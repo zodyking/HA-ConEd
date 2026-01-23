@@ -1,14 +1,30 @@
 #!/bin/bash
 # Home Assistant addon startup script
 
-# Set environment variables from Home Assistant addon options
+set -e
+
+# Parse configuration options using jq (bashio not available in custom base image)
 if [ -f /data/options.json ]; then
-    export MQTT_HOST=$(jq -r '.mqtt_host // "core-mosquitto"' /data/options.json)
-    export MQTT_PORT=$(jq -r '.mqtt_port // 1883' /data/options.json)
-    export MQTT_USER=$(jq -r '.mqtt_user // ""' /data/options.json)
-    export MQTT_PASSWORD=$(jq -r '.mqtt_password // ""' /data/options.json)
-    export MQTT_TOPIC_PREFIX=$(jq -r '.mqtt_topic_prefix // "coned"' /data/options.json)
+    MQTT_HOST=$(jq -r '.mqtt_host // "core-mosquitto"' /data/options.json)
+    MQTT_PORT=$(jq -r '.mqtt_port // 1883' /data/options.json)
+    MQTT_USER=$(jq -r '.mqtt_user // ""' /data/options.json)
+    MQTT_PASSWORD=$(jq -r '.mqtt_password // ""' /data/options.json)
+    MQTT_TOPIC_PREFIX=$(jq -r '.mqtt_topic_prefix // "coned"' /data/options.json)
+else
+    # Default values if no config file
+    MQTT_HOST="core-mosquitto"
+    MQTT_PORT=1883
+    MQTT_USER=""
+    MQTT_PASSWORD=""
+    MQTT_TOPIC_PREFIX="coned"
 fi
+
+# Export environment variables
+export MQTT_HOST
+export MQTT_PORT
+export MQTT_USER
+export MQTT_PASSWORD
+export MQTT_TOPIC_PREFIX
 
 # Link data directory to persistent storage
 if [ ! -d /app/python-service/data ]; then
@@ -26,5 +42,4 @@ fi
 
 # Start the application
 cd /app
-exec python -m uvicorn python-service.main:app --host 0.0.0.0 --port 8000
-
+exec python3 -m uvicorn python-service.main:app --host 0.0.0.0 --port 8000

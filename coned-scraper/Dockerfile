@@ -1,7 +1,8 @@
-FROM python:3.11-slim
+ARG BUILD_FROM
+FROM $BUILD_FROM
 
 # Install system dependencies
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     gnupg \
     ca-certificates \
@@ -26,20 +27,18 @@ RUN apt-get update && apt-get install -y \
     xdg-utils \
     libu2f-udev \
     libvulkan1 \
+    jq \
+    bash \
     && rm -rf /var/lib/apt/lists/*
 
-# Set working directory
-WORKDIR /app
-
-# Copy requirements first for better caching
-COPY python-service/requirements.txt .
-
 # Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+WORKDIR /app
+COPY python-service/requirements.txt .
+RUN pip3 install --no-cache-dir -r requirements.txt
 
 # Install Playwright browsers
-RUN playwright install chromium
-RUN playwright install-deps chromium
+RUN playwright install chromium || true
+RUN playwright install-deps chromium || true
 
 # Copy application code
 COPY python-service/ ./python-service/
@@ -52,9 +51,13 @@ RUN mkdir -p /data/python-service/data && \
 ENV PYTHONUNBUFFERED=1
 ENV PLAYWRIGHT_HEADLESS=true
 
-# Expose port
-EXPOSE 8000
+# Copy run script
+COPY run.sh /run.sh
+RUN chmod a+x /run.sh
 
-# Run the application
-CMD ["python", "-m", "uvicorn", "python-service.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD [ "/run.sh" ]
 
+LABEL \
+  io.hass.version="1.0.0" \
+  io.hass.type="addon" \
+  io.hass.arch="armhf|aarch64|i386|amd64|armv7"

@@ -1,0 +1,43 @@
+name: "ConEd Scraper"
+version: "1.0.0"
+slug: "coned-scraper"
+description: >-
+  Automated ConEd account scraping with TOTP authentication. Monitors account balance,
+  bills, and payments, publishing changes to Home Assistant via MQTT sensors.
+arch:
+  - aarch64
+  - amd64
+  - armhf
+  - armv7
+  - i386
+startup: application
+boot: auto
+url: "https://github.com/zodyking/coned-scraper"
+panel_icon: "mdi:flash"
+homeassistant: "2023.1.0"
+ports:
+  8000/tcp: 8000
+ports_description:
+  8000/tcp: "FastAPI web interface"
+image: "coned-scraper-{arch}"
+options:
+  username: ""
+  password: ""
+  totp_secret: ""
+  scrape_frequency: 3600
+  mqtt_host: "core-mosquitto"
+  mqtt_port: 1883
+  mqtt_user: ""
+  mqtt_password: ""
+  mqtt_topic_prefix: "coned"
+schema:
+  username: str
+  password: str
+  totp_secret: str
+  scrape_frequency: "int(60,)"
+  mqtt_host: str
+  mqtt_port: port
+  mqtt_user: "str?"
+  mqtt_password: "password?"
+  mqtt_topic_prefix: str
+
