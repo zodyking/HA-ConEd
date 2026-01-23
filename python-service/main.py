@@ -11,7 +11,9 @@ from pathlib import Path
 from cryptography.fernet import Fernet
 import base64
 import hashlib
-from database import get_logs, get_latest_scraped_data, get_all_scraped_data, add_log
+import asyncio
+from datetime import datetime, timedelta
+from database import get_logs, get_latest_scraped_data, get_all_scraped_data, add_log, clear_logs
 
 app = FastAPI(title="ConEd Scraper API")
 
@@ -42,6 +44,149 @@ def get_or_create_key():
 
 ENCRYPTION_KEY = get_or_create_key()
 cipher = Fernet(ENCRYPTION_KEY)
+
+# Automated scraping schedule
+SCHEDULE_FILE = DATA_DIR / "schedule.json"
+_scheduler_task = None
+
+class ScheduleModel(BaseModel):
+    enabled: bool
+    frequency: int  # Frequency in seconds
+
+def load_schedule() -> dict:
+    """Load automated scraping schedule"""
+    if not SCHEDULE_FILE.exists():
+        return {"enabled": False, "frequency": 3600}  # Default: disabled, 1 hour
+    
+    try:
+        data = json.loads(SCHEDULE_FILE.read_text())
+        return {
+            "enabled": data.get("enabled", False),
+            "frequency": data.get("frequency", 3600)
+        }
+    except Exception as e:
+        add_log("error", f"Failed to load schedule: {str(e)}")
+        return {"enabled": False, "frequency": 3600}
+
+def save_schedule(enabled: bool, frequency: int):
+    """Save automated scraping schedule"""
+    schedule = {
+        "enabled": enabled,
+        "frequency": frequency,
+        "updated_at": datetime.now().isoformat()
+    }
+    SCHEDULE_FILE.write_text(json.dumps(schedule))
+    add_log("info", f"Schedule saved: enabled={enabled}, frequency={frequency}s")
+
+async def run_scheduled_scrape():
+    """Run a scheduled scrape"""
+    try:
+        credentials = load_credentials()
+        if not credentials:
+            add_log("warning", "Scheduled scrape skipped: No credentials found")
+            return
+        
+        from browser_automation import perform_login
+        
+        username = credentials["username"]
+        password = credentials["password"]
+        totp = pyotp.TOTP(credentials["totp_secret"])
+        totp_code = totp.now()
+        
+        add_log("info", "Starting scheduled scrape...")
+        result = await perform_login(username, password, totp_code)
+        add_log("success", f"Scheduled scrape completed: {result.get('success', False)}")
+    except Exception as e:
+        error_msg = f"Scheduled scrape failed: {str(e)}"
+        add_log("error", error_msg)
+        logging.error(error_msg)
+
+async def scheduler_loop():
+    """Background scheduler loop"""
+    while True:
+        try:
+            schedule = load_schedule()
+            
+            if schedule["enabled"]:
+                frequency = schedule["frequency"]
+                add_log("info", f"Scheduler: Waiting {frequency} seconds until next scrape...")
+                await asyncio.sleep(frequency)
+                
+                # Check if still enabled before running
+                current_schedule = load_schedule()
+                if current_schedule["enabled"]:
+                    await run_scheduled_scrape()
+            else:
+                # If disabled, check every 60 seconds
+                await asyncio.sleep(60)
+        except Exception as e:
+            error_msg = f"Scheduler error: {str(e)}"
+            add_log("error", error_msg)
+            logging.error(error_msg)
+            await asyncio.sleep(60)  # Wait before retrying
+
+async def restart_scheduler():
+    """Restart the scheduler with current settings"""
+    global _scheduler_task
+    
+    # Cancel existing task if running
+    if _scheduler_task and not _scheduler_task.done():
+        _scheduler_task.cancel()
+        try:
+            await _scheduler_task
+        except asyncio.CancelledError:
+            pass
+    
+    # Start new scheduler task
+    schedule = load_schedule()
+    if schedule["enabled"]:
+        _scheduler_task = asyncio.create_task(scheduler_loop())
+        add_log("info", "Scheduler restarted")
+    else:
+        add_log("info", "Scheduler disabled")
+
+# Start scheduler on app startup
+@app.on_event("startup")
+async def startup_event():
+    # Initialize MQTT client
+    try:
+        import os
+        from mqtt_client import init_mqtt_client
+        
+        mqtt_host = os.getenv("MQTT_HOST", "core-mosquitto")
+        mqtt_port = int(os.getenv("MQTT_PORT", "1883"))
+        mqtt_user = os.getenv("MQTT_USER", "")
+        mqtt_password = os.getenv("MQTT_PASSWORD", "")
+        mqtt_topic_prefix = os.getenv("MQTT_TOPIC_PREFIX", "coned")
+        
+        init_mqtt_client(mqtt_host, mqtt_port, mqtt_user if mqtt_user else None, 
+                        mqtt_password if mqtt_password else None, mqtt_topic_prefix)
+        add_log("info", f"MQTT client initialized: {mqtt_host}:{mqtt_port}")
+    except Exception as e:
+        add_log("warning", f"MQTT initialization failed (sensors will not be published): {e}")
+    
+    schedule = load_schedule()
+    if schedule["enabled"]:
+        _scheduler_task = asyncio.create_task(scheduler_loop())
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    global _scheduler_task
+    if _scheduler_task and not _scheduler_task.done():
+        _scheduler_task.cancel()
+        try:
+            await _scheduler_task
+        except asyncio.CancelledError:
+            pass
+    
+    # Disconnect MQTT client
+    try:
+        from mqtt_client import get_mqtt_client
+        mqtt_client = get_mqtt_client()
+        if mqtt_client:
+            mqtt_client.disconnect()
+    except Exception as e:
+        pass
 
 class CredentialsModel(BaseModel):
     username: str
@@ -194,6 +339,8 @@ async def start_scraper():
     if not credentials:
         raise HTTPException(status_code=404, detail="No credentials found. Please configure settings first.")
     
+    # Clear previous logs when starting a new scrape
+    clear_logs()
     add_log("info", "Scraper started by user")
     
     # Use saved credentials
@@ -219,6 +366,12 @@ async def get_logs_endpoint(limit: int = 100):
     logs = get_logs(limit)
     return {"logs": logs}
 
+@app.delete("/api/logs")
+async def clear_logs_endpoint():
+    """Clear all log entries"""
+    clear_logs()
+    return {"message": "Logs cleared successfully"}
+
 @app.get("/api/scraped-data")
 async def get_scraped_data_endpoint(limit: int = 100):
     """Get scraped data"""
@@ -231,21 +384,26 @@ async def get_latest_data():
     data = get_latest_scraped_data(1)
     return {"data": data[0] if data else None}
 
-@app.get("/api/screenshot/latest")
-async def get_latest_screenshot():
-    """Get latest browser screenshot for live preview"""
+@app.get("/api/screenshot/{filename}")
+async def get_screenshot(filename: str):
+    """Get saved screenshot by filename (only account_page.png is served)"""
     import os
     from pathlib import Path
-    from browser_automation import SCREENSHOT_FILENAME
+    from fastapi.responses import FileResponse, JSONResponse
     
-    # Always use the single screenshot filename
-    screenshot_path = Path(__file__).parent / SCREENSHOT_FILENAME
+    # Security: prevent directory traversal and only allow account_balance.png
+    if '..' in filename or '/' in filename or '\\' in filename:
+        return JSONResponse({"error": "Invalid filename"}, status_code=400)
     
-    if os.path.exists(screenshot_path):
-        from fastapi.responses import FileResponse
-        # Add cache busting headers
+    # Only serve account_balance.png
+    if filename != "account_balance.png":
+        return JSONResponse({"error": "Screenshot not found"}, status_code=404)
+    
+    screenshot_path = Path(__file__).parent / filename
+    
+    if os.path.exists(screenshot_path) and screenshot_path.suffix.lower() == '.png':
         return FileResponse(
-            str(screenshot_path), 
+            str(screenshot_path),
             media_type="image/png",
             headers={
                 "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -254,15 +412,57 @@ async def get_latest_screenshot():
             }
         )
     else:
-        # Return 404 with proper JSON
-        from fastapi.responses import JSONResponse
         return JSONResponse(
-            {"error": "No screenshot available"}, 
-            status_code=404,
-            headers={
-                "Cache-Control": "no-cache"
-            }
+            {"error": "Screenshot not found"},
+            status_code=404
         )
+
+@app.get("/api/automated-schedule")
+async def get_automated_schedule():
+    """Get automated scraping schedule"""
+    schedule = load_schedule()
+    
+    # Calculate next run time if enabled
+    next_run = None
+    if schedule["enabled"]:
+        # Try to get last run time from logs or use now
+        next_run = (datetime.now() + timedelta(seconds=schedule["frequency"])).isoformat()
+    
+    return {
+        "enabled": schedule["enabled"],
+        "frequency": schedule["frequency"],
+        "nextRun": next_run
+    }
+
+@app.post("/api/automated-schedule")
+async def save_automated_schedule(schedule: ScheduleModel):
+    """Save automated scraping schedule"""
+    try:
+        if schedule.frequency <= 0:
+            raise HTTPException(status_code=400, detail="Frequency must be greater than 0")
+        
+        save_schedule(schedule.enabled, schedule.frequency)
+        
+        # Restart scheduler with new settings
+        await restart_scheduler()
+        
+        # Calculate next run time
+        next_run = None
+        if schedule.enabled:
+            next_run = (datetime.now() + timedelta(seconds=schedule.frequency)).isoformat()
+        
+        return {
+            "enabled": schedule.enabled,
+            "frequency": schedule.frequency,
+            "nextRun": next_run,
+            "message": "Schedule saved successfully"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_msg = f"Failed to save schedule: {str(e)}"
+        add_log("error", error_msg)
+        raise HTTPException(status_code=500, detail=error_msg)
 
 if __name__ == "__main__":
     import uvicorn

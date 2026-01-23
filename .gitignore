@@ -1,34 +1,3 @@
-# Dependencies
-/node_modules
-/.pnp
-.pnp.js
-
-# Testing
-/coverage
-
-# Next.js
-/.next/
-/out/
-
-# Production
-/build
-
-# Misc
-.DS_Store
-*.pem
-
-# Debug
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# Local env files
-.env*.local
-.env
-
-# Vercel
-.vercel
-
 # Python
 __pycache__/
 *.py[cod]
@@ -38,19 +7,51 @@ __pycache__/
 env/
 venv/
 ENV/
-env.bak/
-venv.bak/
-*.egg-info/
-dist/
-build/
+.venv
 
-# Python Service
-python-service/data/
-python-service/*.png
-python-service/.key
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Screenshots (generated dynamically)
+*.png
+*.jpg
+*.jpeg
+
+# Credentials and keys
+**/data/.key
+**/data/credentials.json
+**/data/schedule.json
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Next.js build artifacts
+.next/
+out/
+node_modules/
+package-lock.json
+
+# Home Assistant addon persistent data
+python-service/data/
+data/
+
+# Environment variables
+.env
+.env.local
+
+# Temporary files
+*.tmp
+*.bak

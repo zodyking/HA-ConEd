@@ -34,49 +34,28 @@ async def type_text_slowly(page, selector: str, text: str, delay: int = 50):
         add_log("error", error_msg)
         raise
 
-# Global variable to store latest screenshot path for live preview
-_latest_screenshot_path = None
-SCREENSHOT_FILENAME = "live_preview.png"  # Single file that gets overwritten
-
-async def take_screenshot(page, step_name: str = None):
-    """Take screenshot and store path for live preview - overwrites single file"""
-    global _latest_screenshot_path
-    from pathlib import Path
-    
-    try:
-        # Use single filename that gets overwritten
-        screenshot_path = Path(__file__).parent / SCREENSHOT_FILENAME
-        await page.screenshot(path=str(screenshot_path), full_page=False)
-        _latest_screenshot_path = str(screenshot_path)
-        if step_name:
-            add_log("info", f"Screenshot updated: {step_name}")
-        logger.info(f"Screenshot saved to: {screenshot_path}")
-        return str(screenshot_path)
-    except Exception as e:
-        error_msg = f"Failed to take screenshot: {str(e)}"
-        logger.error(error_msg)
-        add_log("error", error_msg)
-        return None
+# Single screenshot filename that gets overwritten each scrape
+# Captures the page state where account balance was found
+SCREENSHOT_FILENAME = "account_balance.png"
 
 async def perform_login(username: str, password: str, totp_code: str):
     """
     Perform ConEd login automation using headless browser.
     Types all values character by character, never pastes.
     """
-    global _latest_screenshot_path
     import time
     from pathlib import Path
-    
-    # Initialize screenshot path
-    screenshot_path = Path(__file__).parent / SCREENSHOT_FILENAME
-    _latest_screenshot_path = str(screenshot_path)
     
     coned_url = "https://www.coned.com/en/login"
     
     async with async_playwright() as p:
+        # Force headless mode - check environment variable or default to True
+        import os
+        headless_mode = os.getenv('PLAYWRIGHT_HEADLESS', 'true').lower() == 'true'
+        
         browser = await p.chromium.launch(
-            headless=False,  # Set to False for visible browser (can watch in real-time)
-            args=['--no-sandbox', '--disable-setuid-sandbox']
+            headless=headless_mode,  # Run in headless mode
+            args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
         )
         
         context = await browser.new_context(
@@ -91,7 +70,6 @@ async def perform_login(username: str, password: str, totp_code: str):
             logger.info(f"Navigating to {coned_url}")
             await page.goto(coned_url, wait_until="networkidle", timeout=30000)
             await asyncio.sleep(2)  # Wait for page to fully load
-            await take_screenshot(page, "Login page loaded")
             add_log("info", "Page loaded successfully")
             
             # Wait for and type username
@@ -116,15 +94,12 @@ async def perform_login(username: str, password: str, totp_code: str):
                     continue
             
             if not username_field:
-                # Take screenshot for debugging
-                await page.screenshot(path="debug_username.png")
-                raise Exception("Could not find username field. Screenshot saved as debug_username.png")
+                raise Exception("Could not find username field")
             
             logger.info(f"Found username field: {username_field}")
             add_log("info", f"Found username field: {username_field}")
             await type_text_slowly(page, username_field, username, delay=50)
             await asyncio.sleep(0.5)
-            await take_screenshot(page, "Username entered")
             add_log("success", "Username entered successfully")
             
             # Wait for and type password
@@ -146,14 +121,12 @@ async def perform_login(username: str, password: str, totp_code: str):
                     continue
             
             if not password_field:
-                await page.screenshot(path="debug_password.png")
-                raise Exception("Could not find password field. Screenshot saved as debug_password.png")
+                raise Exception("Could not find password field")
             
             logger.info(f"Found password field: {password_field}")
             add_log("info", f"Found password field: {password_field}")
             await type_text_slowly(page, password_field, password, delay=50)
             await asyncio.sleep(0.5)
-            await take_screenshot(page, "Password entered")
             add_log("success", "Password entered successfully")
             
             # Click login/submit button
@@ -178,15 +151,13 @@ async def perform_login(username: str, password: str, totp_code: str):
                     continue
             
             if not submit_button:
-                await page.screenshot(path="debug_submit.png")
-                raise Exception("Could not find submit button. Screenshot saved as debug_submit.png")
+                raise Exception("Could not find submit button")
             
             logger.info(f"Found submit button: {submit_button}")
             add_log("info", f"Found submit button: {submit_button}")
             await page.locator(submit_button).first.click()
             add_log("info", "Login form submitted")
             await asyncio.sleep(3)  # Wait for potential redirect or TOTP field
-            await take_screenshot(page, "After form submit")
             
             # Check if TOTP field appears
             logger.info("Checking for TOTP/MFA field...")
@@ -214,10 +185,8 @@ async def perform_login(username: str, password: str, totp_code: str):
             if totp_field:
                 logger.info(f"Found TOTP field: {totp_field}")
                 add_log("info", f"Found TOTP field: {totp_field}")
-                await take_screenshot(page, "TOTP field found")
                 await type_text_slowly(page, totp_field, totp_code, delay=50)
                 await asyncio.sleep(0.5)
-                await take_screenshot(page, "TOTP entered")
                 add_log("success", "TOTP code entered successfully")
                 
                 # Submit TOTP
@@ -237,11 +206,9 @@ async def perform_login(username: str, password: str, totp_code: str):
                         continue
                 
                 await asyncio.sleep(3)
-                await take_screenshot(page, "After TOTP submit")
             
             # Check if login was successful
             current_url = page.url
-            await take_screenshot(page, "Login result")
             
             # Wait a bit for page to fully load
             await asyncio.sleep(2)
@@ -308,15 +275,23 @@ async def perform_login(username: str, password: str, totp_code: str):
                         await page.goto(account_url, wait_until="networkidle", timeout=30000)
                         await asyncio.sleep(3)  # Wait for page to load
                     
-                    scraped_data = await scrape_account_data(page)
-                    await take_screenshot(page, "Scraping complete")
-                    add_log("success", "Data scraping completed successfully")
-                    save_scraped_data(scraped_data, "success")
+                    scraped_data = await scrape_account_data(page, context)
+                    # Scrape bill history ledger
+                    bill_history = await scrape_bill_history(page)
+                    scraped_data["bill_history"] = bill_history
+                    
+                    # Screenshot was already taken in scrape_account_data after finding balance
+                    # Just store the filename in scraped_data
+                    scraped_data["screenshot_path"] = SCREENSHOT_FILENAME
+                    
+                    add_log("success", f"Data scraping completed successfully")
+                    
+                    save_scraped_data(scraped_data, "success", None, SCREENSHOT_FILENAME)
                 except Exception as e:
                     error_msg = f"Data scraping failed: {str(e)}"
                     add_log("error", error_msg)
                     logger.error(error_msg)
-                    save_scraped_data({}, "error", error_msg)
+                    save_scraped_data({}, "error", error_msg, None)
             
             await browser.close()
             add_log("info", "Browser closed")
@@ -329,26 +304,24 @@ async def perform_login(username: str, password: str, totp_code: str):
             }
             
         except PlaywrightTimeoutError as e:
-            await page.screenshot(path="error_timeout.png")
             error_msg = f"Timeout error: {str(e)}"
             logger.error(error_msg)
             add_log("error", error_msg)
-            save_scraped_data({}, "error", error_msg)
+            save_scraped_data({}, "error", error_msg, None)
             await browser.close()
             raise Exception(f"Login timeout: {str(e)}")
         except Exception as e:
-            await page.screenshot(path="error_general.png")
             error_msg = f"Login error: {str(e)}"
             logger.error(error_msg)
             add_log("error", error_msg)
-            save_scraped_data({}, "error", error_msg)
+            save_scraped_data({}, "error", error_msg, None)
             await browser.close()
             raise
 
-async def scrape_account_data(page):
+async def scrape_account_data(page, context):
     """
     Scrape account data from ConEd account page.
-    Extracts Account Balance and Current Bill PDF link.
+    Extracts Account Balance only.
     """
     import time
     scraped_data = {
@@ -356,8 +329,6 @@ async def scrape_account_data(page):
         "url": page.url,
         "title": await page.title(),
         "account_balance": None,
-        "current_bill_pdf_link": None,
-        "current_bill_pdf_href": None,
     }
     
     try:
@@ -402,59 +373,14 @@ async def scrape_account_data(page):
             add_log("warning", "Could not find Account Balance element")
         else:
             scraped_data["account_balance"] = account_balance
-        
-        # Scrape Current Bill PDF Link
-        add_log("info", "Looking for Current Bill PDF link...")
-        bill_link_selectors = [
-            'a.overview-bill-card__cta.js-bill-link.js-overview-bill-card__cta',
-            'a.overview-bill-card__cta',
-            'a[class*="overview-bill-card__cta"]',
-            'a:has-text("View Current Bill")',
-            'a:has-text("Current Bill")'
-        ]
-        
-        bill_pdf_link = None
-        bill_pdf_href = None
-        
-        for selector in bill_link_selectors:
+            # Take screenshot right after finding account balance
             try:
-                bill_element = page.locator(selector).first
-                # Check if element exists
-                try:
-                    await bill_element.wait_for(state="visible", timeout=2000)
-                    # Get the link text
-                    link_text = (await bill_element.inner_text()).strip()
-                    # Get the href attribute
-                    href = await bill_element.get_attribute('href')
-                    # Also check for onclick data attributes
-                    data_type = await bill_element.get_attribute('data-type')
-                    
-                    if link_text or href:
-                        bill_pdf_link = link_text if link_text else "View Current Bill (PDF)"
-                        bill_pdf_href = href if href else "#"
-                        scraped_data["current_bill_pdf_link"] = bill_pdf_link
-                        scraped_data["current_bill_pdf_href"] = bill_pdf_href
-                        scraped_data["bill_pdf_data_type"] = data_type
-                        add_log("success", f"Found Current Bill PDF link: {bill_pdf_link}")
-                        break
-                except:
-                    # Element not found, try next selector
-                    continue
+                from pathlib import Path
+                screenshot_path = Path(__file__).parent / SCREENSHOT_FILENAME
+                await page.screenshot(path=str(screenshot_path), full_page=False)
+                add_log("info", f"Screenshot saved: {SCREENSHOT_FILENAME}")
             except Exception as e:
-                add_log("warning", f"Bill link selector {selector} failed: {str(e)}")
-                continue
-        
-        if not bill_pdf_link:
-            add_log("warning", "Could not find Current Bill PDF link element")
-        
-        # Take screenshot of the account page for verification
-        try:
-            screenshot_path = f"account_page_{int(time.time())}.png"
-            await page.screenshot(path=screenshot_path, full_page=False)
-            scraped_data["screenshot"] = screenshot_path
-            add_log("info", f"Screenshot saved: {screenshot_path}")
-        except Exception as e:
-            add_log("warning", f"Failed to save screenshot: {str(e)}")
+                add_log("warning", f"Failed to save screenshot: {str(e)}")
             
     except Exception as e:
         error_msg = f"Error during data scraping: {str(e)}"
@@ -463,3 +389,162 @@ async def scrape_account_data(page):
         scraped_data["error"] = str(e)
     
     return scraped_data
+
+async def scrape_bill_history(page):
+    """
+    Scrape bill history ledger from ConEd bill history page.
+    Navigates to bill history page, clicks Payments checkbox, and parses ledger.
+    """
+    import time
+    bill_history = {
+        "ledger": [],
+        "scraped_at": time.strftime("%Y-%m-%d %H:%M:%S")
+    }
+    
+    try:
+        bill_history_url = "https://www.coned.com/en/accounts-billing/my-account/bill-history-assistance"
+        add_log("info", f"Navigating to bill history page: {bill_history_url}")
+        
+        await page.goto(bill_history_url, wait_until="networkidle", timeout=30000)
+        await asyncio.sleep(3)  # Wait for page to load
+        
+        # Click the Payments checkbox using xpath
+        add_log("info", "Looking for Payments checkbox...")
+        try:
+            # Try xpath first
+            payments_checkbox_xpath = '/html/body/div[3]/div[3]/div[3]/div[5]/div/div[1]/div/div/div/div/div[2]/div/label[1]'
+            checkbox_selectors = [
+                f'xpath={payments_checkbox_xpath}',
+                'input#payments-check',
+                'input[name="paymentscheck"]',
+                'label:has-text("Payments")',
+                '.js-check-payments'
+            ]
+            
+            checkbox_found = False
+            for selector in checkbox_selectors:
+                try:
+                    if selector.startswith('xpath='):
+                        element = page.locator(selector)
+                    else:
+                        element = page.locator(selector).first
+                    
+                    count = await element.count()
+                    if count > 0:
+                        await element.wait_for(state="visible", timeout=5000)
+                        await element.click()
+                        add_log("success", "Clicked Payments checkbox")
+                        checkbox_found = True
+                        break
+                except Exception as e:
+                    add_log("info", f"Checkbox selector {selector} failed: {str(e)}, trying next...")
+                    continue
+            
+            if not checkbox_found:
+                add_log("warning", "Could not find Payments checkbox")
+                return bill_history
+            
+            # Wait for ledger to load after clicking checkbox
+            await asyncio.sleep(3)
+            await page.wait_for_load_state("networkidle", timeout=10000)
+            
+            # Parse the ledger items
+            add_log("info", "Parsing bill history ledger...")
+            
+            # Find all ledger items - both payments and bills
+            # Use more specific selectors based on the HTML structure
+            payment_items = await page.locator('.billing-payment-item--received, .js-payment-item').all()
+            bill_items = await page.locator('.js-bill-item, .billing-payment-item--bill').all()
+            
+            add_log("info", f"Found {len(payment_items)} payment items and {len(bill_items)} bill items")
+            
+            # Process payment items
+            for item in payment_items:
+                try:
+                    item_data = {"type": "payment"}
+                    
+                    # Get bill cycle date
+                    date_element = item.locator('.billing-payment-item__date .billing-payment-item__focus').first
+                    if await date_element.count() > 0:
+                        date_text = await date_element.inner_text()
+                        date_text = date_text.replace('Bill Cycle:', '').replace('visually-hidden', '').strip()
+                        # Clean up - remove any hidden text
+                        date_text = ' '.join(date_text.split()).strip()
+                        item_data["bill_cycle_date"] = date_text
+                    
+                    # Get payment description
+                    received_element = item.locator('.billing-payment-item__received').first
+                    if await received_element.count() > 0:
+                        item_data["description"] = (await received_element.inner_text()).strip()
+                    else:
+                        item_data["description"] = "Payment Received"
+                    
+                    # Get payment amount
+                    amount_element = item.locator('.billing-payment-item__total-received').first
+                    if await amount_element.count() > 0:
+                        amount_text = await amount_element.inner_text()
+                        item_data["amount"] = amount_text.strip()
+                    
+                    if item_data.get("bill_cycle_date") or item_data.get("amount"):
+                        bill_history["ledger"].append(item_data)
+                        add_log("info", f"Added payment: {item_data.get('amount')} on {item_data.get('bill_cycle_date')}")
+                        
+                except Exception as e:
+                    add_log("warning", f"Error parsing payment item: {str(e)}")
+                    continue
+            
+            # Process bill items
+            for item in bill_items:
+                try:
+                    item_data = {"type": "bill"}
+                    
+                    # Get bill cycle date
+                    date_element = item.locator('.billing-payment-item__date .billing-payment-item__focus').first
+                    if await date_element.count() > 0:
+                        date_text = await date_element.inner_text()
+                        date_text = date_text.replace('Bill Cycle:', '').replace('visually-hidden', '').strip()
+                        date_text = ' '.join(date_text.split()).strip()
+                        item_data["bill_cycle_date"] = date_text
+                    
+                    # Get month range
+                    months_element = item.locator('.billing-payment-item__months').first
+                    if await months_element.count() > 0:
+                        months_text = await months_element.inner_text()
+                        item_data["month_range"] = months_text.strip()
+                    
+                    # Get bill total amount
+                    total_element = item.locator('.billing-payment-item__total-amount').first
+                    if await total_element.count() > 0:
+                        total_text = await total_element.inner_text()
+                        item_data["bill_total"] = total_text.strip()
+                    
+                    # Get bill date from data attribute if available
+                    bill_link = item.locator('a.js-bill-link[data-bill-date]').first
+                    if await bill_link.count() > 0:
+                        bill_date = await bill_link.get_attribute('data-bill-date')
+                        if bill_date:
+                            item_data["bill_date"] = bill_date
+                    
+                    if item_data.get("bill_cycle_date") or item_data.get("bill_total"):
+                        bill_history["ledger"].append(item_data)
+                        add_log("info", f"Added bill: {item_data.get('bill_total')} for {item_data.get('month_range')}")
+                        
+                except Exception as e:
+                    add_log("warning", f"Error parsing bill item: {str(e)}")
+                    continue
+            
+            add_log("success", f"Parsed {len(bill_history['ledger'])} ledger entries")
+            
+        except Exception as e:
+            error_msg = f"Error scraping bill history: {str(e)}"
+            add_log("error", error_msg)
+            logger.error(error_msg)
+            bill_history["error"] = str(e)
+            
+    except Exception as e:
+        error_msg = f"Error navigating to bill history page: {str(e)}"
+        add_log("error", error_msg)
+        logger.error(error_msg)
+        bill_history["error"] = str(e)
+    
+    return bill_history
