@@ -1,6 +1,45 @@
-# ConEd Scraper - Home Assistant Addon
+# ConEd Scraper - Home Assistant Addon Repository
 
-A Home Assistant addon for automating ConEd account scraping with TOTP authentication. Monitors account balance, bills, and payments, publishing changes to Home Assistant via MQTT.
+This repository contains the ConEd Scraper addon for Home Assistant.
+
+## Quick Start
+
+1. **Add this repository to Home Assistant:**
+   - Go to **Supervisor** → **Add-on Store**
+   - Click the three dots (⋮) → **Repositories**
+   - Add: `https://github.com/zodyking/coned-scraper`
+   - Click **Add**
+
+2. **Install the addon:**
+   - Find "ConEd Scraper" in the addon store
+   - Click **Install**
+   - Configure your ConEd credentials
+   - Start the addon
+
+3. **Configure Home Assistant sensors:**
+   - See `coned-scraper/home-assistant-config.yaml` for sensor configuration
+   - Add the sensors to your `configuration.yaml`
+
+## Repository Structure
+
+```
+.
+├── repository.json          # Repository metadata
+└── coned-scraper/          # Addon directory
+    ├── config.json         # Addon configuration
+    ├── Dockerfile          # Docker image definition
+    ├── run.sh              # Startup script
+    ├── README.md           # Addon documentation
+    ├── home-assistant-config.yaml  # HA sensor config example
+    └── python-service/     # Python application code
+        ├── main.py
+        ├── browser_automation.py
+        ├── database.py
+        ├── mqtt_client.py
+        ├── change_detection.py
+        ├── sensor_publisher.py
+        └── requirements.txt
+```
 
 ## Features
 
@@ -8,151 +47,24 @@ A Home Assistant addon for automating ConEd account scraping with TOTP authentic
 - **TOTP Support**: Generates TOTP codes matching Google Authenticator
 - **Headless Browser Automation**: Uses Playwright to automate login
 - **Secure Storage**: Encrypted credential storage
-- **Home Assistant Integration**: MQTT sensors for account balance, bills, and payments
-- **Change Detection**: Automatically detects and publishes changes to Home Assistant
+- **MQTT Integration**: Publishes sensors to Home Assistant
+- **Change Detection**: Only updates sensors when values change
 
-## Home Assistant Sensors
+## Sensors
 
-The addon publishes the following MQTT sensors:
+The addon publishes 4 MQTT sensors:
+- Account Balance
+- Most Recent Bill Amount
+- Previous Bill Amount
+- Last Payment Amount
 
-- **Account Balance** (`coned/account_balance`): Current account balance with change detection
-- **Most Recent Bill** (`coned/most_recent_bill`): Amount of the most recent bill
-- **Previous Bill** (`coned/previous_bill`): Amount of the previous bill
-- **Last Payment** (`coned/last_payment`): Amount of the most recent payment
+See `coned-scraper/home-assistant-config.yaml` for complete sensor configuration.
 
-All sensors include attributes with timestamps, dates, and raw values. Sensors are only updated when values change, making them perfect for automations.
+## Documentation
 
-## Installation
-
-1. Copy this addon to your Home Assistant `addons` directory (typically `/usr/share/hassio/addons/` or `/config/addons/`)
-2. In Home Assistant, go to **Supervisor** → **Add-on Store** → **Local add-ons**
-3. Find "ConEd Scraper" and click **Install**
-4. Configure the addon with your ConEd credentials and MQTT settings
-5. Start the addon
-
-## Configuration
-
-Configure the addon through the Home Assistant UI or `config.json`:
-
-```json
-{
-  "username": "your_email@example.com",
-  "password": "your_password",
-  "totp_secret": "YOUR_BASE32_SECRET",
-  "scrape_frequency": 3600,
-  "mqtt_host": "core-mosquitto",
-  "mqtt_port": 1883,
-  "mqtt_user": "",
-  "mqtt_password": "",
-  "mqtt_topic_prefix": "coned"
-}
-```
-
-### Options
-
-- `username`: Your ConEd account email/username
-- `password`: Your ConEd account password
-- `totp_secret`: Base32-encoded TOTP secret (same as Google Authenticator)
-- `scrape_frequency`: Scraping frequency in seconds (default: 3600 = 1 hour)
-- `mqtt_host`: MQTT broker hostname (default: "core-mosquitto" for Home Assistant)
-- `mqtt_port`: MQTT broker port (default: 1883)
-- `mqtt_user`: MQTT username (optional)
-- `mqtt_password`: MQTT password (optional)
-- `mqtt_topic_prefix`: MQTT topic prefix (default: "coned")
-
-## Home Assistant Configuration
-
-See `home-assistant-config.yaml` for complete sensor configuration examples. Add to your `configuration.yaml`:
-
-```yaml
-mqtt:
-  sensor:
-    - name: "ConEd Account Balance"
-      state_topic: "coned/account_balance/state"
-      json_attributes_topic: "coned/account_balance/attributes"
-      availability_topic: "coned/account_balance/availability"
-      unit_of_measurement: "$"
-      device_class: "monetary"
-      state_class: "measurement"
-      unique_id: "coned_account_balance"
-      
-    - name: "ConEd Most Recent Bill"
-      state_topic: "coned/most_recent_bill/state"
-      json_attributes_topic: "coned/most_recent_bill/attributes"
-      availability_topic: "coned/most_recent_bill/availability"
-      unit_of_measurement: "$"
-      device_class: "monetary"
-      state_class: "measurement"
-      unique_id: "coned_most_recent_bill"
-      
-    - name: "ConEd Previous Bill"
-      state_topic: "coned/previous_bill/state"
-      json_attributes_topic: "coned/previous_bill/attributes"
-      availability_topic: "coned/previous_bill/availability"
-      unit_of_measurement: "$"
-      device_class: "monetary"
-      state_class: "measurement"
-      unique_id: "coned_previous_bill"
-      
-    - name: "ConEd Last Payment"
-      state_topic: "coned/last_payment/state"
-      json_attributes_topic: "coned/last_payment/attributes"
-      availability_topic: "coned/last_payment/availability"
-      unit_of_measurement: "$"
-      device_class: "monetary"
-      state_class: "measurement"
-      unique_id: "coned_last_payment"
-```
-
-## Project Structure
-
-```
-.
-├── config.json              # Home Assistant addon configuration
-├── Dockerfile              # Docker image definition
-├── run.sh                  # Startup script for addon
-├── home-assistant-config.yaml  # Home Assistant sensor configuration example
-├── python-service/         # Python FastAPI service
-│   ├── main.py            # FastAPI app and endpoints
-│   ├── browser_automation.py  # Playwright automation
-│   ├── database.py        # SQLite database operations
-│   ├── mqtt_client.py     # MQTT client for sensor publishing
-│   ├── change_detection.py  # Change detection logic
-│   ├── sensor_publisher.py  # Sensor publishing logic
-│   ├── requirements.txt   # Python dependencies
-│   └── data/              # Data directory (credentials, database)
-│       ├── .key          # Encryption key (auto-generated)
-│       ├── credentials.json  # Encrypted credentials
-│       └── scraper.db    # SQLite database
-└── README.md              # This file
-```
-
-## Security Notes
-
-- Credentials are encrypted at rest using Fernet encryption
-- Encryption key is auto-generated and stored in `data/.key`
-- Never commit credentials or encryption keys to version control
-- The addon runs in a containerized environment for isolation
-
-## API Endpoints
-
-The addon exposes a FastAPI service on port 8000:
-
-- `GET /api/totp` - Get current TOTP code
-- `GET /api/settings` - Get saved credentials (masked)
-- `POST /api/settings` - Save credentials
-- `POST /api/scrape` - Trigger manual scrape
-- `GET /api/scraped-data` - Get scraped data
-- `GET /api/logs` - Get logs
-- `GET /api/automated-schedule` - Get schedule configuration
-- `POST /api/automated-schedule` - Update schedule configuration
-
-## Troubleshooting
-
-- **TOTP not generating**: Ensure the TOTP secret is valid base32 format
-- **Scraping fails**: Check logs in Home Assistant Supervisor
-- **MQTT not connecting**: Verify MQTT broker settings and that Mosquitto addon is running
-- **Browser automation fails**: Ensure Playwright browsers are installed (handled automatically in Docker)
+For detailed documentation, see:
+- [Addon README](coned-scraper/README.md) - Complete addon documentation
+- [Home Assistant Config](coned-scraper/home-assistant-config.yaml) - Sensor configuration example
 
 ## License
 
