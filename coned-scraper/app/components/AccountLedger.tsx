@@ -401,8 +401,61 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
               })}
             </div>
           ) : (
-            <div className="ha-empty-state">
-              No bill history ledger data available. Run the scraper to collect data.
+            <div style={{
+              padding: '4rem 2rem',
+              textAlign: 'center',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              minHeight: '300px'
+            }}>
+              <img 
+                src="/images/ajax-loader.gif" 
+                alt="Loading" 
+                style={{ 
+                  width: '120px', 
+                  height: '120px',
+                  marginBottom: '2rem'
+                }} 
+              />
+              <h3 style={{
+                fontSize: '1.25rem',
+                fontWeight: 600,
+                color: '#333',
+                marginBottom: '1rem'
+              }}>
+                No Bill History Available
+              </h3>
+              <p style={{
+                color: '#666',
+                fontSize: '1rem',
+                maxWidth: '500px',
+                lineHeight: '1.6',
+                marginBottom: '1.5rem'
+              }}>
+                The account ledger doesn't have any bill history data yet. This happens when:
+              </p>
+              <ul style={{
+                color: '#666',
+                fontSize: '0.95rem',
+                textAlign: 'left',
+                maxWidth: '500px',
+                lineHeight: '1.8',
+                marginBottom: '1.5rem',
+                paddingLeft: '1.5rem'
+              }}>
+                <li>The scraper hasn't been run yet</li>
+                <li>The latest scrape didn't capture bill history data</li>
+                <li>Your account may not have any bills in the current view</li>
+              </ul>
+              <p style={{
+                color: '#666',
+                fontSize: '0.95rem',
+                fontStyle: 'italic'
+              }}>
+                Go to the Console tab and run the scraper to collect bill history data.
+              </p>
             </div>
           )}
         </div>
