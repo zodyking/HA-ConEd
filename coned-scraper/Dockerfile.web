@@ -17,7 +17,9 @@ COPY app/ ./
 RUN chmod -R +x node_modules/.bin
 
 # Build Next.js
+# Set API_BASE_URL before build so rewrites() uses correct URL (evaluated at build time)
 ENV DOCKER_BUILD=true
+ENV API_BASE_URL=http://api:8000
 RUN npm run build
 
 
@@ -27,6 +29,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
+ENV API_BASE_URL=http://api:8000
 
 # Copy standalone output
 COPY --from=builder /app/.next/standalone ./
