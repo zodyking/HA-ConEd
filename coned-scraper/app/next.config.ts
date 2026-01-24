@@ -22,11 +22,11 @@ const nextConfig: NextConfig = {
   outputFileTracingRoot: process.env.DOCKER_BUILD ? '/app' : path.join(__dirname),
 
   async rewrites() {
-    const apiBaseUrl = process.env.API_BASE_URL || 'http://localhost:8000'
+    const apiBaseUrl = process.env.API_BASE_URL || 'http://api:8000'
     return [
       {
         source: '/api/:path*',
-        destination: `${apiBaseUrl}/:path*`,
+        destination: `${apiBaseUrl}/api/:path*`,
       },
     ]
   },
