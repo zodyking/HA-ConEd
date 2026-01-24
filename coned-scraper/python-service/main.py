@@ -126,14 +126,9 @@ async def run_scheduled_scrape():
                     bills = [item for item in ledger if item.get("type") == "bill"]
                     payments = [item for item in ledger if item.get("type") == "payment"]
                     
-                    # Sort bills by date (newest first)
-                    bills.sort(key=lambda x: x.get("bill_cycle_date") or x.get("bill_date") or "", reverse=True)
-                    # Sort payments by date (newest first)
-                    payments.sort(key=lambda x: x.get("payment_date") or x.get("bill_cycle_date") or "", reverse=True)
-                    
                     if len(bills) > 0:
                         await mqtt_client.publish_latest_bill(bills[0], timestamp)
-                    if len(bills) > 1:
+                    if len(bills) >= 2:
                         await mqtt_client.publish_previous_bill(bills[1], timestamp)
                     if len(payments) > 0:
                         await mqtt_client.publish_last_payment(payments[0], timestamp)
@@ -167,7 +162,7 @@ async def run_scheduled_scrape():
                         await webhook_client.send_latest_bill(bills[0], timestamp)
                     
                     # Send previous bill if changed
-                    if changes.get("previous_bill") and len(bills) > 1:
+                    if changes.get("previous_bill") and len(bills) >= 2:
                         await webhook_client.send_previous_bill(bills[1], timestamp)
                     
                     # Send last payment if changed
@@ -705,14 +700,9 @@ async def start_scraper():
                     bills = [item for item in ledger if item.get("type") == "bill"]
                     payments = [item for item in ledger if item.get("type") == "payment"]
                     
-                    # Sort bills by date (newest first)
-                    bills.sort(key=lambda x: x.get("bill_cycle_date") or x.get("bill_date") or "", reverse=True)
-                    # Sort payments by date (newest first)
-                    payments.sort(key=lambda x: x.get("payment_date") or x.get("bill_cycle_date") or "", reverse=True)
-                    
                     if len(bills) > 0:
                         await mqtt_client.publish_latest_bill(bills[0], timestamp)
-                    if len(bills) > 1:
+                    if len(bills) >= 2:
                         await mqtt_client.publish_previous_bill(bills[1], timestamp)
                     if len(payments) > 0:
                         await mqtt_client.publish_last_payment(payments[0], timestamp)
@@ -746,7 +736,7 @@ async def start_scraper():
                         await webhook_client.send_latest_bill(bills[0], timestamp)
                     
                     # Send previous bill if changed
-                    if changes.get("previous_bill") and len(bills) > 1:
+                    if changes.get("previous_bill") and len(bills) >= 2:
                         await webhook_client.send_previous_bill(bills[1], timestamp)
                     
                     # Send last payment if changed
