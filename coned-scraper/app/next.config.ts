@@ -1,4 +1,5 @@
 import type { NextConfig } from 'next'
+import path from 'path'
 
 const nextConfig: NextConfig = {
   // Production optimizations
@@ -18,6 +19,7 @@ const nextConfig: NextConfig = {
   
   // Output configuration
   output: 'standalone',
+  outputFileTracingRoot: path.join(__dirname, '../../'),
 }
 
 export default nextConfig

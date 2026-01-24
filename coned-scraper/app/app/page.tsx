@@ -1,12 +1,12 @@
 'use client'
 
 import { useState } from 'react'
-import Dashboard from './components/Dashboard'
-import Settings from './components/Settings'
-import AccountLedger from './components/AccountLedger'
+import Dashboard from '../components/Dashboard'
+import Settings from '../components/Settings'
+import AccountLedger from '../components/AccountLedger'
 
 export default function Home() {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'account-ledger' | 'settings'>('dashboard')
+  const [activeTab, setActiveTab] = useState<'console' | 'account-ledger' | 'settings'>('account-ledger')
 
   return (
     <div className="ha-container">
@@ -20,17 +20,8 @@ export default function Home() {
               height={20}
               style={{ filter: 'brightness(0) invert(1)' }}
             />
-            <h1 className="ha-title">ConEd Scraper</h1>
           </div>
           <nav className="ha-nav">
-            <button
-              className={`ha-nav-button ${activeTab === 'dashboard' ? 'active' : ''}`}
-              onClick={() => setActiveTab('dashboard')}
-              aria-label="Dashboard"
-            >
-              <span className="ha-nav-icon">📊</span>
-              <span>Dashboard</span>
-            </button>
             <button
               className={`ha-nav-button ${activeTab === 'account-ledger' ? 'active' : ''}`}
               onClick={() => setActiveTab('account-ledger')}
@@ -38,6 +29,14 @@ export default function Home() {
             >
               <span className="ha-nav-icon">📋</span>
               <span>Account Ledger</span>
+            </button>
+            <button
+              className={`ha-nav-button ${activeTab === 'console' ? 'active' : ''}`}
+              onClick={() => setActiveTab('console')}
+              aria-label="Console"
+            >
+              <span className="ha-nav-icon">📊</span>
+              <span>Console</span>
             </button>
             <button
               className={`ha-nav-button ${activeTab === 'settings' ? 'active' : ''}`}
@@ -52,8 +51,8 @@ export default function Home() {
       </div>
 
       <div className="ha-content">
-        {activeTab === 'dashboard' && <Dashboard />}
-        {activeTab === 'account-ledger' && <AccountLedger />}
+        {activeTab === 'console' && <Dashboard />}
+        {activeTab === 'account-ledger' && <AccountLedger onNavigate={(tab) => setActiveTab(tab)} />}
         {activeTab === 'settings' && <Settings />}
       </div>
     </div>

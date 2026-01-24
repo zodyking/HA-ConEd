@@ -7,6 +7,12 @@ from database import add_log, save_scraped_data
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Single screenshot filename that gets overwritten each scrape
+# Captures the page state where account balance was found
+SCREENSHOT_FILENAME = "account_balance.png"
+# Live preview screenshot for console display
+LIVE_PREVIEW_FILENAME = "live_preview.png"
+
 async def type_text_slowly(page, selector: str, text: str, delay: int = 50):
     """
     Type text character by character to simulate human typing.
@@ -34,9 +40,26 @@ async def type_text_slowly(page, selector: str, text: str, delay: int = 50):
         add_log("error", error_msg)
         raise
 
-# Single screenshot filename that gets overwritten each scrape
-# Captures the page state where account balance was found
-SCREENSHOT_FILENAME = "account_balance.png"
+async def take_live_preview(page, step_name: str = ""):
+    """Take a live preview screenshot for console display"""
+    try:
+        from pathlib import Path
+        screenshot_dir = Path("./data")
+        screenshot_dir.mkdir(parents=True, exist_ok=True)
+        screenshot_path = screenshot_dir / LIVE_PREVIEW_FILENAME
+        
+        # Ensure page is ready before taking screenshot
+        try:
+            await page.wait_for_load_state("domcontentloaded", timeout=2000)
+        except:
+            pass  # Continue even if wait times out
+        
+        await page.screenshot(path=str(screenshot_path), full_page=False)
+        if step_name:
+            add_log("debug", f"Live preview updated: {step_name}")
+    except Exception as e:
+        logger.debug(f"Failed to take live preview: {str(e)}")
+        # Don't raise - preview failures shouldn't stop scraping
 
 async def perform_login(username: str, password: str, totp_code: str):
     """
@@ -71,6 +94,7 @@ async def perform_login(username: str, password: str, totp_code: str):
             await page.goto(coned_url, wait_until="networkidle", timeout=30000)
             await asyncio.sleep(2)  # Wait for page to fully load
             add_log("info", "Page loaded successfully")
+            await take_live_preview(page, "Page loaded")
             
             # Wait for and type username
             logger.info("Looking for username field...")
@@ -101,6 +125,7 @@ async def perform_login(username: str, password: str, totp_code: str):
             await type_text_slowly(page, username_field, username, delay=50)
             await asyncio.sleep(0.5)
             add_log("success", "Username entered successfully")
+            await take_live_preview(page, "Username entered")
             
             # Wait for and type password
             logger.info("Looking for password field...")
@@ -128,6 +153,7 @@ async def perform_login(username: str, password: str, totp_code: str):
             await type_text_slowly(page, password_field, password, delay=50)
             await asyncio.sleep(0.5)
             add_log("success", "Password entered successfully")
+            await take_live_preview(page, "Password entered")
             
             # Click login/submit button
             logger.info("Looking for submit button...")
@@ -158,6 +184,7 @@ async def perform_login(username: str, password: str, totp_code: str):
             await page.locator(submit_button).first.click()
             add_log("info", "Login form submitted")
             await asyncio.sleep(3)  # Wait for potential redirect or TOTP field
+            await take_live_preview(page, "Login form submitted")
             
             # Check if TOTP field appears
             logger.info("Checking for TOTP/MFA field...")
@@ -188,62 +215,133 @@ async def perform_login(username: str, password: str, totp_code: str):
                 await type_text_slowly(page, totp_field, totp_code, delay=50)
                 await asyncio.sleep(0.5)
                 add_log("success", "TOTP code entered successfully")
+                await take_live_preview(page, "TOTP code entered")
                 
-                # Submit TOTP
+                # Submit TOTP - wait for button to be visible and enabled
                 submit_totp_selectors = [
                     'button[type="submit"]',
                     'button:has-text("Verify")',
                     'button:has-text("Submit")',
-                    'button:has-text("Continue")'
+                    'button:has-text("Continue")',
+                    'button:has-text("Sign In")',
+                    'button:has-text("Log In")'
                 ]
                 
+                totp_submitted = False
                 for selector in submit_totp_selectors:
                     try:
-                        if await page.locator(selector).count() > 0:
-                            await page.locator(selector).first.click()
-                            break
-                    except:
+                        button = page.locator(selector).first
+                        if await button.count() > 0:
+                            # Wait for button to be visible and enabled
+                            await button.wait_for(state="visible", timeout=5000)
+                            # Check if button is enabled
+                            is_disabled = await button.get_attribute("disabled")
+                            if is_disabled is None:
+                                await button.click()
+                                add_log("info", f"Clicked TOTP submit button: {selector}")
+                                totp_submitted = True
+                                break
+                    except Exception as e:
+                        logger.debug(f"TOTP submit selector {selector} failed: {str(e)}")
                         continue
                 
-                await asyncio.sleep(3)
+                if not totp_submitted:
+                    # Try pressing Enter as fallback
+                    try:
+                        await page.keyboard.press("Enter")
+                        add_log("info", "Pressed Enter to submit TOTP")
+                        totp_submitted = True
+                    except Exception as e:
+                        logger.warning(f"Failed to submit TOTP via Enter: {str(e)}")
+                
+                # Wait for navigation or page update after TOTP submission
+                if totp_submitted:
+                    try:
+                        # Wait for navigation to start and complete
+                        add_log("info", "Waiting for navigation after TOTP submission...")
+                        # Wait for DOM to be ready first
+                        await page.wait_for_load_state("domcontentloaded", timeout=15000)
+                        # Then wait for network to be idle
+                        await page.wait_for_load_state("networkidle", timeout=15000)
+                        await asyncio.sleep(2)  # Additional wait for dynamic content
+                        add_log("info", "Navigation completed after TOTP submission")
+                        await take_live_preview(page, "After TOTP submission")
+                    except Exception as e:
+                        logger.debug(f"Navigation wait timeout (may be normal): {str(e)}")
+                        # Try waiting for load state with longer timeout
+                        try:
+                            await page.wait_for_load_state("load", timeout=10000)
+                            await asyncio.sleep(3)  # Fallback wait
+                        except:
+                            await asyncio.sleep(5)  # Final fallback
             
             # Check if login was successful
+            # Wait for page to be stable before accessing content
+            try:
+                add_log("info", "Waiting for page to stabilize before checking login status...")
+                await page.wait_for_load_state("domcontentloaded", timeout=10000)
+                await page.wait_for_load_state("networkidle", timeout=10000)
+                await take_live_preview(page, "Page stabilized")
+            except Exception as e:
+                logger.debug(f"Page stabilization wait: {str(e)}")
+                await asyncio.sleep(2)
+                await take_live_preview(page, "After stabilization wait")
+            
             current_url = page.url
             
-            # Wait a bit for page to fully load
-            await asyncio.sleep(2)
-            
             # Check for success by looking at page content, not just URL
-            page_content = await page.content()
-            page_text = await page.locator("body").inner_text()
+            # Wrap content access in try-except to handle navigation errors
+            page_content = None
+            page_text = ""
             
-            # Success indicators - check for actual page content
-            success_indicators = [
-                'my account',
-                'account snapshot',
-                'outstanding balance',
-                'pay bill',
-                'bill history',
-                'energy use'
-            ]
+            try:
+                # Ensure page is not navigating before accessing content
+                await page.wait_for_load_state("domcontentloaded", timeout=5000)
+                page_content = await page.content()
+                page_text = await page.locator("body").inner_text()
+            except Exception as e:
+                # If content access fails, try again after waiting
+                logger.warning(f"Failed to get page content (may be navigating): {str(e)}")
+                try:
+                    await asyncio.sleep(3)
+                    await page.wait_for_load_state("load", timeout=10000)
+                    page_content = await page.content()
+                    page_text = await page.locator("body").inner_text()
+                except Exception as e2:
+                    # If still failing, use URL as fallback
+                    logger.warning(f"Still unable to get page content: {str(e2)}")
+                    page_text = ""  # Will rely on URL check only
             
-            # Error indicators
-            error_keywords = [
-                'invalid username or password',
-                'incorrect password',
-                'authentication failed',
-                'login failed',
-                'try again',
-                'error signing in'
-            ]
+            # Check for errors first (only if we have page text)
+            has_error = False
+            if page_text:
+                error_keywords = [
+                    'invalid username or password',
+                    'incorrect password',
+                    'authentication failed',
+                    'login failed',
+                    'try again',
+                    'error signing in',
+                    'invalid code',
+                    'verification failed'
+                ]
+                has_error = any(keyword in page_text.lower() for keyword in error_keywords)
             
-            # Check for errors first
-            has_error = any(keyword in page_text.lower() for keyword in error_keywords)
             if has_error:
                 raise Exception("Login failed - error detected on page")
             
-            # Check for success indicators
-            is_success = any(indicator in page_text.lower() for indicator in success_indicators)
+            # Check for success indicators (only if we have page text)
+            is_success = False
+            if page_text:
+                success_indicators = [
+                    'my account',
+                    'account snapshot',
+                    'outstanding balance',
+                    'pay bill',
+                    'bill history',
+                    'energy use'
+                ]
+                is_success = any(indicator in page_text.lower() for indicator in success_indicators)
             
             # Also check URL as fallback
             if not is_success:
@@ -376,7 +474,10 @@ async def scrape_account_data(page, context):
             # Take screenshot right after finding account balance
             try:
                 from pathlib import Path
-                screenshot_path = Path(__file__).parent / SCREENSHOT_FILENAME
+                # Use ./data for persistent storage
+                screenshot_dir = Path("./data")
+                screenshot_dir.mkdir(parents=True, exist_ok=True)
+                screenshot_path = screenshot_dir / SCREENSHOT_FILENAME
                 await page.screenshot(path=str(screenshot_path), full_page=False)
                 add_log("info", f"Screenshot saved: {SCREENSHOT_FILENAME}")
             except Exception as e:
@@ -472,12 +573,26 @@ async def scrape_bill_history(page):
                         date_text = ' '.join(date_text.split()).strip()
                         item_data["bill_cycle_date"] = date_text
                     
-                    # Get payment description
+                    # Get payment description and extract payment date
                     received_element = item.locator('.billing-payment-item__received').first
                     if await received_element.count() > 0:
-                        item_data["description"] = (await received_element.inner_text()).strip()
+                        description_text = (await received_element.inner_text()).strip()
+                        item_data["description"] = description_text
+                        
+                        # Try to extract payment date from description (e.g., "Payment Received 1/23/2026")
+                        import re
+                        date_match = re.search(r'(\d{1,2}/\d{1,2}/\d{4})', description_text)
+                        if date_match:
+                            item_data["payment_date"] = date_match.group(1)
                     else:
                         item_data["description"] = "Payment Received"
+                    
+                    # Try to get payment date from data attribute if available
+                    payment_link = item.locator('a[data-payment-date]').first
+                    if await payment_link.count() > 0:
+                        payment_date = await payment_link.get_attribute('data-payment-date')
+                        if payment_date:
+                            item_data["payment_date"] = payment_date
                     
                     # Get payment amount
                     amount_element = item.locator('.billing-payment-item__total-received').first
@@ -487,7 +602,12 @@ async def scrape_bill_history(page):
                     
                     if item_data.get("bill_cycle_date") or item_data.get("amount"):
                         bill_history["ledger"].append(item_data)
-                        add_log("info", f"Added payment: {item_data.get('amount')} on {item_data.get('bill_cycle_date')}")
+                        payment_info = f"Added payment: {item_data.get('amount')}"
+                        if item_data.get("payment_date"):
+                            payment_info += f" on {item_data.get('payment_date')}"
+                        elif item_data.get("bill_cycle_date"):
+                            payment_info += f" (bill cycle: {item_data.get('bill_cycle_date')})"
+                        add_log("info", payment_info)
                         
                 except Exception as e:
                     add_log("warning", f"Error parsing payment item: {str(e)}")

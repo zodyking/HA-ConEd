@@ -4,7 +4,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
-DB_PATH = Path(__file__).parent / "data" / "scraper.db"
+# Use /data for persistent storage (mounted volume in Home Assistant)
+DB_PATH = Path("./data") / "scraper.db"
 
 def init_database():
     """Initialize SQLite database"""

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api'
 
 interface ScrapedData {
   id: number
@@ -37,14 +37,14 @@ function formatTimestamp(timestamp: string): { date: string, time: string } {
   }
 }
 
-export default function AccountLedger() {
+export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'console' | 'settings') => void }) {
   const [scrapedData, setScrapedData] = useState<ScrapedData[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [apiError, setApiError] = useState<string | null>(null)
 
   const loadScrapedData = useCallback(async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/scraped-data?limit=50`)
+      const response = await fetch(`${API_BASE_URL}/scraped-data?limit=50`)
       if (response.ok) {
         const data = await response.json()
         setScrapedData(data.data || [])
@@ -67,7 +67,30 @@ export default function AccountLedger() {
   }, [loadScrapedData])
 
   if (isLoading) {
-    return <div style={{ padding: '2rem', textAlign: 'center' }}>Loading account ledger...</div>
+    return (
+      <div style={{ 
+        padding: '4rem 2rem', 
+        textAlign: 'center',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        minHeight: '400px'
+      }}>
+        <img 
+          src="/images/ajax-loader.gif" 
+          alt="Loading" 
+          style={{ 
+            width: '64px', 
+            height: '64px',
+            marginBottom: '1.5rem'
+          }} 
+        />
+        <div style={{ color: '#666', fontSize: '1rem', marginTop: '1rem' }}>
+          Loading account ledger...
+        </div>
+      </div>
+    )
   }
 
   if (apiError) {
@@ -80,8 +103,85 @@ export default function AccountLedger() {
 
   if (scrapedData.length === 0) {
     return (
-      <div style={{ padding: '2rem', textAlign: 'center', color: '#666' }}>
-        No account ledger data yet. Start the scraper to collect data.
+      <div style={{ 
+        padding: '4rem 2rem', 
+        textAlign: 'center',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        minHeight: '400px'
+      }}>
+        <img 
+          src="/images/ajax-loader.gif" 
+          alt="Setup Required" 
+          style={{ 
+            width: '80px', 
+            height: '80px',
+            marginBottom: '2rem',
+            opacity: 0.8
+          }} 
+        />
+        <h2 style={{ 
+          fontSize: '1.5rem', 
+          fontWeight: 600, 
+          color: '#333',
+          marginBottom: '1rem'
+        }}>
+          No Account Data Yet
+        </h2>
+        <p style={{ 
+          color: '#666', 
+          fontSize: '1rem',
+          maxWidth: '500px',
+          lineHeight: '1.6',
+          marginBottom: '2rem'
+        }}>
+          To get started, please configure your credentials in Settings and run the scraper from the Console.
+        </p>
+        <div style={{
+          display: 'flex',
+          gap: '1rem',
+          justifyContent: 'center',
+          flexWrap: 'wrap'
+        }}>
+          <button
+            onClick={() => onNavigate?.('settings')}
+            style={{
+              padding: '0.75rem 1.5rem',
+              backgroundColor: '#03a9f4',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              fontSize: '1rem',
+              cursor: 'pointer',
+              fontWeight: 500,
+              transition: 'background-color 0.2s'
+            }}
+            onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#0288d1'}
+            onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#03a9f4'}
+          >
+            ⚙️ Go to Settings
+          </button>
+          <button
+            onClick={() => onNavigate?.('console')}
+            style={{
+              padding: '0.75rem 1.5rem',
+              backgroundColor: '#4caf50',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              fontSize: '1rem',
+              cursor: 'pointer',
+              fontWeight: 500,
+              transition: 'background-color 0.2s'
+            }}
+            onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#45a049'}
+            onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#4caf50'}
+          >
+            📊 Go to Console
+          </button>
+        </div>
       </div>
     )
   }
@@ -218,7 +318,7 @@ export default function AccountLedger() {
               <>
                 <strong>Screenshot:</strong>
                 <a 
-                  href={`${API_BASE_URL}/api/screenshot/${screenshotPath.split('/').pop() || screenshotPath}`}
+                  href={`${API_BASE_URL}/screenshot/${screenshotPath.split('/').pop() || screenshotPath}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="ha-button ha-button-primary"

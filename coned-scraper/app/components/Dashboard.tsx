@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api'
 
 interface LogEntry {
   id: number
@@ -17,13 +17,15 @@ export default function Dashboard() {
   const [status, setStatus] = useState<'stopped' | 'running' | 'error'>('stopped')
   const logContainerRef = useRef<HTMLDivElement>(null)
   const [apiError, setApiError] = useState<string | null>(null)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const previewRefreshIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
   const loadLogs = useCallback(async () => {
     try {
       let response: Response | null = null
       
       try {
-        response = await fetch(`${API_BASE_URL}/api/logs?limit=100`, {
+        response = await fetch(`${API_BASE_URL}/logs?limit=100`, {
           method: 'GET',
           headers: {
             'Content-Type': 'application/json',
@@ -55,20 +57,73 @@ export default function Dashboard() {
     }
   }, [])
 
+  const loadLivePreview = useCallback(async () => {
+    try {
+      const timestamp = new Date().getTime()
+      const url = `${API_BASE_URL}/live-preview?t=${timestamp}`
+      const response = await fetch(url)
+      
+      if (response.ok && response.headers.get('content-type')?.startsWith('image/')) {
+        const blob = await response.blob()
+        const imageUrl = URL.createObjectURL(blob)
+        // Revoke old URL to prevent memory leaks
+        setPreviewUrl((prevUrl) => {
+          if (prevUrl && prevUrl.startsWith('blob:')) {
+            URL.revokeObjectURL(prevUrl)
+          }
+          return imageUrl
+        })
+      } else {
+        // Preview not available yet (404 or other error)
+        setPreviewUrl((prevUrl) => {
+          if (prevUrl && prevUrl.startsWith('blob:')) {
+            URL.revokeObjectURL(prevUrl)
+          }
+          return null
+        })
+      }
+    } catch (error) {
+      // Silently fail - preview might not be available
+      setPreviewUrl((prevUrl) => {
+        if (prevUrl && prevUrl.startsWith('blob:')) {
+          URL.revokeObjectURL(prevUrl)
+        }
+        return null
+      })
+    }
+  }, [])
+
   const loadScrapedData = useCallback(async () => {
     // Removed - scraped data is now in AccountLedger component
   }, [])
 
   useEffect(() => {
     loadLogs()
+    loadLivePreview()
     
     // Refresh logs every 1 second for faster updates
     const logInterval = setInterval(loadLogs, 1000)
     
+    // Refresh preview every 500ms when running, 2s when stopped
+    const previewInterval = setInterval(loadLivePreview, isRunning ? 500 : 2000)
+    previewRefreshIntervalRef.current = previewInterval
+    
     return () => {
       clearInterval(logInterval)
+      if (previewRefreshIntervalRef.current) {
+        clearInterval(previewRefreshIntervalRef.current)
+      }
     }
-  }, [loadLogs])
+  }, [loadLogs, loadLivePreview, isRunning])
+
+  // Cleanup blob URL on unmount
+  useEffect(() => {
+    return () => {
+      if (previewUrl && previewUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(previewUrl)
+      }
+    }
+  }, [previewUrl])
 
   // Auto-scroll logs to bottom when new logs are added
   useEffect(() => {
@@ -86,7 +141,7 @@ export default function Dashboard() {
     
     try {
       // Clear logs on the backend as well
-      await fetch(`${API_BASE_URL}/api/logs`, {
+      await fetch(`${API_BASE_URL}/logs`, {
         method: 'DELETE',
       }).catch(() => {
         // Ignore errors if endpoint doesn't exist or fails
@@ -111,7 +166,7 @@ export default function Dashboard() {
         }
       }
       
-      const response = await safeFetch(`${API_BASE_URL}/api/scrape`, {
+      const response = await safeFetch(`${API_BASE_URL}/scrape`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -243,23 +298,62 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div className="ha-card ha-card-logs">
-        <div className="ha-card-header">
-          <span className="ha-card-icon">📝</span>
-          <span>Console Logs</span>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', height: '100%' }}>
+        <div className="ha-card ha-card-logs" style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          <div className="ha-card-header">
+            <span className="ha-card-icon">📝</span>
+            <span>Console Logs</span>
+          </div>
+          <div className="ha-card-content ha-log-container" ref={logContainerRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+            {logs.length === 0 ? (
+              <div className="ha-empty-state">No logs yet. Start the scraper to see activity.</div>
+            ) : (
+              logs.map((log) => (
+                <div key={log.id} className={`ha-log-entry ha-log-${log.level.toLowerCase()}`}>
+                  <span className="ha-log-time">{formatTimestampForLogs(log.timestamp)}</span>
+                  <span className={getLogLevelClass(log.level)}>[{log.level.toUpperCase()}]</span>
+                  <span className="ha-log-message">{log.message}</span>
+                </div>
+              ))
+            )}
+          </div>
         </div>
-        <div className="ha-card-content ha-log-container" ref={logContainerRef} style={{ flex: 1, minHeight: 0 }}>
-          {logs.length === 0 ? (
-            <div className="ha-empty-state">No logs yet. Start the scraper to see activity.</div>
-          ) : (
-            logs.map((log) => (
-              <div key={log.id} className={`ha-log-entry ha-log-${log.level.toLowerCase()}`}>
-                <span className="ha-log-time">{formatTimestampForLogs(log.timestamp)}</span>
-                <span className={getLogLevelClass(log.level)}>[{log.level.toUpperCase()}]</span>
-                <span className="ha-log-message">{log.message}</span>
+
+        <div className="ha-card" style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          <div className="ha-card-header">
+            <span className="ha-card-icon">🖥️</span>
+            <span>Browser Preview</span>
+          </div>
+          <div className="ha-card-content" style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#1a1a1a', padding: '1rem' }}>
+            {previewUrl ? (
+              <img 
+                src={previewUrl} 
+                alt="Browser preview" 
+                style={{ 
+                  maxWidth: '100%', 
+                  maxHeight: '100%', 
+                  objectFit: 'contain',
+                  border: '1px solid #333',
+                  borderRadius: '4px'
+                }} 
+              />
+            ) : (
+              <div className="ha-empty-state" style={{ textAlign: 'center', color: '#888' }}>
+                {isRunning ? (
+                  <>
+                    <img 
+                      src="/images/ajax-loader.gif" 
+                      alt="Loading" 
+                      style={{ width: '40px', height: '40px', marginBottom: '1rem' }} 
+                    />
+                    <div>Waiting for browser preview...</div>
+                  </>
+                ) : (
+                  <div>No preview available. Start the scraper to see browser activity.</div>
+                )}
               </div>
-            ))
-          )}
+            )}
+          </div>
         </div>
       </div>
     </div>

@@ -1,57 +1,59 @@
-# Python
+# Dependencies
+node_modules/
 __pycache__/
-*.py[cod]
-*$py.class
-*.so
+*.pyc
+*.pyo
+*.pyd
 .Python
-env/
 venv/
+env/
 ENV/
-.venv
 
-# Database
-*.db
-*.sqlite
-*.sqlite3
-
-# Screenshots (generated dynamically)
-*.png
-*.jpg
-*.jpeg
-
-# Credentials and keys
-**/data/.key
-**/data/credentials.json
-**/data/schedule.json
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Logs
-*.log
-
-# Next.js build artifacts
+# Next.js
 .next/
 out/
-node_modules/
-package-lock.json
+build/
+dist/
 
-# Home Assistant addon persistent data
-python-service/data/
-data/
+# Production
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
 # Environment variables
 .env
 .env.local
+.env.development.local
+.env.test.local
+.env.production.local
 
-# Temporary files
-*.tmp
-*.bak
+# OS files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# IDE
+.vscode/
+.idea/
+*.sublime-*
+
+# Testing
+coverage/
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Data directory (contains sensitive info)
+coned-scraper/python-service/data/
+**/data/*.json
+**/data/*.db
+**/data/*.png
+**/data/.key
+
+# Build artifacts
+*.egg-info/
+*.egg
+*.whl

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api'
 
 interface Credentials {
   username: string
@@ -23,7 +23,7 @@ export default function Settings() {
   const [timeRemaining, setTimeRemaining] = useState<number>(30)
   const [isLoading, setIsLoading] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
-  const [activeTab, setActiveTab] = useState<'credentials' | 'automated'>('credentials')
+  const [activeTab, setActiveTab] = useState<'credentials' | 'automated' | 'webhooks'>('credentials')
   
   // Show/hide password states
   const [showUsername, setShowUsername] = useState(false)
@@ -51,7 +51,7 @@ export default function Settings() {
 
     const updateTOTP = async () => {
       try {
-        const response = await fetch(`${API_BASE_URL}/api/totp`)
+        const response = await fetch(`${API_BASE_URL}/totp`)
         if (response.ok) {
           const data: TOTPResponse = await response.json()
           setCurrentTOTP(data.code)
@@ -91,7 +91,7 @@ export default function Settings() {
 
   const loadSettings = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/settings`)
+      const response = await fetch(`${API_BASE_URL}/settings`)
       if (response.ok) {
         const data: Credentials = await response.json()
         setUsername(data.username || '')
@@ -121,7 +121,7 @@ export default function Settings() {
     setMessage(null)
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/settings`, {
+      const response = await fetch(`${API_BASE_URL}/settings`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -137,7 +137,7 @@ export default function Settings() {
         setMessage({ type: 'success', text: 'Settings saved successfully!' })
         // Reload to get updated TOTP
         if (totpSecret) {
-          const totpResponse = await fetch(`${API_BASE_URL}/api/totp`)
+          const totpResponse = await fetch(`${API_BASE_URL}/totp`)
           if (totpResponse.ok) {
             const totpData: TOTPResponse = await totpResponse.json()
             setCurrentTOTP(totpData.code)
@@ -172,6 +172,13 @@ export default function Settings() {
           onClick={() => setActiveTab('automated')}
         >
           ⏰ Automated Scrape
+        </button>
+        <button
+          type="button"
+          className={`ha-tab ${activeTab === 'webhooks' ? 'active' : ''}`}
+          onClick={() => setActiveTab('webhooks')}
+        >
+          🔗 Home Assistant Webhooks
         </button>
       </div>
 
@@ -292,6 +299,333 @@ export default function Settings() {
       {activeTab === 'automated' && (
         <AutomatedScrapeTab />
       )}
+
+      {activeTab === 'webhooks' && (
+        <WebhooksTab />
+      )}
+    </div>
+  )
+}
+
+function WebhooksTab() {
+  const [latestBillUrl, setLatestBillUrl] = useState('')
+  const [previousBillUrl, setPreviousBillUrl] = useState('')
+  const [accountBalanceUrl, setAccountBalanceUrl] = useState('')
+  const [lastPaymentUrl, setLastPaymentUrl] = useState('')
+  const [isLoading, setIsLoading] = useState(false)
+  const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
+
+  useEffect(() => {
+    loadWebhooks()
+  }, [])
+
+  const loadWebhooks = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/webhooks`)
+      if (response.ok) {
+        const data = await response.json()
+        setLatestBillUrl(data.latest_bill || '')
+        setPreviousBillUrl(data.previous_bill || '')
+        setAccountBalanceUrl(data.account_balance || '')
+        setLastPaymentUrl(data.last_payment || '')
+      }
+    } catch (error) {
+      console.error('Failed to load webhooks:', error)
+    }
+  }
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setIsLoading(true)
+    setMessage(null)
+
+    try {
+      const payload = {
+        latest_bill: latestBillUrl.trim(),
+        previous_bill: previousBillUrl.trim(),
+        account_balance: accountBalanceUrl.trim(),
+        last_payment: lastPaymentUrl.trim()
+      }
+
+      const response = await fetch(`${API_BASE_URL}/webhooks`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        setMessage({ type: 'success', text: `Webhook URLs saved successfully! (${data.configured_count} configured)` })
+        await loadWebhooks()
+      } else {
+        let errorMessage = 'Failed to save webhook URLs'
+        try {
+          const errorData = await response.json()
+          if (errorData.detail) {
+            if (typeof errorData.detail === 'string') {
+              errorMessage = errorData.detail
+            } else if (Array.isArray(errorData.detail)) {
+              // Pydantic validation errors
+              errorMessage = errorData.detail.map((err: any) => 
+                `${err.loc.join('.')}: ${err.msg}`
+              ).join(', ')
+            }
+          }
+        } catch {
+          errorMessage = `HTTP ${response.status}: ${response.statusText}`
+        }
+        setMessage({ type: 'error', text: errorMessage })
+      }
+    } catch (error) {
+      setMessage({ type: 'error', text: `Failed to connect to API: ${error instanceof Error ? error.message : 'Unknown error'}` })
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleTest = async () => {
+    setIsLoading(true)
+    setMessage(null)
+
+    try {
+      // First, make sure webhooks are saved
+      const saveResponse = await fetch(`${API_BASE_URL}/webhooks`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          latest_bill: latestBillUrl,
+          previous_bill: previousBillUrl,
+          account_balance: accountBalanceUrl,
+          last_payment: lastPaymentUrl
+        }),
+      })
+
+      if (!saveResponse.ok) {
+        const errorData = await saveResponse.json().catch(() => ({}))
+        setMessage({ type: 'error', text: errorData.detail || 'Failed to save webhooks before testing' })
+        setIsLoading(false)
+        return
+      }
+
+      // Test webhooks with existing data
+      setMessage({ type: 'success', text: 'Sending test webhooks with latest scraped data...' })
+      
+      const testResponse = await fetch(`${API_BASE_URL}/webhooks/test`, {
+        method: 'POST',
+      })
+
+      if (testResponse.ok) {
+        const data = await testResponse.json()
+        setMessage({ 
+          type: 'success', 
+          text: `${data.message}${data.webhooks_sent ? ` (${data.webhooks_sent.join(', ')})` : ''}` 
+        })
+      } else {
+        const errorData = await testResponse.json().catch(() => ({}))
+        setMessage({ type: 'error', text: errorData.detail || 'Test webhooks failed' })
+      }
+    } catch (error) {
+      setMessage({ type: 'error', text: 'Failed to test webhooks. Make sure the Python service is running.' })
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const hasAnyWebhook = latestBillUrl.trim() || previousBillUrl.trim() || accountBalanceUrl.trim() || lastPaymentUrl.trim()
+
+  return (
+    <div className="ha-card">
+      <div className="ha-card-header">
+        <span className="ha-card-icon">🔗</span>
+        <span>Home Assistant Webhooks</span>
+      </div>
+      <div className="ha-card-content">
+        <div className="info-text" style={{ marginBottom: '1.5rem' }}>
+          Configure separate webhook URLs for each event type. Each scrape will POST JSON data to the configured URLs.
+        </div>
+
+        <form onSubmit={handleSave}>
+          <div className="ha-form-group">
+            <label htmlFor="latest-bill-url" className="ha-form-label">
+              📄 Latest Bill Webhook
+            </label>
+            <input
+              type="url"
+              id="latest-bill-url"
+              className="ha-form-input"
+              value={latestBillUrl}
+              onChange={(e) => setLatestBillUrl(e.target.value)}
+              placeholder="https://homeassistant.local/api/webhook/YOUR_WEBHOOK_ID"
+              style={{ fontFamily: 'monospace', fontSize: '0.9rem' }}
+            />
+            <div className="info-text">
+              Sends latest bill amount, billing cycle date, and month range
+            </div>
+          </div>
+
+          <div className="ha-form-group">
+            <label htmlFor="previous-bill-url" className="ha-form-label">
+              📋 Previous Bill Webhook
+            </label>
+            <input
+              type="url"
+              id="previous-bill-url"
+              className="ha-form-input"
+              value={previousBillUrl}
+              onChange={(e) => setPreviousBillUrl(e.target.value)}
+              placeholder="https://homeassistant.local/api/webhook/YOUR_WEBHOOK_ID"
+              style={{ fontFamily: 'monospace', fontSize: '0.9rem' }}
+            />
+            <div className="info-text">
+              Sends previous bill amount, billing cycle date, and month range
+            </div>
+          </div>
+
+          <div className="ha-form-group">
+            <label htmlFor="account-balance-url" className="ha-form-label">
+              💰 Account Balance Webhook
+            </label>
+            <input
+              type="url"
+              id="account-balance-url"
+              className="ha-form-input"
+              value={accountBalanceUrl}
+              onChange={(e) => setAccountBalanceUrl(e.target.value)}
+              placeholder="https://homeassistant.local/api/webhook/YOUR_WEBHOOK_ID"
+              style={{ fontFamily: 'monospace', fontSize: '0.9rem' }}
+            />
+            <div className="info-text">
+              Sends current account balance (outstanding amount)
+            </div>
+          </div>
+
+          <div className="ha-form-group">
+            <label htmlFor="last-payment-url" className="ha-form-label">
+              💳 Last Payment Webhook
+            </label>
+            <input
+              type="url"
+              id="last-payment-url"
+              className="ha-form-input"
+              value={lastPaymentUrl}
+              onChange={(e) => setLastPaymentUrl(e.target.value)}
+              placeholder="https://homeassistant.local/api/webhook/YOUR_WEBHOOK_ID"
+              style={{ fontFamily: 'monospace', fontSize: '0.9rem' }}
+            />
+            <div className="info-text">
+              Sends last payment amount and date received
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+            <button type="submit" className="ha-button ha-button-primary" disabled={isLoading}>
+              {isLoading ? 'Saving...' : 'Save Webhooks'}
+            </button>
+            <button 
+              type="button" 
+              className="ha-button" 
+              onClick={handleTest} 
+              disabled={isLoading || !hasAnyWebhook}
+              style={{ backgroundColor: '#1e88e5', color: 'white' }}
+            >
+              Test Webhooks
+            </button>
+          </div>
+        </form>
+
+        <div className="info-text" style={{ marginTop: '1rem', padding: '0.75rem', backgroundColor: '#1a1a1a', borderRadius: '4px', border: '1px solid #333' }}>
+          <strong>📋 How it works:</strong>
+          <ul style={{ marginTop: '0.5rem', marginBottom: 0, paddingLeft: '1.25rem' }}>
+            <li><strong>Smart Change Detection:</strong> Webhooks are automatically sent only when values change by comparing with previous scrapes in the database</li>
+            <li><strong>Test Webhooks:</strong> Instantly sends the latest scraped data to all configured webhooks (bypasses change detection for testing)</li>
+            <li><strong>Account Ledger:</strong> View full history of all scrapes and changes on the Account Ledger page</li>
+          </ul>
+        </div>
+
+        {message && (
+          <div className={`ha-card ha-card-${message.type === 'error' ? 'error' : 'status'}`} style={{ marginTop: '1rem' }}>
+            <div className="ha-card-content">
+              {message.text}
+            </div>
+          </div>
+        )}
+
+        <div className="ha-card" style={{ marginTop: '1.5rem', backgroundColor: '#1e1e1e', border: '1px solid #333' }}>
+          <div className="ha-card-content">
+            <h4 style={{ marginTop: 0, marginBottom: '0.75rem', fontSize: '0.95rem' }}>Webhook Payload Examples</h4>
+            
+            <div style={{ marginBottom: '1rem' }}>
+              <strong style={{ fontSize: '0.9rem' }}>Latest Bill:</strong>
+              <pre style={{ 
+                backgroundColor: '#0a0a0a', 
+                padding: '0.75rem', 
+                borderRadius: '4px', 
+                fontSize: '0.8rem',
+                overflow: 'auto',
+                margin: '0.5rem 0 0 0'
+              }}>
+{`{
+  "event_type": "latest_bill",
+  "timestamp": "2026-01-23T12:00:00",
+  "data": {
+    "bill_total": "$123.45",
+    "bill_cycle_date": "January 15, 2026",
+    "month_range": "Dec 16 - Jan 15"
+  }
+}`}
+              </pre>
+            </div>
+
+            <div style={{ marginBottom: '1rem' }}>
+              <strong style={{ fontSize: '0.9rem' }}>Account Balance:</strong>
+              <pre style={{ 
+                backgroundColor: '#0a0a0a', 
+                padding: '0.75rem', 
+                borderRadius: '4px', 
+                fontSize: '0.8rem',
+                overflow: 'auto',
+                margin: '0.5rem 0 0 0'
+              }}>
+{`{
+  "event_type": "account_balance",
+  "timestamp": "2026-01-23T12:00:00",
+  "data": {
+    "account_balance": 123.45,
+    "account_balance_raw": "$123.45"
+  }
+}`}
+              </pre>
+            </div>
+
+            <div>
+              <strong style={{ fontSize: '0.9rem' }}>Last Payment:</strong>
+              <pre style={{ 
+                backgroundColor: '#0a0a0a', 
+                padding: '0.75rem', 
+                borderRadius: '4px', 
+                fontSize: '0.8rem',
+                overflow: 'auto',
+                margin: '0.5rem 0 0 0'
+              }}>
+{`{
+  "event_type": "last_payment",
+  "timestamp": "2026-01-23T12:00:00",
+  "data": {
+    "amount": "$123.45",
+    "payment_date": "1/15/2026",
+    "bill_cycle_date": "1/10/2026",
+    "description": "Payment Received"
+  }
+}`}
+              </pre>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
@@ -311,7 +645,7 @@ function AutomatedScrapeTab() {
 
   const loadSchedule = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/automated-schedule`)
+      const response = await fetch(`${API_BASE_URL}/automated-schedule`)
       if (response.ok) {
         const data = await response.json()
         setStatus(data)
@@ -342,7 +676,7 @@ function AutomatedScrapeTab() {
         return
       }
 
-      const response = await fetch(`${API_BASE_URL}/api/automated-schedule`, {
+      const response = await fetch(`${API_BASE_URL}/automated-schedule`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
