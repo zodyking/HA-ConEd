@@ -632,6 +632,9 @@ function AppSettingsTab() {
   const handleSetTime = async (userTime: string) => {
     // User enters what time they think it is now (e.g., "8:42 AM")
     // Calculate offset from system time
+    setIsLoading(true)
+    setMessage(null)
+    
     try {
       const userDate = new Date(`1970-01-01 ${userTime}`)
       const systemDate = new Date()
@@ -642,12 +645,16 @@ function AppSettingsTab() {
       const offsetMinutes = userMinutes - systemMinutes
       const offsetHours = offsetMinutes / 60
       
+      // Get current settings first
+      const currentSettings = await fetch(`${API_BASE_URL}/app-settings`)
+      const currentData = await currentSettings.json()
+      
       const response = await fetch(`${API_BASE_URL}/app-settings`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           time_offset_hours: offsetHours,
-          settings_password: '0000'
+          settings_password: currentData.settings_password || '0000'
         }),
       })
 
@@ -661,6 +668,8 @@ function AppSettingsTab() {
       }
     } catch (error) {
       setMessage({ type: 'error', text: 'Invalid time format. Use format like "8:42 AM"' })
+    } finally {
+      setIsLoading(false)
     }
   }
 
