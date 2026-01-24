@@ -771,15 +771,14 @@ function AppSettingsTab() {
           </div>
         </div>
 
-        <form onSubmit={handleSave}>
-          <div className="ha-form-group" style={{ marginTop: '2rem', paddingTop: '2rem', borderTop: '1px solid #e0e0e0' }}>
-            <div style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '1rem', color: '#333' }}>
-              Change Settings Password
-            </div>
+        <form onSubmit={handleSave} style={{ marginTop: '2rem', paddingTop: '2rem', borderTop: '1px solid #e0e0e0' }}>
+          <div style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '1rem', color: '#333' }}>
+            Change Settings Password
+          </div>
 
           <div className="ha-form-group">
             <label htmlFor="new-password" className="ha-form-label">
-              Change Settings Password
+              New Password
             </label>
             <input
               type="password"
@@ -813,7 +812,7 @@ function AppSettingsTab() {
           )}
 
           <button type="submit" className="ha-button ha-button-primary" disabled={isLoading}>
-            {isLoading ? 'Saving...' : 'Save App Settings'}
+            {isLoading ? 'Saving...' : 'Change Password'}
           </button>
         </form>
 
