@@ -119,7 +119,6 @@ export default function Settings() {
         const data = await response.json()
         if (data.valid) {
           setIsUnlocked(true)
-          sessionStorage.setItem('settings_unlocked', 'true')
           setPasswordError('')
           return true
         } else {
