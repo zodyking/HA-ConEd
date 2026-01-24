@@ -15,6 +15,15 @@ interface TOTPResponse {
   time_remaining: number
 }
 
+interface ScrapeHistoryEntry {
+  id: number
+  timestamp: string
+  success: boolean
+  error_message?: string
+  failure_step?: string
+  duration_seconds?: number
+}
+
 export default function Settings() {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -23,7 +32,12 @@ export default function Settings() {
   const [timeRemaining, setTimeRemaining] = useState<number>(30)
   const [isLoading, setIsLoading] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
-  const [activeTab, setActiveTab] = useState<'credentials' | 'automated' | 'webhooks'>('credentials')
+  const [activeTab, setActiveTab] = useState<'credentials' | 'automated' | 'webhooks' | 'mqtt' | 'app-settings'>('credentials')
+  
+  // Password protection
+  const [isUnlocked, setIsUnlocked] = useState(false)
+  const [passwordInput, setPasswordInput] = useState('')
+  const [passwordError, setPasswordError] = useState('')
   
   // Show/hide password states
   const [showUsername, setShowUsername] = useState(false)
@@ -36,13 +50,28 @@ export default function Settings() {
     return '•'.repeat(text.length)
   }
 
+  // Check password on mount
+  useEffect(() => {
+    // For now, check if settings page should be locked
+    // In production, you might want to check session/local storage
+    const unlocked = sessionStorage.getItem('settings_unlocked')
+    if (unlocked === 'true') {
+      setIsUnlocked(true)
+      loadSettings()
+    }
+  }, [])
+
   // Load saved credentials on mount
   useEffect(() => {
-    loadSettings()
-  }, [])
+    if (isUnlocked) {
+      loadSettings()
+    }
+  }, [isUnlocked])
 
   // Update TOTP code every second
   useEffect(() => {
+    if (!isUnlocked) return
+    
     if (!totpSecret || totpSecret.trim() === '') {
       setCurrentTOTP('')
       setTimeRemaining(30)
@@ -57,7 +86,6 @@ export default function Settings() {
           setCurrentTOTP(data.code)
           setTimeRemaining(data.time_remaining)
         } else {
-          // Handle different error status codes
           let errorMessage = 'Error'
           try {
             const errorData = await response.json()
@@ -69,7 +97,6 @@ export default function Settings() {
               errorMessage = errorData.detail || 'Failed to fetch TOTP'
             }
           } catch {
-            // If response is not JSON, use status text
             errorMessage = response.status === 404 ? 'No credentials saved' : 'Error'
           }
           setCurrentTOTP(errorMessage)
@@ -80,14 +107,44 @@ export default function Settings() {
       }
     }
 
-    // Initial fetch immediately
     updateTOTP()
-
-    // Update every second
     const interval = setInterval(updateTOTP, 1000)
-
     return () => clearInterval(interval)
-  }, [totpSecret])
+  }, [totpSecret, isUnlocked])
+
+  const verifyPassword = async (pwd: string) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/app-settings/verify-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: pwd })
+      })
+      
+      if (response.ok) {
+        const data = await response.json()
+        if (data.valid) {
+          setIsUnlocked(true)
+          sessionStorage.setItem('settings_unlocked', 'true')
+          setPasswordError('')
+          return true
+        } else {
+          setPasswordError('Incorrect password')
+          return false
+        }
+      } else {
+        setPasswordError('Failed to verify password')
+        return false
+      }
+    } catch (error) {
+      setPasswordError('Connection error')
+      return false
+    }
+  }
+
+  const handlePasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    await verifyPassword(passwordInput)
+  }
 
   const loadSettings = async () => {
     try {
@@ -95,23 +152,17 @@ export default function Settings() {
       if (response.ok) {
         const data: Credentials = await response.json()
         setUsername(data.username || '')
-        setPassword('') // Don't show saved password
+        setPassword('')
         setTotpSecret(data.totp_secret || '')
-        
-        // Reset show states when loading
         setShowUsername(false)
         setShowPassword(false)
         setShowTotpSecret(false)
-        
-        // If TOTP secret exists, trigger TOTP fetch immediately
-        // Note: The useEffect will handle TOTP updates automatically
-        // so we don't need to fetch here
       } else {
         console.error('Failed to load settings:', await response.text())
       }
     } catch (error) {
       console.error('Failed to load settings:', error)
-      setMessage({ type: 'error', text: 'Failed to connect to API. Make sure the Python service is running on port 8000.' })
+      setMessage({ type: 'error', text: 'Failed to connect to API. Make sure the Python service is running.' })
     }
   }
 
@@ -128,14 +179,13 @@ export default function Settings() {
         },
         body: JSON.stringify({
           username,
-          password: password || null, // Send null if empty to keep existing password
+          password: password || null,
           totp_secret: totpSecret,
         }),
       })
 
       if (response.ok) {
         setMessage({ type: 'success', text: 'Settings saved successfully!' })
-        // Reload to get updated TOTP
         if (totpSecret) {
           const totpResponse = await fetch(`${API_BASE_URL}/totp`)
           if (totpResponse.ok) {
@@ -155,10 +205,64 @@ export default function Settings() {
     }
   }
 
+  // Password protection modal
+  if (!isUnlocked) {
+    return (
+      <div style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 1000
+      }}>
+        <div className="ha-card" style={{ maxWidth: '400px', margin: '1rem' }}>
+          <div className="ha-card-header">
+            <span className="ha-card-icon">🔒</span>
+            <span>Settings Password Required</span>
+          </div>
+          <div className="ha-card-content">
+            <form onSubmit={handlePasswordSubmit}>
+              <div className="ha-form-group">
+                <label htmlFor="settings-password" className="ha-form-label">
+                  Enter Settings Password
+                </label>
+                <input
+                  type="password"
+                  id="settings-password"
+                  className="ha-form-input"
+                  value={passwordInput}
+                  onChange={(e) => setPasswordInput(e.target.value)}
+                  placeholder="Default: 0000"
+                  autoFocus
+                  required
+                />
+                {passwordError && (
+                  <div style={{ color: '#d32f2f', fontSize: '0.85rem', marginTop: '0.5rem' }}>
+                    {passwordError}
+                  </div>
+                )}
+                <div className="info-text" style={{ marginTop: '0.5rem' }}>
+                  Default password is <strong>0000</strong>. Change it in App Settings after unlocking.
+                </div>
+              </div>
+              <button type="submit" className="ha-button ha-button-primary">
+                Unlock Settings
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="ha-settings">
-      <div className="ha-tabs">
+      <div className="ha-tabs" style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
         <button
           type="button"
           className={`ha-tab ${activeTab === 'credentials' ? 'active' : ''}`}
@@ -178,7 +282,21 @@ export default function Settings() {
           className={`ha-tab ${activeTab === 'webhooks' ? 'active' : ''}`}
           onClick={() => setActiveTab('webhooks')}
         >
-          🔗 Home Assistant Webhooks
+          🔗 Webhooks
+        </button>
+        <button
+          type="button"
+          className={`ha-tab ${activeTab === 'mqtt' ? 'active' : ''}`}
+          onClick={() => setActiveTab('mqtt')}
+        >
+          📡 MQTT
+        </button>
+        <button
+          type="button"
+          className={`ha-tab ${activeTab === 'app-settings' ? 'active' : ''}`}
+          onClick={() => setActiveTab('app-settings')}
+        >
+          ⚙️ App Settings
         </button>
       </div>
 
@@ -200,23 +318,20 @@ export default function Settings() {
                     value={showUsername ? username : (username ? maskText(username) : '')}
                     onChange={(e) => setUsername(e.target.value)}
                     onFocus={() => setShowUsername(true)}
-                    placeholder="your.email@example.com"
+                    onBlur={() => setShowUsername(false)}
                     required
+                    autoComplete="off"
                   />
-                  <button
-                    type="button"
-                    className="toggle-password"
-                    onClick={() => setShowUsername(!showUsername)}
-                    tabIndex={-1}
-                    aria-label={showUsername ? "Hide username" : "Show username"}
-                  >
-                    {showUsername ? '👁️' : '👁️‍🗨️'}
-                  </button>
                 </div>
               </div>
 
               <div className="ha-form-group">
-                <label htmlFor="password" className="ha-form-label">Password</label>
+                <label htmlFor="password" className="ha-form-label">
+                  Password
+                  <span style={{ fontSize: '0.85rem', fontWeight: 'normal', marginLeft: '0.5rem', color: '#666' }}>
+                    (leave empty to keep existing)
+                  </span>
+                </label>
                 <div className="password-input-wrapper">
                   <input
                     type={showPassword ? "text" : "password"}
@@ -225,62 +340,55 @@ export default function Settings() {
                     value={showPassword ? password : (password ? maskText(password) : '')}
                     onChange={(e) => setPassword(e.target.value)}
                     onFocus={() => setShowPassword(true)}
-                    placeholder={password ? '' : 'Enter password to update'}
+                    onBlur={() => setShowPassword(false)}
+                    autoComplete="new-password"
                   />
-                  <button
-                    type="button"
-                    className="toggle-password"
-                    onClick={() => setShowPassword(!showPassword)}
-                    tabIndex={-1}
-                    aria-label={showPassword ? "Hide password" : "Show password"}
-                  >
-                    {showPassword ? '👁️' : '👁️‍🗨️'}
-                  </button>
-                </div>
-                <div className="info-text">
-                  Leave empty to keep existing password
                 </div>
               </div>
 
               <div className="ha-form-group">
-                <label htmlFor="totp_secret" className="ha-form-label">TOTP Secret</label>
+                <label htmlFor="totp-secret" className="ha-form-label">TOTP Secret</label>
                 <div className="password-input-wrapper">
                   <input
                     type={showTotpSecret ? "text" : "password"}
-                    id="totp_secret"
+                    id="totp-secret"
                     className="ha-form-input"
                     value={showTotpSecret ? totpSecret : (totpSecret ? maskText(totpSecret) : '')}
-                    onChange={(e) => setTotpSecret(e.target.value)}
+                    onChange={(e) => setTotpSecret(e.target.value.trim().toUpperCase())}
                     onFocus={() => setShowTotpSecret(true)}
-                    placeholder="JBSWY3DPEHPK3PXP"
+                    onBlur={() => setShowTotpSecret(false)}
                     required
+                    autoComplete="off"
+                    style={{ fontFamily: 'monospace', letterSpacing: showTotpSecret ? '0.1em' : 'normal' }}
                   />
-                  <button
-                    type="button"
-                    className="toggle-password"
-                    onClick={() => setShowTotpSecret(!showTotpSecret)}
-                    tabIndex={-1}
-                    aria-label={showTotpSecret ? "Hide TOTP secret" : "Show TOTP secret"}
-                  >
-                    {showTotpSecret ? '👁️' : '👁️‍🗨️'}
-                  </button>
                 </div>
                 <div className="info-text">
-                  Enter your TOTP secret (base32 encoded string, same as Google Authenticator)
+                  Your 2FA secret key (usually 16-32 characters)
                 </div>
               </div>
 
               <button type="submit" className="ha-button ha-button-primary" disabled={isLoading}>
-                {isLoading ? 'Saving...' : 'Save Settings'}
+                {isLoading ? 'Saving...' : 'Save Credentials'}
               </button>
             </form>
 
-            {totpSecret && (
-              <div className="ha-totp-display">
-                <h3>Current TOTP Code</h3>
-                <div className="ha-totp-code">{currentTOTP || 'Loading...'}</div>
-                <div className="ha-totp-time">
-                  Expires in {timeRemaining} seconds
+            {currentTOTP && currentTOTP !== 'Connection Error' && currentTOTP !== 'No credentials saved' && (
+              <div className="ha-card ha-card-status" style={{ marginTop: '1.5rem' }}>
+                <div className="ha-card-content">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                      <div style={{ fontSize: '0.85rem', color: '#666', marginBottom: '0.25rem' }}>Current TOTP Code</div>
+                      <div style={{ fontSize: '1.5rem', fontWeight: 'bold', fontFamily: 'monospace', letterSpacing: '0.15em' }}>
+                        {currentTOTP}
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontSize: '0.85rem', color: '#666', marginBottom: '0.25rem' }}>Time Remaining</div>
+                      <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: timeRemaining < 10 ? '#d32f2f' : '#4caf50' }}>
+                        {timeRemaining}s
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
@@ -303,6 +411,351 @@ export default function Settings() {
       {activeTab === 'webhooks' && (
         <WebhooksTab />
       )}
+
+      {activeTab === 'mqtt' && (
+        <MQTTTab />
+      )}
+
+      {activeTab === 'app-settings' && (
+        <AppSettingsTab />
+      )}
+    </div>
+  )
+}
+
+function MQTTTab() {
+  const [mqttUrl, setMqttUrl] = useState('')
+  const [mqttUsername, setMqttUsername] = useState('')
+  const [mqttPassword, setMqttPassword] = useState('')
+  const [mqttBaseTopic, setMqttBaseTopic] = useState('coned')
+  const [mqttQos, setMqttQos] = useState(1)
+  const [mqttRetain, setMqttRetain] = useState(true)
+  const [isLoading, setIsLoading] = useState(false)
+  const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
+
+  useEffect(() => {
+    loadMqttConfig()
+  }, [])
+
+  const loadMqttConfig = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/mqtt-config`)
+      if (response.ok) {
+        const data = await response.json()
+        setMqttUrl(data.mqtt_url || '')
+        setMqttUsername(data.mqtt_username || '')
+        setMqttPassword('')
+        setMqttBaseTopic(data.mqtt_base_topic || 'coned')
+        setMqttQos(data.mqtt_qos || 1)
+        setMqttRetain(data.mqtt_retain !== undefined ? data.mqtt_retain : true)
+      }
+    } catch (error) {
+      console.error('Failed to load MQTT config:', error)
+    }
+  }
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setIsLoading(true)
+    setMessage(null)
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/mqtt-config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mqtt_url: mqttUrl.trim(),
+          mqtt_username: mqttUsername.trim(),
+          mqtt_password: mqttPassword || undefined,
+          mqtt_base_topic: mqttBaseTopic.trim() || 'coned',
+          mqtt_qos: mqttQos,
+          mqtt_retain: mqttRetain
+        }),
+      })
+
+      if (response.ok) {
+        setMessage({ type: 'success', text: 'MQTT configuration saved successfully!' })
+        await loadMqttConfig()
+      } else {
+        const error = await response.json()
+        setMessage({ type: 'error', text: error.detail || 'Failed to save MQTT config' })
+      }
+    } catch (error) {
+      setMessage({ type: 'error', text: 'Failed to connect to API.' })
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  return (
+    <div className="ha-card">
+      <div className="ha-card-header">
+        <span className="ha-card-icon">📡</span>
+        <span>MQTT Configuration</span>
+      </div>
+      <div className="ha-card-content">
+        <div className="info-text" style={{ marginBottom: '1.5rem' }}>
+          Configure MQTT to publish sensor data to Home Assistant. Topics: <code>coned/account_balance</code>, <code>coned/latest_bill</code>, <code>coned/previous_bill</code>, <code>coned/last_payment</code>
+        </div>
+
+        <form onSubmit={handleSave}>
+          <div className="ha-form-group">
+            <label htmlFor="mqtt-url" className="ha-form-label">MQTT Broker URL</label>
+            <input
+              type="text"
+              id="mqtt-url"
+              className="ha-form-input"
+              value={mqttUrl}
+              onChange={(e) => setMqttUrl(e.target.value)}
+              placeholder="mqtt://homeassistant.local:1883 or mqtts://..."
+              style={{ fontFamily: 'monospace', fontSize: '0.9rem' }}
+            />
+            <div className="info-text">
+              Leave empty to disable MQTT publishing
+            </div>
+          </div>
+
+          <div className="ha-form-group">
+            <label htmlFor="mqtt-username" className="ha-form-label">MQTT Username</label>
+            <input
+              type="text"
+              id="mqtt-username"
+              className="ha-form-input"
+              value={mqttUsername}
+              onChange={(e) => setMqttUsername(e.target.value)}
+              placeholder="Optional"
+            />
+          </div>
+
+          <div className="ha-form-group">
+            <label htmlFor="mqtt-password" className="ha-form-label">
+              MQTT Password
+              <span style={{ fontSize: '0.85rem', fontWeight: 'normal', marginLeft: '0.5rem', color: '#666' }}>
+                (leave empty to keep existing)
+              </span>
+            </label>
+            <input
+              type="password"
+              id="mqtt-password"
+              className="ha-form-input"
+              value={mqttPassword}
+              onChange={(e) => setMqttPassword(e.target.value)}
+              placeholder="Optional"
+              autoComplete="new-password"
+            />
+          </div>
+
+          <div className="ha-form-group">
+            <label htmlFor="mqtt-base-topic" className="ha-form-label">Base Topic</label>
+            <input
+              type="text"
+              id="mqtt-base-topic"
+              className="ha-form-input"
+              value={mqttBaseTopic}
+              onChange={(e) => setMqttBaseTopic(e.target.value)}
+              placeholder="coned"
+              style={{ fontFamily: 'monospace' }}
+            />
+            <div className="info-text">
+              Topics will be: {mqttBaseTopic || 'coned'}/account_balance, etc.
+            </div>
+          </div>
+
+          <div className="ha-form-group">
+            <label htmlFor="mqtt-qos" className="ha-form-label">Quality of Service (QoS)</label>
+            <select
+              id="mqtt-qos"
+              className="ha-form-input"
+              value={mqttQos}
+              onChange={(e) => setMqttQos(parseInt(e.target.value))}
+            >
+              <option value="0">0 - At most once</option>
+              <option value="1">1 - At least once</option>
+              <option value="2">2 - Exactly once</option>
+            </select>
+          </div>
+
+          <div className="ha-form-group">
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={mqttRetain}
+                onChange={(e) => setMqttRetain(e.target.checked)}
+                style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+              />
+              <span>Retain Messages</span>
+            </label>
+            <div className="info-text">
+              Retained messages persist on the broker and are delivered to new subscribers
+            </div>
+          </div>
+
+          <button type="submit" className="ha-button ha-button-primary" disabled={isLoading}>
+            {isLoading ? 'Saving...' : 'Save MQTT Config'}
+          </button>
+        </form>
+
+        {message && (
+          <div className={`ha-card ha-card-${message.type === 'error' ? 'error' : 'status'}`} style={{ marginTop: '1rem' }}>
+            <div className="ha-card-content">
+              {message.text}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function AppSettingsTab() {
+  const [timezone, setTimezone] = useState('America/New_York')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [isLoading, setIsLoading] = useState(false)
+  const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
+
+  useEffect(() => {
+    loadAppSettings()
+  }, [])
+
+  const loadAppSettings = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/app-settings`)
+      if (response.ok) {
+        const data = await response.json()
+        setTimezone(data.timezone || 'America/New_York')
+      }
+    } catch (error) {
+      console.error('Failed to load app settings:', error)
+    }
+  }
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setIsLoading(true)
+    setMessage(null)
+
+    if (newPassword && newPassword !== confirmPassword) {
+      setMessage({ type: 'error', text: 'Passwords do not match' })
+      setIsLoading(false)
+      return
+    }
+
+    if (newPassword && newPassword.length < 4) {
+      setMessage({ type: 'error', text: 'Password must be at least 4 characters' })
+      setIsLoading(false)
+      return
+    }
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/app-settings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          timezone: timezone.trim(),
+          settings_password: newPassword || '0000'
+        }),
+      })
+
+      if (response.ok) {
+        setMessage({ type: 'success', text: 'App settings saved successfully!' })
+        setNewPassword('')
+        setConfirmPassword('')
+        if (newPassword) {
+          sessionStorage.removeItem('settings_unlocked')
+          setTimeout(() => {
+            window.location.reload()
+          }, 2000)
+        }
+      } else {
+        const error = await response.json()
+        setMessage({ type: 'error', text: error.detail || 'Failed to save settings' })
+      }
+    } catch (error) {
+      setMessage({ type: 'error', text: 'Failed to connect to API.' })
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  return (
+    <div className="ha-card">
+      <div className="ha-card-header">
+        <span className="ha-card-icon">⚙️</span>
+        <span>App Settings</span>
+      </div>
+      <div className="ha-card-content">
+        <form onSubmit={handleSave}>
+          <div className="ha-form-group">
+            <label htmlFor="timezone" className="ha-form-label">Timezone</label>
+            <select
+              id="timezone"
+              className="ha-form-input"
+              value={timezone}
+              onChange={(e) => setTimezone(e.target.value)}
+            >
+              <option value="America/New_York">Eastern Time (ET)</option>
+              <option value="America/Chicago">Central Time (CT)</option>
+              <option value="America/Denver">Mountain Time (MT)</option>
+              <option value="America/Los_Angeles">Pacific Time (PT)</option>
+              <option value="America/Phoenix">Arizona Time (No DST)</option>
+              <option value="America/Anchorage">Alaska Time (AKT)</option>
+              <option value="Pacific/Honolulu">Hawaii Time (HST)</option>
+              <option value="UTC">UTC</option>
+            </select>
+            <div className="info-text">
+              Used for displaying timestamps throughout the app
+            </div>
+          </div>
+
+          <div className="ha-form-group">
+            <label htmlFor="new-password" className="ha-form-label">
+              Change Settings Password
+            </label>
+            <input
+              type="password"
+              id="new-password"
+              className="ha-form-input"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              placeholder="Leave empty to keep current password"
+              autoComplete="new-password"
+            />
+            <div className="info-text">
+              Minimum 4 characters. You'll need to re-login after changing.
+            </div>
+          </div>
+
+          {newPassword && (
+            <div className="ha-form-group">
+              <label htmlFor="confirm-password" className="ha-form-label">
+                Confirm New Password
+              </label>
+              <input
+                type="password"
+                id="confirm-password"
+                className="ha-form-input"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="Re-enter new password"
+                autoComplete="new-password"
+              />
+            </div>
+          )}
+
+          <button type="submit" className="ha-button ha-button-primary" disabled={isLoading}>
+            {isLoading ? 'Saving...' : 'Save App Settings'}
+          </button>
+        </form>
+
+        {message && (
+          <div className={`ha-card ha-card-${message.type === 'error' ? 'error' : 'status'}`} style={{ marginTop: '1rem' }}>
+            <div className="ha-card-content">
+              {message.text}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -367,7 +820,6 @@ function WebhooksTab() {
             if (typeof errorData.detail === 'string') {
               errorMessage = errorData.detail
             } else if (Array.isArray(errorData.detail)) {
-              // Pydantic validation errors
               errorMessage = errorData.detail.map((err: any) => 
                 `${err.loc.join('.')}: ${err.msg}`
               ).join(', ')
@@ -390,46 +842,25 @@ function WebhooksTab() {
     setMessage(null)
 
     try {
-      // First, make sure webhooks are saved
-      const saveResponse = await fetch(`${API_BASE_URL}/webhooks`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          latest_bill: latestBillUrl,
-          previous_bill: previousBillUrl,
-          account_balance: accountBalanceUrl,
-          last_payment: lastPaymentUrl
-        }),
+      const response = await fetch(`${API_BASE_URL}/webhooks/test`, {
+        method: 'POST'
       })
 
-      if (!saveResponse.ok) {
-        const errorData = await saveResponse.json().catch(() => ({}))
-        setMessage({ type: 'error', text: errorData.detail || 'Failed to save webhooks before testing' })
-        setIsLoading(false)
-        return
-      }
-
-      // Test webhooks with existing data
-      setMessage({ type: 'success', text: 'Sending test webhooks with latest scraped data...' })
-      
-      const testResponse = await fetch(`${API_BASE_URL}/webhooks/test`, {
-        method: 'POST',
-      })
-
-      if (testResponse.ok) {
-        const data = await testResponse.json()
+      if (response.ok) {
+        const data = await response.json()
         setMessage({ 
           type: 'success', 
-          text: `${data.message}${data.webhooks_sent ? ` (${data.webhooks_sent.join(', ')})` : ''}` 
+          text: `Test webhooks sent! (${data.webhooks_sent?.join(', ') || 'none'})` 
         })
       } else {
-        const errorData = await testResponse.json().catch(() => ({}))
-        setMessage({ type: 'error', text: errorData.detail || 'Test webhooks failed' })
+        const errorData = await response.json().catch(() => ({}))
+        setMessage({ 
+          type: 'error', 
+          text: errorData.detail || 'Failed to send test webhooks' 
+        })
       }
     } catch (error) {
-      setMessage({ type: 'error', text: 'Failed to test webhooks. Make sure the Python service is running.' })
+      setMessage({ type: 'error', text: 'Failed to connect to API' })
     } finally {
       setIsLoading(false)
     }
@@ -499,7 +930,7 @@ function WebhooksTab() {
               style={{ fontFamily: 'monospace', fontSize: '0.9rem' }}
             />
             <div className="info-text">
-              Sends current account balance (outstanding amount)
+              Sends current account balance
             </div>
           </div>
 
@@ -517,34 +948,27 @@ function WebhooksTab() {
               style={{ fontFamily: 'monospace', fontSize: '0.9rem' }}
             />
             <div className="info-text">
-              Sends last payment amount and date received
+              Sends last payment amount and date
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: '1rem' }}>
             <button type="submit" className="ha-button ha-button-primary" disabled={isLoading}>
-              {isLoading ? 'Saving...' : 'Save Webhooks'}
+              {isLoading ? 'Saving...' : 'Save Webhook URLs'}
             </button>
-            <button 
-              type="button" 
-              className="ha-button" 
-              onClick={handleTest} 
-              disabled={isLoading || !hasAnyWebhook}
-              style={{ backgroundColor: '#1e88e5', color: 'white' }}
-            >
-              Test Webhooks
-            </button>
+            {hasAnyWebhook && (
+              <button 
+                type="button" 
+                className="ha-button" 
+                onClick={handleTest}
+                disabled={isLoading}
+                style={{ backgroundColor: '#4caf50', color: 'white' }}
+              >
+                Test Webhooks
+              </button>
+            )}
           </div>
         </form>
-
-        <div className="info-text" style={{ marginTop: '1rem', padding: '0.75rem', backgroundColor: '#1a1a1a', borderRadius: '4px', border: '1px solid #333' }}>
-          <strong>📋 How it works:</strong>
-          <ul style={{ marginTop: '0.5rem', marginBottom: 0, paddingLeft: '1.25rem' }}>
-            <li><strong>Smart Change Detection:</strong> Webhooks are automatically sent only when values change by comparing with previous scrapes in the database</li>
-            <li><strong>Test Webhooks:</strong> Instantly sends the latest scraped data to all configured webhooks (bypasses change detection for testing)</li>
-            <li><strong>Account Ledger:</strong> View full history of all scrapes and changes on the Account Ledger page</li>
-          </ul>
-        </div>
 
         {message && (
           <div className={`ha-card ha-card-${message.type === 'error' ? 'error' : 'status'}`} style={{ marginTop: '1rem' }}>
@@ -553,78 +977,6 @@ function WebhooksTab() {
             </div>
           </div>
         )}
-
-        <div className="ha-card" style={{ marginTop: '1.5rem', backgroundColor: '#1e1e1e', border: '1px solid #333' }}>
-          <div className="ha-card-content">
-            <h4 style={{ marginTop: 0, marginBottom: '0.75rem', fontSize: '0.95rem' }}>Webhook Payload Examples</h4>
-            
-            <div style={{ marginBottom: '1rem' }}>
-              <strong style={{ fontSize: '0.9rem' }}>Latest Bill:</strong>
-              <pre style={{ 
-                backgroundColor: '#0a0a0a', 
-                padding: '0.75rem', 
-                borderRadius: '4px', 
-                fontSize: '0.8rem',
-                overflow: 'auto',
-                margin: '0.5rem 0 0 0'
-              }}>
-{`{
-  "event_type": "latest_bill",
-  "timestamp": "2026-01-23T12:00:00",
-  "data": {
-    "bill_total": "$123.45",
-    "bill_cycle_date": "January 15, 2026",
-    "month_range": "Dec 16 - Jan 15"
-  }
-}`}
-              </pre>
-            </div>
-
-            <div style={{ marginBottom: '1rem' }}>
-              <strong style={{ fontSize: '0.9rem' }}>Account Balance:</strong>
-              <pre style={{ 
-                backgroundColor: '#0a0a0a', 
-                padding: '0.75rem', 
-                borderRadius: '4px', 
-                fontSize: '0.8rem',
-                overflow: 'auto',
-                margin: '0.5rem 0 0 0'
-              }}>
-{`{
-  "event_type": "account_balance",
-  "timestamp": "2026-01-23T12:00:00",
-  "data": {
-    "account_balance": 123.45,
-    "account_balance_raw": "$123.45"
-  }
-}`}
-              </pre>
-            </div>
-
-            <div>
-              <strong style={{ fontSize: '0.9rem' }}>Last Payment:</strong>
-              <pre style={{ 
-                backgroundColor: '#0a0a0a', 
-                padding: '0.75rem', 
-                borderRadius: '4px', 
-                fontSize: '0.8rem',
-                overflow: 'auto',
-                margin: '0.5rem 0 0 0'
-              }}>
-{`{
-  "event_type": "last_payment",
-  "timestamp": "2026-01-23T12:00:00",
-  "data": {
-    "amount": "$123.45",
-    "payment_date": "1/15/2026",
-    "bill_cycle_date": "1/10/2026",
-    "description": "Payment Received"
-  }
-}`}
-              </pre>
-            </div>
-          </div>
-        </div>
       </div>
     </div>
   )
@@ -638,9 +990,13 @@ function AutomatedScrapeTab() {
   const [isLoading, setIsLoading] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
   const [status, setStatus] = useState<{ enabled: boolean, frequency: number, nextRun?: string } | null>(null)
+  const [scrapeHistory, setScrapeHistory] = useState<ScrapeHistoryEntry[]>([])
 
   useEffect(() => {
     loadSchedule()
+    loadScrapeHistory()
+    const interval = setInterval(loadScrapeHistory, 30000) // Refresh every 30s
+    return () => clearInterval(interval)
   }, [])
 
   const loadSchedule = async () => {
@@ -659,6 +1015,18 @@ function AutomatedScrapeTab() {
       }
     } catch (error) {
       console.error('Failed to load schedule:', error)
+    }
+  }
+
+  const loadScrapeHistory = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/scrape-history?limit=20`)
+      if (response.ok) {
+        const data = await response.json()
+        setScrapeHistory(data.history || [])
+      }
+    } catch (error) {
+      console.error('Failed to load scrape history:', error)
     }
   }
 
@@ -701,99 +1069,176 @@ function AutomatedScrapeTab() {
     }
   }
 
-  return (
-    <div className="ha-card">
-      <div className="ha-card-header">
-        <span className="ha-card-icon">⏰</span>
-        <span>Automated Scrape Schedule</span>
-      </div>
-      <div className="ha-card-content">
-        <form onSubmit={handleSave}>
-          <div className="ha-form-group">
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
-              <input
-                type="checkbox"
-                checked={enabled}
-                onChange={(e) => setEnabled(e.target.checked)}
-                style={{ width: '18px', height: '18px', cursor: 'pointer' }}
-              />
-              <span>Enable Automated Scraping</span>
-            </label>
-          </div>
+  const formatDuration = (seconds?: number) => {
+    if (!seconds) return 'N/A'
+    return `${seconds.toFixed(1)}s`
+  }
 
-          {enabled && (
-            <>
-              <div className="ha-form-group">
-                <label className="ha-form-label">Scrape Frequency</label>
-                <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start' }}>
-                  <div style={{ flex: 1 }}>
-                    <label htmlFor="hours" className="ha-form-label" style={{ fontSize: '0.85rem' }}>Hours</label>
-                    <input
-                      type="number"
-                      id="hours"
-                      className="ha-form-input"
-                      min="0"
-                      max="23"
-                      value={hours}
-                      onChange={(e) => setHours(e.target.value)}
-                      required
-                    />
+  const formatTimestamp = (timestamp: string) => {
+    try {
+      return new Date(timestamp).toLocaleString()
+    } catch {
+      return timestamp
+    }
+  }
+
+  return (
+    <>
+      <div className="ha-card">
+        <div className="ha-card-header">
+          <span className="ha-card-icon">⏰</span>
+          <span>Automated Scrape Schedule</span>
+        </div>
+        <div className="ha-card-content">
+          <form onSubmit={handleSave}>
+            <div className="ha-form-group">
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={enabled}
+                  onChange={(e) => setEnabled(e.target.checked)}
+                  style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                />
+                <span>Enable Automated Scraping</span>
+              </label>
+            </div>
+
+            {enabled && (
+              <>
+                <div className="ha-form-group">
+                  <label className="ha-form-label">Scrape Frequency</label>
+                  <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start' }}>
+                    <div style={{ flex: 1 }}>
+                      <label htmlFor="hours" className="ha-form-label" style={{ fontSize: '0.85rem' }}>Hours</label>
+                      <input
+                        type="number"
+                        id="hours"
+                        className="ha-form-input"
+                        min="0"
+                        max="23"
+                        value={hours}
+                        onChange={(e) => setHours(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <label htmlFor="minutes" className="ha-form-label" style={{ fontSize: '0.85rem' }}>Minutes</label>
+                      <input
+                        type="number"
+                        id="minutes"
+                        className="ha-form-input"
+                        min="0"
+                        max="59"
+                        value={minutes}
+                        onChange={(e) => setMinutes(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <label htmlFor="seconds" className="ha-form-label" style={{ fontSize: '0.85rem' }}>Seconds</label>
+                      <input
+                        type="number"
+                        id="seconds"
+                        className="ha-form-input"
+                        min="0"
+                        max="59"
+                        value={seconds}
+                        onChange={(e) => setSeconds(e.target.value)}
+                        required
+                      />
+                    </div>
                   </div>
-                  <div style={{ flex: 1 }}>
-                    <label htmlFor="minutes" className="ha-form-label" style={{ fontSize: '0.85rem' }}>Minutes</label>
-                    <input
-                      type="number"
-                      id="minutes"
-                      className="ha-form-input"
-                      min="0"
-                      max="59"
-                      value={minutes}
-                      onChange={(e) => setMinutes(e.target.value)}
-                      required
-                    />
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <label htmlFor="seconds" className="ha-form-label" style={{ fontSize: '0.85rem' }}>Seconds</label>
-                    <input
-                      type="number"
-                      id="seconds"
-                      className="ha-form-input"
-                      min="0"
-                      max="59"
-                      value={seconds}
-                      onChange={(e) => setSeconds(e.target.value)}
-                      required
-                    />
+                  <div className="info-text" style={{ marginTop: '0.5rem' }}>
+                    Scraper will run automatically every {hours}:{String(minutes).padStart(2, '0')}:{String(seconds).padStart(2, '0')}
                   </div>
                 </div>
-                <div className="info-text" style={{ marginTop: '0.5rem' }}>
-                  Scraper will run automatically every {hours}:{String(minutes).padStart(2, '0')}:{String(seconds).padStart(2, '0')}
-                </div>
+              </>
+            )}
+
+            <button type="submit" className="ha-button ha-button-primary" disabled={isLoading}>
+              {isLoading ? 'Saving...' : 'Save Schedule'}
+            </button>
+          </form>
+
+          {message && (
+            <div className={`ha-card ha-card-${message.type === 'error' ? 'error' : 'status'}`} style={{ marginTop: '1rem' }}>
+              <div className="ha-card-content">
+                {message.text}
               </div>
-            </>
+            </div>
           )}
 
-          <button type="submit" className="ha-button ha-button-primary" disabled={isLoading}>
-            {isLoading ? 'Saving...' : 'Save Schedule'}
-          </button>
-        </form>
-
-        {message && (
-          <div className={`ha-card ha-card-${message.type === 'error' ? 'error' : 'status'}`} style={{ marginTop: '1rem' }}>
-            <div className="ha-card-content">
-              {message.text}
+          {status && status.enabled && status.nextRun && (
+            <div className="ha-card ha-card-status" style={{ marginTop: '1rem' }}>
+              <div className="ha-card-content">
+                <strong>Next scheduled run:</strong> {new Date(status.nextRun).toLocaleString()}
+              </div>
             </div>
-          </div>
-        )}
-
-        {status && status.enabled && status.nextRun && (
-          <div className="ha-card ha-card-status" style={{ marginTop: '1rem' }}>
-            <div className="ha-card-content">
-              <strong>Next scheduled run:</strong> {new Date(status.nextRun).toLocaleString()}
-            </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
-    </div>
+
+      {/* Scrape History */}
+      <div className="ha-card" style={{ marginTop: '1.5rem' }}>
+        <div className="ha-card-header">
+          <span className="ha-card-icon">📊</span>
+          <span>Scrape History</span>
+        </div>
+        <div className="ha-card-content">
+          {scrapeHistory.length === 0 ? (
+            <div className="info-text">No scrape history available yet.</div>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
+                <thead>
+                  <tr style={{ borderBottom: '2px solid #ddd', textAlign: 'left' }}>
+                    <th style={{ padding: '0.75rem 0.5rem' }}>Time</th>
+                    <th style={{ padding: '0.75rem 0.5rem' }}>Status</th>
+                    <th style={{ padding: '0.75rem 0.5rem' }}>Duration</th>
+                    <th style={{ padding: '0.75rem 0.5rem' }}>Details</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {scrapeHistory.map((entry) => (
+                    <tr key={entry.id} style={{ borderBottom: '1px solid #eee' }}>
+                      <td style={{ padding: '0.75rem 0.5rem' }}>
+                        {formatTimestamp(entry.timestamp)}
+                      </td>
+                      <td style={{ padding: '0.75rem 0.5rem' }}>
+                        <span style={{
+                          display: 'inline-block',
+                          padding: '0.25rem 0.5rem',
+                          borderRadius: '4px',
+                          fontSize: '0.8rem',
+                          fontWeight: 500,
+                          backgroundColor: entry.success ? '#4caf50' : '#d32f2f',
+                          color: 'white'
+                        }}>
+                          {entry.success ? '✓ Success' : '✗ Failed'}
+                        </span>
+                      </td>
+                      <td style={{ padding: '0.75rem 0.5rem' }}>
+                        {formatDuration(entry.duration_seconds)}
+                      </td>
+                      <td style={{ padding: '0.75rem 0.5rem', fontSize: '0.85rem', color: '#666' }}>
+                        {entry.error_message && (
+                          <div style={{ color: '#d32f2f' }}>
+                            {entry.failure_step && `[${entry.failure_step}] `}
+                            {entry.error_message}
+                          </div>
+                        )}
+                        {!entry.error_message && entry.success && (
+                          <span style={{ color: '#4caf50' }}>Completed successfully</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+    </>
   )
 }
