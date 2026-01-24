@@ -1,0 +1,17 @@
+{
+  "account_balance": 569.79,
+  "latest_bill": {
+    "bill_total": "$719.79",
+    "bill_cycle_date": "1/15/2026",
+    "bill_date": "2026-01-15"
+  },
+  "previous_bill": {
+    "bill_total": "$719.79",
+    "bill_cycle_date": "1/15/2026",
+    "bill_date": "2026-01-15"
+  },
+  "last_payment": {
+    "amount": "$150.00",
+    "bill_cycle_date": "1/21/2026"
+  }
+}

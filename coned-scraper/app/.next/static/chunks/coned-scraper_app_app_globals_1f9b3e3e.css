@@ -1,0 +1,871 @@
+/* [project]/coned-scraper/app/app/globals.css [app-client] (css) */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background: #f5f5f5;
+  max-width: 100vw;
+  height: 100vh;
+  font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Oxygen, Ubuntu, Cantarell, Fira Sans, Droid Sans, Helvetica Neue, sans-serif;
+  overflow: hidden;
+}
+
+body {
+  color: #212121;
+  background: #f5f5f5;
+  flex-direction: column;
+  height: 100vh;
+  display: flex;
+}
+
+.ha-container {
+  flex-direction: column;
+  height: 100vh;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.ha-header {
+  color: #fff;
+  z-index: 1000;
+  background: #03a9f4;
+  flex-shrink: 0;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, .1);
+}
+
+.ha-header-content {
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: .75rem;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: .5rem 1rem;
+  display: flex;
+}
+
+.ha-logo-container {
+  align-items: center;
+  gap: .75rem;
+  display: flex;
+}
+
+.ha-logo-container img {
+  filter: brightness(0) invert();
+  width: auto;
+  height: 20px;
+}
+
+.ha-title {
+  color: #fff;
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 500;
+}
+
+.ha-nav {
+  flex-wrap: wrap;
+  gap: .5rem;
+  display: flex;
+}
+
+.ha-nav-button {
+  color: #fff;
+  cursor: pointer;
+  touch-action: manipulation;
+  background: rgba(255, 255, 255, .1);
+  border: none;
+  border-radius: 4px;
+  align-items: center;
+  gap: .4rem;
+  min-height: 36px;
+  padding: .4rem .75rem;
+  font-size: .8rem;
+  font-weight: 500;
+  transition: background .2s;
+  display: flex;
+}
+
+.ha-nav-button:hover {
+  background: rgba(255, 255, 255, .2);
+}
+
+.ha-nav-button.active {
+  background: rgba(255, 255, 255, .25);
+  font-weight: 600;
+}
+
+.ha-nav-icon {
+  font-size: 1.1rem;
+}
+
+.ha-content {
+  flex: 1;
+  width: 100%;
+  max-width: 1400px;
+  min-height: 0;
+  margin: 0 auto;
+  padding: .75rem;
+  overflow-y: auto;
+}
+
+.ha-dashboard {
+  flex-direction: column;
+  gap: .75rem;
+  height: 100%;
+  min-height: 0;
+  padding: 1rem;
+  display: flex;
+}
+
+.ha-dashboard > div[style*="grid"] {
+  flex: 1;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  min-height: 0;
+  display: grid;
+}
+
+@media (max-width: 1024px) {
+  .ha-dashboard > div[style*="grid"] {
+    grid-template-columns: 1fr;
+  }
+}
+
+.ha-card {
+  background: #fff;
+  border-radius: 6px;
+  flex-direction: column;
+  min-height: 0;
+  transition: box-shadow .2s;
+  display: flex;
+  overflow: hidden;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, .1);
+}
+
+.ha-card-status {
+  flex-shrink: 0;
+}
+
+.ha-card-logs {
+  flex: 1;
+  min-height: 0;
+}
+
+.ha-card:hover {
+  box-shadow: 0 4px 8px rgba(0, 0, 0, .15);
+}
+
+.ha-card-header {
+  background: #f5f5f5;
+  border-bottom: 1px solid #e0e0e0;
+  align-items: center;
+  gap: .5rem;
+  padding: .5rem .75rem;
+  font-size: .8rem;
+  font-weight: 500;
+  display: flex;
+}
+
+.ha-card-icon {
+  font-size: 1rem;
+}
+
+.ha-card-content {
+  padding: .75rem;
+}
+
+.ha-card-error {
+  border-left: 4px solid #f44336;
+}
+
+.ha-card-error .ha-card-header {
+  color: #c62828;
+  background: #ffebee;
+}
+
+.ha-card-status {
+  border-left: 4px solid #03a9f4;
+}
+
+.ha-status-controls {
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: .75rem;
+  display: flex;
+}
+
+.ha-status-info {
+  align-items: center;
+  gap: .75rem;
+  display: flex;
+}
+
+.ha-status-indicator {
+  border-radius: 50%;
+  width: 12px;
+  height: 12px;
+  display: inline-block;
+}
+
+.ha-status-indicator.running {
+  background: #4caf50;
+  animation: 2s infinite pulse;
+  box-shadow: 0 0 8px rgba(76, 175, 80, .5);
+}
+
+.ha-status-indicator.stopped {
+  background: #9e9e9e;
+}
+
+.ha-status-indicator.error {
+  background: #f44336;
+  box-shadow: 0 0 8px rgba(244, 67, 54, .5);
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: .5;
+  }
+}
+
+.ha-status-text {
+  font-size: .85rem;
+  font-weight: 500;
+}
+
+.ha-button {
+  cursor: pointer;
+  touch-action: manipulation;
+  border: none;
+  border-radius: 4px;
+  align-items: center;
+  gap: .4rem;
+  min-height: 36px;
+  padding: .5rem 1rem;
+  font-size: .8rem;
+  font-weight: 500;
+  transition: all .2s;
+  display: inline-flex;
+}
+
+.ha-button-primary {
+  color: #fff;
+  background: #03a9f4;
+}
+
+.ha-button-primary:hover:not(:disabled) {
+  background: #0288d1;
+  box-shadow: 0 2px 4px rgba(3, 169, 244, .3);
+}
+
+.ha-button:disabled {
+  cursor: not-allowed;
+  opacity: .6;
+  background: #bdbdbd;
+}
+
+.ha-loader-inline {
+  width: 14px;
+  height: 14px;
+  display: inline-block;
+}
+
+.ha-card-logs {
+  border-left: 4px solid #607d8b;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.ha-log-container {
+  color: #d4d4d4;
+  background: #1e1e1e;
+  border-radius: 4px;
+  flex: 1;
+  min-height: 0;
+  padding: .5rem;
+  font-family: Courier New, monospace;
+  font-size: .75rem;
+  overflow-y: auto;
+}
+
+.ha-log-entry {
+  word-break: break-word;
+  border-bottom: 1px solid #333;
+  flex-wrap: wrap;
+  gap: .5rem;
+  padding: .25rem 0;
+  line-height: 1.4;
+  display: flex;
+}
+
+.ha-log-entry:last-child {
+  border-bottom: none;
+}
+
+.ha-log-time {
+  color: #858585;
+  flex-shrink: 0;
+}
+
+.ha-log-message {
+  flex: 1;
+}
+
+.ha-log-info .ha-log-level-info {
+  color: #4ec9b0;
+}
+
+.ha-log-success .ha-log-level-success {
+  color: #4fc3f7;
+}
+
+.ha-log-error .ha-log-level-error {
+  color: #f48771;
+}
+
+.ha-log-warning .ha-log-level-warning {
+  color: #dcdcaa;
+}
+
+.ha-empty-state {
+  text-align: center;
+  color: #858585;
+  padding: 1rem;
+  font-size: .8rem;
+  font-style: italic;
+}
+
+.ha-ledger {
+  flex-direction: column;
+  gap: .75rem;
+  height: 100%;
+  display: flex;
+}
+
+.ha-card-summary {
+  border-left: 4px solid #4caf50;
+}
+
+.ha-summary-grid {
+  grid-template-columns: repeat(2, auto 1fr);
+  gap: .5rem 1rem;
+  font-size: .75rem;
+  display: grid;
+}
+
+.ha-summary-grid strong {
+  color: #666;
+  font-size: .75rem;
+  font-weight: 600;
+}
+
+.ha-summary-balance {
+  color: #d32f2f;
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.ha-card-ledger {
+  border-left: 4px solid #ff9800;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.ha-card-ledger .ha-card-content {
+  flex: 1;
+  min-height: 0;
+  padding: .5rem;
+  overflow-y: auto;
+}
+
+.ha-bill-card {
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  margin-bottom: .5rem;
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .08);
+}
+
+.ha-bill-header {
+  color: #333;
+  background: #f5f5f5;
+  border-bottom: 1px solid #e0e0e0;
+  padding: .5rem .75rem;
+  font-size: .75rem;
+  font-weight: 600;
+}
+
+.ha-bill-entry {
+  background: #e3f2fd;
+  border-bottom: 1px solid #e0e0e0;
+  padding: .6rem .75rem;
+}
+
+.ha-bill-content {
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: .5rem;
+  display: flex;
+}
+
+.ha-bill-badge {
+  color: #fff;
+  text-transform: uppercase;
+  letter-spacing: .3px;
+  background: #2196f3;
+  border-radius: 3px;
+  padding: .2rem .5rem;
+  font-size: .65rem;
+  font-weight: 700;
+}
+
+.ha-bill-amount {
+  color: #1565c0;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.ha-payment-entry {
+  background: #f1f8e9;
+  border-top: 1px solid #e0e0e0;
+  padding: .5rem .75rem .5rem 2rem;
+  position: relative;
+}
+
+.ha-payment-badge {
+  color: #fff;
+  text-transform: uppercase;
+  letter-spacing: .2px;
+  background: #4caf50;
+  border-radius: 3px;
+  padding: .15rem .5rem;
+  font-size: .6rem;
+  font-weight: 700;
+}
+
+.ha-payment-amount {
+  color: #2e7d32;
+  font-size: .9rem;
+  font-weight: 700;
+}
+
+.ha-form-group {
+  margin-bottom: 1rem;
+}
+
+.ha-form-label {
+  color: #555;
+  margin-bottom: .4rem;
+  font-size: .8rem;
+  font-weight: 500;
+  display: block;
+}
+
+.ha-form-input {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  border: 2px solid #e0e0e0;
+  border-radius: 4px;
+  width: 100%;
+  padding: .6rem;
+  font-size: 14px;
+  transition: border-color .2s;
+}
+
+.ha-form-input:focus {
+  border-color: #03a9f4;
+  outline: none;
+}
+
+.password-input-wrapper {
+  align-items: center;
+  display: flex;
+  position: relative;
+}
+
+.password-input-wrapper input {
+  padding-right: 2.5rem;
+}
+
+.toggle-password {
+  cursor: pointer;
+  color: #666;
+  z-index: 1;
+  background: none;
+  border: none;
+  justify-content: center;
+  align-items: center;
+  padding: .25rem .5rem;
+  font-size: 1.2rem;
+  transition: color .2s;
+  display: flex;
+  position: absolute;
+  right: .5rem;
+}
+
+.toggle-password:hover {
+  color: #333;
+}
+
+.toggle-password:focus {
+  outline: none;
+}
+
+.info-text {
+  color: #666;
+  margin-top: .4rem;
+  font-size: .75rem;
+}
+
+.form-group {
+  margin-bottom: 1rem;
+}
+
+.ha-settings {
+  flex-direction: column;
+  gap: .75rem;
+  height: 100%;
+  display: flex;
+}
+
+.ha-totp-display {
+  text-align: center;
+  background: #f5f5f5;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  margin-top: .75rem;
+  padding: 1rem;
+}
+
+.ha-totp-code {
+  color: #03a9f4;
+  letter-spacing: .2rem;
+  margin: .4rem 0;
+  font-family: Courier New, monospace;
+  font-size: 1.8rem;
+  font-weight: bold;
+}
+
+.ha-totp-time {
+  color: #666;
+  margin-top: .4rem;
+  font-size: .8rem;
+}
+
+.ha-tabs {
+  border-bottom: 2px solid #e0e0e0;
+  gap: .5rem;
+  margin-bottom: .75rem;
+  display: flex;
+}
+
+.ha-tab {
+  cursor: pointer;
+  color: #666;
+  background: none;
+  border: none;
+  border-bottom: 2px solid rgba(0, 0, 0, 0);
+  min-height: 36px;
+  margin-bottom: -2px;
+  padding: .5rem 1rem;
+  font-size: .8rem;
+  transition: all .2s;
+}
+
+.ha-tab:hover {
+  color: #333;
+}
+
+.ha-tab.active {
+  color: #03a9f4;
+  border-bottom-color: #03a9f4;
+  font-weight: 500;
+}
+
+@media (max-width: 639px) {
+  .ha-header-content {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: .5rem;
+  }
+
+  .ha-content {
+    padding: .5rem;
+  }
+
+  .ha-title {
+    font-size: 1rem;
+  }
+
+  .ha-nav {
+    width: 100%;
+  }
+
+  .ha-nav-button {
+    flex: 1;
+    justify-content: center;
+    padding: .4rem .5rem;
+    font-size: .75rem;
+  }
+
+  .ha-nav-icon {
+    font-size: .9rem;
+  }
+
+  .ha-summary-grid {
+    grid-template-columns: 1fr;
+    gap: .4rem;
+  }
+
+  .ha-summary-grid strong {
+    margin-top: .4rem;
+    display: block;
+  }
+
+  .ha-summary-grid strong:first-child {
+    margin-top: 0;
+  }
+
+  .ha-status-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .ha-button {
+    justify-content: center;
+    width: 100%;
+  }
+
+  .ha-bill-content {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .ha-bill-amount, .ha-payment-amount {
+    text-align: left;
+    width: 100%;
+  }
+
+  .ha-tabs {
+    -webkit-overflow-scrolling: touch;
+    overflow-x: auto;
+  }
+
+  .ha-tab {
+    white-space: nowrap;
+    padding: .4rem .75rem;
+    font-size: .75rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition-duration: .01ms !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+
+.ha-button:focus-visible {
+  outline-offset: 2px;
+  outline: 2px solid #03a9f4;
+}
+
+.ha-nav-button:focus-visible {
+  outline-offset: 2px;
+  outline: 2px solid #03a9f4;
+}
+
+.ha-tab:focus-visible {
+  outline-offset: 2px;
+  outline: 2px solid #03a9f4;
+}
+
+.ha-form-input:focus-visible {
+  outline-offset: 2px;
+  outline: 2px solid #03a9f4;
+}
+
+.container {
+  flex-direction: column;
+  height: 100vh;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.header {
+  color: #fff;
+  z-index: 1000;
+  background: #03a9f4;
+  flex-shrink: 0;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, .1);
+}
+
+.content {
+  flex: 1;
+  width: 100%;
+  max-width: 1400px;
+  min-height: 0;
+  margin: 0 auto;
+  padding: 1.5rem;
+  overflow-y: auto;
+}
+
+.nav {
+  flex-wrap: wrap;
+  gap: .5rem;
+  display: flex;
+}
+
+.nav-button {
+  color: #fff;
+  cursor: pointer;
+  touch-action: manipulation;
+  background: rgba(255, 255, 255, .1);
+  border: none;
+  border-radius: 4px;
+  align-items: center;
+  gap: .5rem;
+  min-height: 44px;
+  padding: .625rem 1rem;
+  font-size: .9rem;
+  font-weight: 500;
+  transition: background .2s;
+  display: flex;
+}
+
+.nav-button:hover {
+  background: rgba(255, 255, 255, .2);
+}
+
+.nav-button.active {
+  background: rgba(255, 255, 255, .25);
+  font-weight: 600;
+}
+
+.control-panel {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .75rem;
+  margin-bottom: 1rem;
+  display: flex;
+}
+
+.status-indicator {
+  border-radius: 50%;
+  width: 12px;
+  height: 12px;
+  display: inline-block;
+}
+
+.status-indicator.running {
+  background: #4caf50;
+  animation: 2s infinite pulse;
+  box-shadow: 0 0 8px rgba(76, 175, 80, .5);
+}
+
+.status-indicator.stopped {
+  background: #9e9e9e;
+}
+
+.status-indicator.error {
+  background: #f44336;
+  box-shadow: 0 0 8px rgba(244, 67, 54, .5);
+}
+
+.log-panel {
+  color: #d4d4d4;
+  background: #1e1e1e;
+  border-radius: 4px;
+  min-height: 200px;
+  max-height: 500px;
+  padding: 1rem;
+  font-family: Courier New, monospace;
+  font-size: .85rem;
+  overflow-y: auto;
+}
+
+.log-entry {
+  word-break: break-word;
+  border-bottom: 1px solid #333;
+  flex-wrap: wrap;
+  gap: .75rem;
+  padding: .5rem 0;
+  display: flex;
+}
+
+.log-entry:last-child {
+  border-bottom: none;
+}
+
+.log-time {
+  color: #858585;
+  flex-shrink: 0;
+}
+
+.log-level-info {
+  color: #4ec9b0;
+}
+
+.log-level-success {
+  color: #4fc3f7;
+}
+
+.log-level-error {
+  color: #f48771;
+}
+
+.log-level-warning {
+  color: #dcdcaa;
+}
+
+button.primary {
+  cursor: pointer;
+  touch-action: manipulation;
+  color: #fff;
+  background: #03a9f4;
+  border: none;
+  border-radius: 4px;
+  align-items: center;
+  gap: .5rem;
+  min-height: 44px;
+  padding: .75rem 1.5rem;
+  font-size: .9rem;
+  font-weight: 500;
+  transition: all .2s;
+  display: inline-flex;
+}
+
+button.primary:hover:not(:disabled) {
+  background: #0288d1;
+  box-shadow: 0 2px 4px rgba(3, 169, 244, .3);
+}
+
+button.primary:disabled {
+  cursor: not-allowed;
+  opacity: .6;
+  background: #bdbdbd;
+}
+
+/*# sourceMappingURL=coned-scraper_app_app_globals_1f9b3e3e.css.map*/
