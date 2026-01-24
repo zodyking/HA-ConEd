@@ -2,26 +2,25 @@ import type { NextConfig } from 'next'
 import path from 'path'
 
 const nextConfig: NextConfig = {
-  // Production optimizations
   compress: true,
   poweredByHeader: false,
   reactStrictMode: true,
-  
-  // Image optimization
+
   images: {
     formats: ['image/avif', 'image/webp'],
   },
-  
-  // Performance optimizations
+
   experimental: {
     optimizePackageImports: ['react', 'react-dom'],
   },
-  
-  // Output configuration
+
   output: 'standalone',
-  outputFileTracingRoot: path.join(__dirname, '../../'),
-  
-  // API rewrites for Docker/Dokploy deployment
+
+  // IMPORTANT: tracing root should be the folder that contains node_modules at build time
+  // In our Dockerfile, node_modules is at /app (which is built from coned-scraper/app)
+  // This maps to the "app" folder, so tracing root should be __dirname (not ../../)
+  outputFileTracingRoot: path.join(__dirname),
+
   async rewrites() {
     const apiBaseUrl = process.env.API_BASE_URL || 'http://localhost:8000'
     return [
