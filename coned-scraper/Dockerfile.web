@@ -1,33 +1,33 @@
 FROM node:20-bookworm-slim AS deps
 WORKDIR /app
 
-# If your package.json is inside ./app
+# Your Next.js package.json lives inside ./app
 COPY app/package*.json ./
 RUN npm ci
-
 
 FROM node:20-bookworm-slim AS builder
 WORKDIR /app
 
 COPY --from=deps /app/node_modules ./node_modules
 
-# Copy Next.js source from ./app into /app
+# Copy the full Next.js app source into the container
 COPY app/ ./
 
-# Build (requires next.config output: "standalone" OR next build produces .next/standalone)
+# Build Next.js (expects output: "standalone" in next.config.*)
 RUN npm run build
-
 
 FROM node:20-bookworm-slim AS runner
 WORKDIR /app
+
 ENV NODE_ENV=production
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 
-# Copy built application (standalone)
+# Copy built standalone output
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
 
 EXPOSE 3000
+
 CMD ["node", "server.js"]
