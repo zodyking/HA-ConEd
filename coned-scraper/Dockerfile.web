@@ -17,6 +17,7 @@ COPY app/ ./
 RUN chmod -R +x node_modules/.bin
 
 # Build Next.js
+ENV DOCKER_BUILD=true
 RUN npm run build
 
 

@@ -17,9 +17,9 @@ const nextConfig: NextConfig = {
   output: 'standalone',
 
   // IMPORTANT: tracing root should be the folder that contains node_modules at build time
-  // In our Dockerfile, node_modules is at /app (which is built from coned-scraper/app)
-  // This maps to the "app" folder, so tracing root should be __dirname (not ../../)
-  outputFileTracingRoot: path.join(__dirname),
+  // In Docker, this will be /app (the WORKDIR), so we use process.cwd() or relative path
+  // This ensures the build works both locally and in Docker
+  outputFileTracingRoot: process.env.DOCKER_BUILD ? '/app' : path.join(__dirname),
 
   async rewrites() {
     const apiBaseUrl = process.env.API_BASE_URL || 'http://localhost:8000'
