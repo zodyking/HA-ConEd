@@ -229,15 +229,22 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
   })
 
   // Group payments under their corresponding bills
+  // Logic: bill_cycle_date is the START of the billing cycle
+  // Bills are sorted newest first
+  // Payments made AFTER a bill is issued belong to that bill
+  // On Con Edison's site, payments appear BEFORE (above) the bill they're for
+  // In our UI, we show payments UNDER the bill
   const groupedBills: Array<{ bill: any, payments: Array<any> }> = []
   const assignedPaymentIndices = new Set<number>()
 
   bills.forEach((bill, billIndex) => {
     try {
-      const billCycleDateStr = bill.bill_cycle_date || bill.bill_date || ''
-      const billCycleEndDate = new Date(billCycleDateStr)
-      const previousBillCycleEndDate = billIndex > 0 
-        ? new Date(bills[billIndex - 1].bill_cycle_date || bills[billIndex - 1].bill_date || 0)
+      const billDateStr = bill.bill_cycle_date || bill.bill_date || ''
+      const billDate = new Date(billDateStr)
+      
+      // Get the next older bill's date (since bills are sorted newest first)
+      const nextOlderBillDate = billIndex < bills.length - 1
+        ? new Date(bills[billIndex + 1].bill_cycle_date || bills[billIndex + 1].bill_date || 0)
         : null
 
       const billPayments: Array<any> = []
@@ -253,10 +260,16 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
 
           let belongsToThisBill = false
 
-          if (previousBillCycleEndDate === null) {
-            belongsToThisBill = paymentDate > billCycleEndDate
+          // Payment belongs to this bill if:
+          // - Payment date is AFTER or EQUAL to this bill's date
+          // - AND (for newer bills) payment date is BEFORE the next older bill's date
+          // - OR (for the oldest bill) payment date is just after the bill date
+          if (nextOlderBillDate === null) {
+            // This is the oldest bill - take payments that are on or after this bill date
+            belongsToThisBill = paymentDate >= billDate
           } else {
-            belongsToThisBill = paymentDate > billCycleEndDate && paymentDate <= previousBillCycleEndDate
+            // This is a newer bill - take payments between this bill and the next older bill
+            belongsToThisBill = paymentDate >= billDate && paymentDate < nextOlderBillDate
           }
 
           if (belongsToThisBill) {
@@ -268,6 +281,7 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
         }
       })
 
+      // Sort payments within each bill by date (newest first)
       billPayments.sort((a: any, b: any) => {
         try {
           const dateA = new Date(a.bill_cycle_date || 0)
