@@ -107,60 +107,67 @@ async def run_scheduled_scrape():
         success = result.get('success', False)
         scraped_data = result.get('data', {})
         
-        # Send webhook and MQTT notifications only for changed values
+        # Send notifications: Webhooks only on changes, MQTT always publishes
         webhook_client = get_webhook_client()
         from mqtt_client import get_mqtt_client
         mqtt_client = get_mqtt_client()
         
-        if (webhook_client or mqtt_client) and success and scraped_data:
-            from webhook_client import has_data_changed
-            
-            # Get previous scrape data from database
-            previous_scrapes = get_latest_scraped_data(2)  # Get last 2 entries
-            previous_data = None
-            if len(previous_scrapes) > 1:
-                previous_data = previous_scrapes[1].get("data", {})
-            
-            # Check what changed
-            changes = has_data_changed(scraped_data, previous_data)
+        if success and scraped_data:
             timestamp = scraped_data.get("timestamp")
             
-            # Send account balance if changed
-            if changes.get("account_balance") and scraped_data.get("account_balance"):
-                if webhook_client:
-                    await webhook_client.send_account_balance(scraped_data["account_balance"], timestamp)
-                if mqtt_client:
+            # MQTT: Always publish after every successful scrape
+            if mqtt_client:
+                if scraped_data.get("account_balance"):
                     await mqtt_client.publish_account_balance(scraped_data["account_balance"], timestamp)
-            
-            # Extract bill history data
-            if scraped_data.get("bill_history"):
-                bill_history = scraped_data["bill_history"]
-                ledger = bill_history.get("ledger", [])
                 
-                # Find latest and previous bills, and last payment
-                bills = [item for item in ledger if item.get("type") == "bill"]
-                payments = [item for item in ledger if item.get("type") == "payment"]
-                
-                # Send latest bill if changed
-                if changes.get("latest_bill") and len(bills) > 0:
-                    if webhook_client:
-                        await webhook_client.send_latest_bill(bills[0], timestamp)
-                    if mqtt_client:
+                if scraped_data.get("bill_history"):
+                    bill_history = scraped_data["bill_history"]
+                    ledger = bill_history.get("ledger", [])
+                    bills = [item for item in ledger if item.get("type") == "bill"]
+                    payments = [item for item in ledger if item.get("type") == "payment"]
+                    
+                    if len(bills) > 0:
                         await mqtt_client.publish_latest_bill(bills[0], timestamp)
-                
-                # Send previous bill if changed
-                if changes.get("previous_bill") and len(bills) > 1:
-                    if webhook_client:
-                        await webhook_client.send_previous_bill(bills[1], timestamp)
-                    if mqtt_client:
+                    if len(bills) > 1:
                         await mqtt_client.publish_previous_bill(bills[1], timestamp)
-                
-                # Send last payment if changed
-                if changes.get("last_payment") and len(payments) > 0:
-                    if webhook_client:
-                        await webhook_client.send_last_payment(payments[0], timestamp)
-                    if mqtt_client:
+                    if len(payments) > 0:
                         await mqtt_client.publish_last_payment(payments[0], timestamp)
+            
+            # Webhooks: Only send for changed values
+            if webhook_client:
+                from webhook_client import has_data_changed
+                
+                # Get previous scrape data from database
+                previous_scrapes = get_latest_scraped_data(2)  # Get last 2 entries
+                previous_data = None
+                if len(previous_scrapes) > 1:
+                    previous_data = previous_scrapes[1].get("data", {})
+                
+                # Check what changed
+                changes = has_data_changed(scraped_data, previous_data)
+                
+                # Send account balance if changed
+                if changes.get("account_balance") and scraped_data.get("account_balance"):
+                    await webhook_client.send_account_balance(scraped_data["account_balance"], timestamp)
+                
+                # Extract bill history data
+                if scraped_data.get("bill_history"):
+                    bill_history = scraped_data["bill_history"]
+                    ledger = bill_history.get("ledger", [])
+                    bills = [item for item in ledger if item.get("type") == "bill"]
+                    payments = [item for item in ledger if item.get("type") == "payment"]
+                    
+                    # Send latest bill if changed
+                    if changes.get("latest_bill") and len(bills) > 0:
+                        await webhook_client.send_latest_bill(bills[0], timestamp)
+                    
+                    # Send previous bill if changed
+                    if changes.get("previous_bill") and len(bills) > 1:
+                        await webhook_client.send_previous_bill(bills[1], timestamp)
+                    
+                    # Send last payment if changed
+                    if changes.get("last_payment") and len(payments) > 0:
+                        await webhook_client.send_last_payment(payments[0], timestamp)
         
         duration = time_module.time() - start_time
         add_scrape_history(success, None if success else "Scrape failed", None, duration)
@@ -288,7 +295,7 @@ class MQTTConfigModel(BaseModel):
     mqtt_retain: bool = True
 
 class AppSettingsModel(BaseModel):
-    timezone: str = "America/New_York"
+    time_offset_hours: float = 0.0
     settings_password: str = "0000"
 
 def encrypt_data(data: str) -> str:
@@ -397,7 +404,7 @@ def load_app_settings() -> dict:
     if not SETTINGS_FILE.exists():
         # Create default settings
         default_settings = {
-            "timezone": "America/New_York",
+            "time_offset_hours": 0.0,
             "settings_password": "0000"
         }
         save_app_settings(default_settings)
@@ -406,12 +413,12 @@ def load_app_settings() -> dict:
     try:
         data = json.loads(SETTINGS_FILE.read_text())
         return {
-            "timezone": data.get("timezone", "America/New_York"),
+            "time_offset_hours": float(data.get("time_offset_hours", 0.0)),
             "settings_password": decrypt_data(data.get("settings_password", encrypt_data("0000"))) if data.get("settings_password") else "0000"
         }
     except Exception as e:
         add_log("warning", f"Failed to load app settings: {str(e)}")
-        return {"timezone": "America/New_York", "settings_password": "0000"}
+        return {"time_offset_hours": 0.0, "settings_password": "0000"}
 
 def verify_settings_password(password: str) -> bool:
     """Verify settings password"""
@@ -674,60 +681,67 @@ async def start_scraper():
         success = result.get('success', False)
         scraped_data = result.get('data', {})
         
-        # Send webhook and MQTT notifications only for changed values
+        # Send notifications: Webhooks only on changes, MQTT always publishes
         webhook_client = get_webhook_client()
         from mqtt_client import get_mqtt_client
         mqtt_client = get_mqtt_client()
         
-        if (webhook_client or mqtt_client) and success and scraped_data:
-            from webhook_client import has_data_changed
-            
-            # Get previous scrape data from database
-            previous_scrapes = get_latest_scraped_data(2)  # Get last 2 entries
-            previous_data = None
-            if len(previous_scrapes) > 1:
-                previous_data = previous_scrapes[1].get("data", {})
-            
-            # Check what changed
-            changes = has_data_changed(scraped_data, previous_data)
+        if success and scraped_data:
             timestamp = scraped_data.get("timestamp")
             
-            # Send account balance if changed
-            if changes.get("account_balance") and scraped_data.get("account_balance"):
-                if webhook_client:
-                    await webhook_client.send_account_balance(scraped_data["account_balance"], timestamp)
-                if mqtt_client:
+            # MQTT: Always publish after every successful scrape
+            if mqtt_client:
+                if scraped_data.get("account_balance"):
                     await mqtt_client.publish_account_balance(scraped_data["account_balance"], timestamp)
-            
-            # Extract bill history data
-            if scraped_data.get("bill_history"):
-                bill_history = scraped_data["bill_history"]
-                ledger = bill_history.get("ledger", [])
                 
-                # Find latest and previous bills, and last payment
-                bills = [item for item in ledger if item.get("type") == "bill"]
-                payments = [item for item in ledger if item.get("type") == "payment"]
-                
-                # Send latest bill if changed
-                if changes.get("latest_bill") and len(bills) > 0:
-                    if webhook_client:
-                        await webhook_client.send_latest_bill(bills[0], timestamp)
-                    if mqtt_client:
+                if scraped_data.get("bill_history"):
+                    bill_history = scraped_data["bill_history"]
+                    ledger = bill_history.get("ledger", [])
+                    bills = [item for item in ledger if item.get("type") == "bill"]
+                    payments = [item for item in ledger if item.get("type") == "payment"]
+                    
+                    if len(bills) > 0:
                         await mqtt_client.publish_latest_bill(bills[0], timestamp)
-                
-                # Send previous bill if changed
-                if changes.get("previous_bill") and len(bills) > 1:
-                    if webhook_client:
-                        await webhook_client.send_previous_bill(bills[1], timestamp)
-                    if mqtt_client:
+                    if len(bills) > 1:
                         await mqtt_client.publish_previous_bill(bills[1], timestamp)
-                
-                # Send last payment if changed
-                if changes.get("last_payment") and len(payments) > 0:
-                    if webhook_client:
-                        await webhook_client.send_last_payment(payments[0], timestamp)
-                    if mqtt_client:
+                    if len(payments) > 0:
                         await mqtt_client.publish_last_payment(payments[0], timestamp)
+            
+            # Webhooks: Only send for changed values
+            if webhook_client:
+                from webhook_client import has_data_changed
+                
+                # Get previous scrape data from database
+                previous_scrapes = get_latest_scraped_data(2)  # Get last 2 entries
+                previous_data = None
+                if len(previous_scrapes) > 1:
+                    previous_data = previous_scrapes[1].get("data", {})
+                
+                # Check what changed
+                changes = has_data_changed(scraped_data, previous_data)
+                
+                # Send account balance if changed
+                if changes.get("account_balance") and scraped_data.get("account_balance"):
+                    await webhook_client.send_account_balance(scraped_data["account_balance"], timestamp)
+                
+                # Extract bill history data
+                if scraped_data.get("bill_history"):
+                    bill_history = scraped_data["bill_history"]
+                    ledger = bill_history.get("ledger", [])
+                    bills = [item for item in ledger if item.get("type") == "bill"]
+                    payments = [item for item in ledger if item.get("type") == "payment"]
+                    
+                    # Send latest bill if changed
+                    if changes.get("latest_bill") and len(bills) > 0:
+                        await webhook_client.send_latest_bill(bills[0], timestamp)
+                    
+                    # Send previous bill if changed
+                    if changes.get("previous_bill") and len(bills) > 1:
+                        await webhook_client.send_previous_bill(bills[1], timestamp)
+                    
+                    # Send last payment if changed
+                    if changes.get("last_payment") and len(payments) > 0:
+                        await webhook_client.send_last_payment(payments[0], timestamp)
         
         duration = time_module.time() - start_time
         add_scrape_history(success, None if success else "Scrape failed", None, duration)

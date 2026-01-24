@@ -1,56 +1,66 @@
 /**
- * Timezone utility for consistent timestamp formatting across the app
+ * Time offset utility for manual time adjustment across the app
  */
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api'
 
-let cachedTimezone: string | null = null
-let timezonePromise: Promise<string> | null = null
+let cachedTimeOffset: number | null = null
+let timeOffsetPromise: Promise<number> | null = null
 
 /**
- * Get the configured timezone from the API
+ * Get the configured time offset from the API (in hours)
  */
-export async function getTimezone(): Promise<string> {
+export async function getTimeOffset(): Promise<number> {
   // Return cached value if available
-  if (cachedTimezone) {
-    return cachedTimezone
+  if (cachedTimeOffset !== null) {
+    return cachedTimeOffset
   }
 
   // Return existing promise if already fetching
-  if (timezonePromise) {
-    return timezonePromise
+  if (timeOffsetPromise) {
+    return timeOffsetPromise
   }
 
-  // Fetch timezone from API
-  timezonePromise = fetch(`${API_BASE_URL}/app-settings`)
+  // Fetch time offset from API
+  timeOffsetPromise = fetch(`${API_BASE_URL}/app-settings`)
     .then(response => response.json())
     .then(data => {
-      const tz = data.timezone || 'America/New_York'
-      cachedTimezone = tz
-      timezonePromise = null
-      return tz as string
+      const offset = parseFloat(data.time_offset_hours || 0)
+      cachedTimeOffset = offset
+      timeOffsetPromise = null
+      return offset as number
     })
     .catch(error => {
-      console.error('Failed to fetch timezone:', error)
-      const tz = 'America/New_York'
-      cachedTimezone = tz
-      timezonePromise = null
-      return tz as string
+      console.error('Failed to fetch time offset:', error)
+      const offset = 0
+      cachedTimeOffset = offset
+      timeOffsetPromise = null
+      return offset as number
     })
 
-  return timezonePromise
+  return timeOffsetPromise
 }
 
 /**
- * Format a timestamp using the configured timezone
+ * Apply time offset to a date
+ */
+function applyTimeOffset(date: Date, offsetHours: number): Date {
+  const adjusted = new Date(date)
+  adjusted.setHours(adjusted.getHours() + offsetHours)
+  return adjusted
+}
+
+/**
+ * Format a timestamp using the configured time offset
  */
 export async function formatTimestamp(
   timestamp: string | Date,
   options?: Intl.DateTimeFormatOptions
 ): Promise<string> {
   try {
-    const timezone = await getTimezone()
+    const offsetHours = await getTimeOffset()
     const date = typeof timestamp === 'string' ? new Date(timestamp) : timestamp
+    const adjustedDate = applyTimeOffset(date, offsetHours)
     
     const defaultOptions: Intl.DateTimeFormatOptions = {
       year: 'numeric',
@@ -60,11 +70,10 @@ export async function formatTimestamp(
       minute: '2-digit',
       second: '2-digit',
       hour12: true,
-      timeZone: timezone,
       ...options
     }
     
-    return date.toLocaleString('en-US', defaultOptions)
+    return adjustedDate.toLocaleString('en-US', defaultOptions)
   } catch (error) {
     console.error('Failed to format timestamp:', error)
     return String(timestamp)
@@ -72,25 +81,25 @@ export async function formatTimestamp(
 }
 
 /**
- * Format a date (without time) using the configured timezone
+ * Format a date (without time) using the configured time offset
  */
 export async function formatDate(
   timestamp: string | Date,
   options?: Intl.DateTimeFormatOptions
 ): Promise<string> {
   try {
-    const timezone = await getTimezone()
+    const offsetHours = await getTimeOffset()
     const date = typeof timestamp === 'string' ? new Date(timestamp) : timestamp
+    const adjustedDate = applyTimeOffset(date, offsetHours)
     
     const defaultOptions: Intl.DateTimeFormatOptions = {
       year: 'numeric',
       month: 'long',
       day: 'numeric',
-      timeZone: timezone,
       ...options
     }
     
-    return date.toLocaleDateString('en-US', defaultOptions)
+    return adjustedDate.toLocaleDateString('en-US', defaultOptions)
   } catch (error) {
     console.error('Failed to format date:', error)
     return String(timestamp)
@@ -98,26 +107,26 @@ export async function formatDate(
 }
 
 /**
- * Format a time (without date) using the configured timezone
+ * Format a time (without date) using the configured time offset
  */
 export async function formatTime(
   timestamp: string | Date,
   options?: Intl.DateTimeFormatOptions
 ): Promise<string> {
   try {
-    const timezone = await getTimezone()
+    const offsetHours = await getTimeOffset()
     const date = typeof timestamp === 'string' ? new Date(timestamp) : timestamp
+    const adjustedDate = applyTimeOffset(date, offsetHours)
     
     const defaultOptions: Intl.DateTimeFormatOptions = {
       hour: '2-digit',
       minute: '2-digit',
       second: '2-digit',
       hour12: true,
-      timeZone: timezone,
       ...options
     }
     
-    return date.toLocaleTimeString('en-US', defaultOptions)
+    return adjustedDate.toLocaleTimeString('en-US', defaultOptions)
   } catch (error) {
     console.error('Failed to format time:', error)
     return String(timestamp)
@@ -125,10 +134,10 @@ export async function formatTime(
 }
 
 /**
- * Clear the cached timezone (call after timezone settings change)
+ * Clear the cached time offset (call after time offset settings change)
  */
 export function clearTimezoneCache() {
-  cachedTimezone = null
-  timezonePromise = null
+  cachedTimeOffset = null
+  timeOffsetPromise = null
 }
 

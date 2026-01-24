@@ -51,15 +51,9 @@ export default function Settings() {
     return '•'.repeat(text.length)
   }
 
-  // Check password on mount
+  // Password lock always shows on mount (removed session persistence)
   useEffect(() => {
-    // For now, check if settings page should be locked
-    // In production, you might want to check session/local storage
-    const unlocked = sessionStorage.getItem('settings_unlocked')
-    if (unlocked === 'true') {
-      setIsUnlocked(true)
-      loadSettings()
-    }
+    // No automatic unlock - user must enter password every time
   }, [])
 
   // Load saved credentials on mount
@@ -609,7 +603,7 @@ function MQTTTab() {
 }
 
 function AppSettingsTab() {
-  const [timezone, setTimezone] = useState('America/New_York')
+  const [timeOffset, setTimeOffset] = useState('0')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [isLoading, setIsLoading] = useState(false)
@@ -624,7 +618,7 @@ function AppSettingsTab() {
       const response = await fetch(`${API_BASE_URL}/app-settings`)
       if (response.ok) {
         const data = await response.json()
-        setTimezone(data.timezone || 'America/New_York')
+        setTimeOffset(String(data.time_offset_hours || 0))
       }
     } catch (error) {
       console.error('Failed to load app settings:', error)
@@ -653,7 +647,7 @@ function AppSettingsTab() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          timezone: timezone.trim(),
+          time_offset_hours: parseFloat(timeOffset),
           settings_password: newPassword || '0000'
         }),
       })
@@ -662,15 +656,14 @@ function AppSettingsTab() {
         setMessage({ type: 'success', text: 'App settings saved successfully!' })
         setNewPassword('')
         setConfirmPassword('')
-        // Clear timezone cache so new timezone takes effect
+        // Clear time offset cache so new offset takes effect
         clearTimezoneCache()
         if (newPassword) {
-          sessionStorage.removeItem('settings_unlocked')
           setTimeout(() => {
             window.location.reload()
           }, 2000)
         } else {
-          // Reload to apply timezone changes
+          // Reload to apply time offset changes
           setTimeout(() => {
             window.location.reload()
           }, 1000)
@@ -695,24 +688,18 @@ function AppSettingsTab() {
       <div className="ha-card-content">
         <form onSubmit={handleSave}>
           <div className="ha-form-group">
-            <label htmlFor="timezone" className="ha-form-label">Timezone</label>
-            <select
-              id="timezone"
+            <label htmlFor="time-offset" className="ha-form-label">Time Offset (hours)</label>
+            <input
+              type="number"
+              step="0.5"
+              id="time-offset"
               className="ha-form-input"
-              value={timezone}
-              onChange={(e) => setTimezone(e.target.value)}
-            >
-              <option value="America/New_York">Eastern Time (ET)</option>
-              <option value="America/Chicago">Central Time (CT)</option>
-              <option value="America/Denver">Mountain Time (MT)</option>
-              <option value="America/Los_Angeles">Pacific Time (PT)</option>
-              <option value="America/Phoenix">Arizona Time (No DST)</option>
-              <option value="America/Anchorage">Alaska Time (AKT)</option>
-              <option value="Pacific/Honolulu">Hawaii Time (HST)</option>
-              <option value="UTC">UTC</option>
-            </select>
+              value={timeOffset}
+              onChange={(e) => setTimeOffset(e.target.value)}
+              placeholder="0"
+            />
             <div className="info-text">
-              Used for displaying timestamps throughout the app
+              Adjust displayed times by this many hours (e.g., -5 for EST, -8 for PST, 0 for UTC)
             </div>
           </div>
 
