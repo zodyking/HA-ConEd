@@ -25,15 +25,17 @@ export async function getTimezone(): Promise<string> {
   timezonePromise = fetch(`${API_BASE_URL}/app-settings`)
     .then(response => response.json())
     .then(data => {
-      cachedTimezone = data.timezone || 'America/New_York'
+      const tz = data.timezone || 'America/New_York'
+      cachedTimezone = tz
       timezonePromise = null
-      return cachedTimezone
+      return tz as string
     })
     .catch(error => {
       console.error('Failed to fetch timezone:', error)
-      cachedTimezone = 'America/New_York'
+      const tz = 'America/New_York'
+      cachedTimezone = tz
       timezonePromise = null
-      return cachedTimezone
+      return tz as string
     })
 
   return timezonePromise
