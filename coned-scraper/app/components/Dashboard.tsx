@@ -215,7 +215,6 @@ export default function Dashboard() {
   }
 
   const [formattedTimestamps, setFormattedTimestamps] = useState<Map<number, string>>(new Map())
-  const [latestTimestamp, setLatestTimestamp] = useState<{ date: string, time: string }>({ date: '', time: '' })
 
   // Format timestamps when logs change
   useEffect(() => {
@@ -233,20 +232,6 @@ export default function Dashboard() {
     }
     formatAllTimestamps()
   }, [logs])
-
-  // Format latest data timestamp
-  useEffect(() => {
-    if (latestData?.timestamp) {
-      Promise.all([
-        formatDate(latestData.timestamp),
-        formatTime(latestData.timestamp)
-      ]).then(([date, time]) => {
-        setLatestTimestamp({ date, time })
-      }).catch(() => {
-        setLatestTimestamp({ date: latestData.timestamp, time: '' })
-      })
-    }
-  }, [latestData])
 
   const getLogLevelClass = (level: string) => {
     switch (level.toLowerCase()) {
