@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-const PYTHON_API_URL = process.env.PYTHON_API_URL || 'http://127.0.0.1:8000'
+// Use API_BASE_URL from docker-compose.yml, fallback to PYTHON_API_URL or localhost
+const PYTHON_API_URL = process.env.API_BASE_URL || process.env.PYTHON_API_URL || 'http://127.0.0.1:8000'
 
 export async function GET(
   request: NextRequest,

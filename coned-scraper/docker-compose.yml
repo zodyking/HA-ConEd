@@ -11,6 +11,7 @@ services:
     depends_on:
       - api
     networks:
+      - internal
       - dokploy-network
     restart: unless-stopped
 
@@ -24,7 +25,7 @@ services:
     volumes:
       - api-data:/app/data
     networks:
-      - dokploy-network
+      - internal
     restart: unless-stopped
 
 volumes:
@@ -32,5 +33,7 @@ volumes:
     driver: local
 
 networks:
+  internal:
+    driver: bridge
   dokploy-network:
     external: true
