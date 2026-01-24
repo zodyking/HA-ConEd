@@ -1,26 +1,33 @@
-FROM node:20-alpine AS deps
+FROM node:20-bookworm-slim AS deps
 WORKDIR /app
+
+# If your package.json is inside ./app
 COPY app/package*.json ./
 RUN npm ci
 
-FROM node:20-alpine AS builder
+
+FROM node:20-bookworm-slim AS builder
 WORKDIR /app
+
 COPY --from=deps /app/node_modules ./node_modules
-COPY app/ .
+
+# Copy Next.js source from ./app into /app
+COPY app/ ./
+
+# Build (requires next.config output: "standalone" OR next build produces .next/standalone)
 RUN npm run build
 
-FROM node:20-alpine AS runner
+
+FROM node:20-bookworm-slim AS runner
 WORKDIR /app
 ENV NODE_ENV=production
+ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
 
-# Copy built application
+# Copy built application (standalone)
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
 
 EXPOSE 3000
-
-ENV PORT=3000
-ENV HOSTNAME="0.0.0.0"
-
 CMD ["node", "server.js"]
