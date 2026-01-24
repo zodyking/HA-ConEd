@@ -20,6 +20,17 @@ const nextConfig: NextConfig = {
   // Output configuration
   output: 'standalone',
   outputFileTracingRoot: path.join(__dirname, '../../'),
+  
+  // API rewrites for Docker/Dokploy deployment
+  async rewrites() {
+    const apiBaseUrl = process.env.API_BASE_URL || 'http://localhost:8000'
+    return [
+      {
+        source: '/api/:path*',
+        destination: `${apiBaseUrl}/:path*`,
+      },
+    ]
+  },
 }
 
 export default nextConfig

@@ -6,13 +6,14 @@ type AppRouteHandlerRoutes = "/api/[...slug]"
 type PageRoutes = never
 type LayoutRoutes = "/"
 type RedirectRoutes = never
-type RewriteRoutes = never
+type RewriteRoutes = "/api/[[...path]]"
 type Routes = AppRoutes | PageRoutes | LayoutRoutes | RedirectRoutes | RewriteRoutes | AppRouteHandlerRoutes
 
 
 interface ParamMap {
   "/": {}
   "/api/[...slug]": { "slug": string[]; }
+  "/api/[[...path]]": { "path"?: string[]; }
 }
 
 
