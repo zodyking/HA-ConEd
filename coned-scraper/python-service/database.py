@@ -43,6 +43,18 @@ def init_database():
         )
     ''')
     
+    # Create scrape_history table for tracking scrape runs
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS scrape_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            success INTEGER NOT NULL,
+            error_message TEXT,
+            failure_step TEXT,
+            duration_seconds REAL
+        )
+    ''')
+    
     conn.commit()
     conn.close()
 
@@ -202,6 +214,57 @@ def clear_logs():
     
     conn.commit()
     conn.close()
+
+def add_scrape_history(success: bool, error_message: Optional[str] = None, failure_step: Optional[str] = None, duration_seconds: Optional[float] = None):
+    """Add scrape history entry"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        INSERT INTO scrape_history (timestamp, success, error_message, failure_step, duration_seconds)
+        VALUES (?, ?, ?, ?, ?)
+    ''', (datetime.now().isoformat(), 1 if success else 0, error_message, failure_step, duration_seconds))
+    
+    # Keep only latest 100 entries
+    cursor.execute('''
+        DELETE FROM scrape_history
+        WHERE id NOT IN (
+            SELECT id FROM scrape_history
+            ORDER BY timestamp DESC
+            LIMIT 100
+        )
+    ''')
+    
+    conn.commit()
+    conn.close()
+
+def get_scrape_history(limit: int = 50) -> List[Dict[str, Any]]:
+    """Get scrape history entries"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        SELECT * FROM scrape_history
+        ORDER BY timestamp DESC
+        LIMIT ?
+    ''', (limit,))
+    
+    rows = cursor.fetchall()
+    conn.close()
+    
+    result = []
+    for row in rows:
+        result.append({
+            "id": row["id"],
+            "timestamp": row["timestamp"],
+            "success": bool(row["success"]),
+            "error_message": row["error_message"],
+            "failure_step": row["failure_step"],
+            "duration_seconds": row["duration_seconds"]
+        })
+    
+    return result
 
 # Initialize database on import
 init_database()

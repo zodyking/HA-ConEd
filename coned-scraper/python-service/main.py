@@ -13,7 +13,7 @@ import base64
 import hashlib
 import asyncio
 from datetime import datetime, timedelta
-from database import get_logs, get_latest_scraped_data, get_all_scraped_data, add_log, clear_logs
+from database import get_logs, get_latest_scraped_data, get_all_scraped_data, add_log, clear_logs, add_scrape_history, get_scrape_history
 
 app = FastAPI(title="ConEd Scraper API")
 
@@ -32,6 +32,8 @@ DATA_DIR = Path("./data")
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 CREDENTIALS_FILE = DATA_DIR / "credentials.json"
 WEBHOOKS_FILE = DATA_DIR / "webhooks.json"
+MQTT_CONFIG_FILE = DATA_DIR / "mqtt_config.json"
+SETTINGS_FILE = DATA_DIR / "app_settings.json"
 KEY_FILE = DATA_DIR / ".key"
 
 # Encryption key management
@@ -82,10 +84,14 @@ def save_schedule(enabled: bool, frequency: int):
 
 async def run_scheduled_scrape():
     """Run a scheduled scrape"""
+    import time as time_module
+    start_time = time_module.time()
+    
     try:
         credentials = load_credentials()
         if not credentials:
             add_log("warning", "Scheduled scrape skipped: No credentials found")
+            add_scrape_history(False, "No credentials found", "credentials_check", 0)
             return
         
         from browser_automation import perform_login
@@ -101,9 +107,12 @@ async def run_scheduled_scrape():
         success = result.get('success', False)
         scraped_data = result.get('data', {})
         
-        # Send webhook notifications only for changed values
+        # Send webhook and MQTT notifications only for changed values
         webhook_client = get_webhook_client()
-        if webhook_client and success and scraped_data:
+        from mqtt_client import get_mqtt_client
+        mqtt_client = get_mqtt_client()
+        
+        if (webhook_client or mqtt_client) and success and scraped_data:
             from webhook_client import has_data_changed
             
             # Get previous scrape data from database
@@ -118,10 +127,10 @@ async def run_scheduled_scrape():
             
             # Send account balance if changed
             if changes.get("account_balance") and scraped_data.get("account_balance"):
-                await webhook_client.send_account_balance(
-                    scraped_data["account_balance"],
-                    timestamp
-                )
+                if webhook_client:
+                    await webhook_client.send_account_balance(scraped_data["account_balance"], timestamp)
+                if mqtt_client:
+                    await mqtt_client.publish_account_balance(scraped_data["account_balance"], timestamp)
             
             # Extract bill history data
             if scraped_data.get("bill_history"):
@@ -134,19 +143,32 @@ async def run_scheduled_scrape():
                 
                 # Send latest bill if changed
                 if changes.get("latest_bill") and len(bills) > 0:
-                    await webhook_client.send_latest_bill(bills[0], timestamp)
+                    if webhook_client:
+                        await webhook_client.send_latest_bill(bills[0], timestamp)
+                    if mqtt_client:
+                        await mqtt_client.publish_latest_bill(bills[0], timestamp)
                 
                 # Send previous bill if changed
                 if changes.get("previous_bill") and len(bills) > 1:
-                    await webhook_client.send_previous_bill(bills[1], timestamp)
+                    if webhook_client:
+                        await webhook_client.send_previous_bill(bills[1], timestamp)
+                    if mqtt_client:
+                        await mqtt_client.publish_previous_bill(bills[1], timestamp)
                 
                 # Send last payment if changed
                 if changes.get("last_payment") and len(payments) > 0:
-                    await webhook_client.send_last_payment(payments[0], timestamp)
+                    if webhook_client:
+                        await webhook_client.send_last_payment(payments[0], timestamp)
+                    if mqtt_client:
+                        await mqtt_client.publish_last_payment(payments[0], timestamp)
         
+        duration = time_module.time() - start_time
+        add_scrape_history(success, None if success else "Scrape failed", None, duration)
         add_log("success", f"Scheduled scrape completed: {success}")
     except Exception as e:
+        duration = time_module.time() - start_time
         error_msg = f"Scheduled scrape failed: {str(e)}"
+        add_scrape_history(False, error_msg, "unknown", duration)
         add_log("error", error_msg)
         logging.error(error_msg)
 
@@ -209,6 +231,23 @@ async def startup_event():
     except Exception as e:
         add_log("warning", f"Webhook initialization failed: {e}")
     
+    # Initialize MQTT client from saved configuration
+    try:
+        from mqtt_client import init_mqtt_client
+        mqtt_config = load_mqtt_config()
+        if mqtt_config.get("mqtt_url"):
+            init_mqtt_client(
+                mqtt_config.get("mqtt_url", ""),
+                mqtt_config.get("mqtt_username", ""),
+                mqtt_config.get("mqtt_password", ""),
+                mqtt_config.get("mqtt_base_topic", "coned"),
+                mqtt_config.get("mqtt_qos", 1),
+                mqtt_config.get("mqtt_retain", True)
+            )
+            add_log("info", "MQTT client initialized")
+    except Exception as e:
+        add_log("warning", f"MQTT initialization failed: {e}")
+    
     schedule = load_schedule()
     if schedule["enabled"]:
         _scheduler_task = asyncio.create_task(scheduler_loop())
@@ -239,6 +278,18 @@ class WebhookConfigModel(BaseModel):
     previous_bill: str = ""
     account_balance: str = ""
     last_payment: str = ""
+
+class MQTTConfigModel(BaseModel):
+    mqtt_url: str = ""
+    mqtt_username: str = ""
+    mqtt_password: str = ""
+    mqtt_base_topic: str = "coned"
+    mqtt_qos: int = 1
+    mqtt_retain: bool = True
+
+class AppSettingsModel(BaseModel):
+    timezone: str = "America/New_York"
+    settings_password: str = "0000"
 
 def encrypt_data(data: str) -> str:
     """Encrypt sensitive data"""
@@ -299,6 +350,73 @@ def load_webhook_config() -> dict:
     except Exception as e:
         add_log("warning", f"Failed to load webhooks: {str(e)}")
         return {}
+
+def save_mqtt_config(mqtt_config: dict):
+    """Save MQTT configuration to file"""
+    config_data = {
+        "mqtt_url": mqtt_config.get("mqtt_url", ""),
+        "mqtt_username": mqtt_config.get("mqtt_username", ""),
+        "mqtt_password": encrypt_data(mqtt_config.get("mqtt_password", "")),  # Encrypt password
+        "mqtt_base_topic": mqtt_config.get("mqtt_base_topic", "coned"),
+        "mqtt_qos": mqtt_config.get("mqtt_qos", 1),
+        "mqtt_retain": mqtt_config.get("mqtt_retain", True),
+        "updated_at": datetime.now().isoformat()
+    }
+    MQTT_CONFIG_FILE.write_text(json.dumps(config_data))
+
+def load_mqtt_config() -> dict:
+    """Load MQTT configuration from file"""
+    if not MQTT_CONFIG_FILE.exists():
+        return {}
+    
+    try:
+        data = json.loads(MQTT_CONFIG_FILE.read_text())
+        return {
+            "mqtt_url": data.get("mqtt_url", ""),
+            "mqtt_username": data.get("mqtt_username", ""),
+            "mqtt_password": decrypt_data(data.get("mqtt_password", "")) if data.get("mqtt_password") else "",
+            "mqtt_base_topic": data.get("mqtt_base_topic", "coned"),
+            "mqtt_qos": data.get("mqtt_qos", 1),
+            "mqtt_retain": data.get("mqtt_retain", True)
+        }
+    except Exception as e:
+        add_log("warning", f"Failed to load MQTT config: {str(e)}")
+        return {}
+
+def save_app_settings(settings: dict):
+    """Save app settings (timezone, password) to file"""
+    settings_data = {
+        "timezone": settings.get("timezone", "America/New_York"),
+        "settings_password": encrypt_data(settings.get("settings_password", "0000")),
+        "updated_at": datetime.now().isoformat()
+    }
+    SETTINGS_FILE.write_text(json.dumps(settings_data))
+
+def load_app_settings() -> dict:
+    """Load app settings from file"""
+    if not SETTINGS_FILE.exists():
+        # Create default settings
+        default_settings = {
+            "timezone": "America/New_York",
+            "settings_password": "0000"
+        }
+        save_app_settings(default_settings)
+        return default_settings
+    
+    try:
+        data = json.loads(SETTINGS_FILE.read_text())
+        return {
+            "timezone": data.get("timezone", "America/New_York"),
+            "settings_password": decrypt_data(data.get("settings_password", encrypt_data("0000"))) if data.get("settings_password") else "0000"
+        }
+    except Exception as e:
+        add_log("warning", f"Failed to load app settings: {str(e)}")
+        return {"timezone": "America/New_York", "settings_password": "0000"}
+
+def verify_settings_password(password: str) -> bool:
+    """Verify settings password"""
+    settings = load_app_settings()
+    return settings.get("settings_password") == password
 
 @app.get("/")
 async def root():
@@ -528,11 +646,15 @@ async def get_settings():
 @app.post("/api/scrape")
 async def start_scraper():
     """Start scraper automation"""
+    import time as time_module
+    start_time = time_module.time()
+    
     from browser_automation import perform_login
     from webhook_client import get_webhook_client
     
     credentials = load_credentials()
     if not credentials:
+        add_scrape_history(False, "No credentials found", "credentials_check", 0)
         raise HTTPException(status_code=404, detail="No credentials found. Please configure settings first.")
     
     # Clear previous logs when starting a new scrape
@@ -552,9 +674,12 @@ async def start_scraper():
         success = result.get('success', False)
         scraped_data = result.get('data', {})
         
-        # Send webhook notifications only for changed values
+        # Send webhook and MQTT notifications only for changed values
         webhook_client = get_webhook_client()
-        if webhook_client and success and scraped_data:
+        from mqtt_client import get_mqtt_client
+        mqtt_client = get_mqtt_client()
+        
+        if (webhook_client or mqtt_client) and success and scraped_data:
             from webhook_client import has_data_changed
             
             # Get previous scrape data from database
@@ -569,10 +694,10 @@ async def start_scraper():
             
             # Send account balance if changed
             if changes.get("account_balance") and scraped_data.get("account_balance"):
-                await webhook_client.send_account_balance(
-                    scraped_data["account_balance"],
-                    timestamp
-                )
+                if webhook_client:
+                    await webhook_client.send_account_balance(scraped_data["account_balance"], timestamp)
+                if mqtt_client:
+                    await mqtt_client.publish_account_balance(scraped_data["account_balance"], timestamp)
             
             # Extract bill history data
             if scraped_data.get("bill_history"):
@@ -585,22 +710,142 @@ async def start_scraper():
                 
                 # Send latest bill if changed
                 if changes.get("latest_bill") and len(bills) > 0:
-                    await webhook_client.send_latest_bill(bills[0], timestamp)
+                    if webhook_client:
+                        await webhook_client.send_latest_bill(bills[0], timestamp)
+                    if mqtt_client:
+                        await mqtt_client.publish_latest_bill(bills[0], timestamp)
                 
                 # Send previous bill if changed
                 if changes.get("previous_bill") and len(bills) > 1:
-                    await webhook_client.send_previous_bill(bills[1], timestamp)
+                    if webhook_client:
+                        await webhook_client.send_previous_bill(bills[1], timestamp)
+                    if mqtt_client:
+                        await mqtt_client.publish_previous_bill(bills[1], timestamp)
                 
                 # Send last payment if changed
                 if changes.get("last_payment") and len(payments) > 0:
-                    await webhook_client.send_last_payment(payments[0], timestamp)
+                    if webhook_client:
+                        await webhook_client.send_last_payment(payments[0], timestamp)
+                    if mqtt_client:
+                        await mqtt_client.publish_last_payment(payments[0], timestamp)
         
+        duration = time_module.time() - start_time
+        add_scrape_history(success, None if success else "Scrape failed", None, duration)
         add_log("success", f"Scraper completed: {success}")
         return result
     except Exception as e:
+        duration = time_module.time() - start_time
         error_msg = str(e)
+        add_scrape_history(False, error_msg, "unknown", duration)
         add_log("error", f"Scraper failed: {error_msg}")
         raise HTTPException(status_code=500, detail=error_msg)
+
+@app.post("/api/mqtt-config")
+async def configure_mqtt(config: MQTTConfigModel):
+    """Configure MQTT settings"""
+    try:
+        from mqtt_client import init_mqtt_client
+        
+        # Build MQTT config dict
+        mqtt_config = {
+            "mqtt_url": config.mqtt_url.strip(),
+            "mqtt_username": config.mqtt_username.strip(),
+            "mqtt_password": config.mqtt_password.strip(),
+            "mqtt_base_topic": config.mqtt_base_topic.strip() or "coned",
+            "mqtt_qos": config.mqtt_qos,
+            "mqtt_retain": config.mqtt_retain
+        }
+        
+        # Save to file for persistence
+        save_mqtt_config(mqtt_config)
+        
+        # Initialize MQTT client with new config
+        if mqtt_config.get("mqtt_url"):
+            init_mqtt_client(
+                mqtt_config["mqtt_url"],
+                mqtt_config["mqtt_username"],
+                mqtt_config["mqtt_password"],
+                mqtt_config["mqtt_base_topic"],
+                mqtt_config["mqtt_qos"],
+                mqtt_config["mqtt_retain"]
+            )
+            add_log("success", "MQTT configured successfully")
+        else:
+            add_log("info", "MQTT disabled (no URL provided)")
+        
+        return {"message": "MQTT configured successfully"}
+    except Exception as e:
+        error_msg = f"Failed to configure MQTT: {str(e)}"
+        add_log("error", error_msg)
+        raise HTTPException(status_code=500, detail=error_msg)
+
+@app.get("/api/mqtt-config")
+async def get_mqtt_config():
+    """Get current MQTT configuration"""
+    try:
+        mqtt_config = load_mqtt_config()
+        # Don't return the password
+        return {
+            "mqtt_url": mqtt_config.get("mqtt_url", ""),
+            "mqtt_username": mqtt_config.get("mqtt_username", ""),
+            "mqtt_password": "***" * (len(mqtt_config.get("mqtt_password", "")) if mqtt_config.get("mqtt_password") else 0),
+            "mqtt_base_topic": mqtt_config.get("mqtt_base_topic", "coned"),
+            "mqtt_qos": mqtt_config.get("mqtt_qos", 1),
+            "mqtt_retain": mqtt_config.get("mqtt_retain", True)
+        }
+    except Exception as e:
+        add_log("error", f"Failed to get MQTT config: {str(e)}")
+        return {
+            "mqtt_url": "",
+            "mqtt_username": "",
+            "mqtt_password": "",
+            "mqtt_base_topic": "coned",
+            "mqtt_qos": 1,
+            "mqtt_retain": True
+        }
+
+@app.post("/api/app-settings")
+async def save_app_settings_endpoint(settings: AppSettingsModel):
+    """Save app settings (timezone, password)"""
+    try:
+        settings_dict = {
+            "timezone": settings.timezone.strip() or "America/New_York",
+            "settings_password": settings.settings_password.strip()
+        }
+        save_app_settings(settings_dict)
+        add_log("success", "App settings saved successfully")
+        return {"message": "Settings saved successfully"}
+    except Exception as e:
+        error_msg = f"Failed to save app settings: {str(e)}"
+        add_log("error", error_msg)
+        raise HTTPException(status_code=500, detail=error_msg)
+
+@app.get("/api/app-settings")
+async def get_app_settings_endpoint():
+    """Get app settings"""
+    try:
+        settings = load_app_settings()
+        # Don't return the password
+        return {
+            "timezone": settings.get("timezone", "America/New_York"),
+            "has_password": bool(settings.get("settings_password"))
+        }
+    except Exception as e:
+        add_log("error", f"Failed to get app settings: {str(e)}")
+        return {"timezone": "America/New_York", "has_password": True}
+
+class PasswordVerifyModel(BaseModel):
+    password: str
+
+@app.post("/api/app-settings/verify-password")
+async def verify_password_endpoint(data: PasswordVerifyModel):
+    """Verify settings password"""
+    try:
+        is_valid = verify_settings_password(data.password)
+        return {"valid": is_valid}
+    except Exception as e:
+        add_log("error", f"Failed to verify password: {str(e)}")
+        return {"valid": False}
 
 @app.get("/api/logs")
 async def get_logs_endpoint(limit: int = 100):
@@ -613,6 +858,12 @@ async def clear_logs_endpoint():
     """Clear all log entries"""
     clear_logs()
     return {"message": "Logs cleared successfully"}
+
+@app.get("/api/scrape-history")
+async def get_scrape_history_endpoint(limit: int = 50):
+    """Get scrape history"""
+    history = get_scrape_history(limit)
+    return {"history": history}
 
 @app.get("/api/scraped-data")
 async def get_scraped_data_endpoint(limit: int = 100):
