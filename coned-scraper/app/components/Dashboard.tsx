@@ -213,34 +213,39 @@ export default function Dashboard() {
     }
   }
 
-  const formatTimestamp = (timestamp: string) => {
-    try {
-      const date = new Date(timestamp)
-      const dateStr = date.toLocaleDateString('en-US', { 
-        year: 'numeric', 
-        month: 'long', 
-        day: 'numeric' 
-      })
-      const timeStr = date.toLocaleTimeString('en-US', { 
-        hour: '2-digit', 
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: true
-      })
-      return { date: dateStr, time: timeStr }
-    } catch {
-      return { date: timestamp, time: '' }
-    }
-  }
+  const [formattedTimestamps, setFormattedTimestamps] = useState<Map<number, string>>(new Map())
+  const [latestTimestamp, setLatestTimestamp] = useState<{ date: string, time: string }>({ date: '', time: '' })
 
-  const formatTimestampForLogs = (timestamp: string) => {
-    try {
-      const date = new Date(timestamp)
-      return date.toLocaleString()
-    } catch {
-      return timestamp
+  // Format timestamps when logs change
+  useEffect(() => {
+    const formatAllTimestamps = async () => {
+      const newMap = new Map<number, string>()
+      for (const log of logs) {
+        try {
+          const formatted = await formatTimestamp(log.timestamp)
+          newMap.set(log.id, formatted)
+        } catch {
+          newMap.set(log.id, log.timestamp)
+        }
+      }
+      setFormattedTimestamps(newMap)
     }
-  }
+    formatAllTimestamps()
+  }, [logs])
+
+  // Format latest data timestamp
+  useEffect(() => {
+    if (latestData?.timestamp) {
+      Promise.all([
+        formatDate(latestData.timestamp),
+        formatTime(latestData.timestamp)
+      ]).then(([date, time]) => {
+        setLatestTimestamp({ date, time })
+      }).catch(() => {
+        setLatestTimestamp({ date: latestData.timestamp, time: '' })
+      })
+    }
+  }, [latestData])
 
   const getLogLevelClass = (level: string) => {
     switch (level.toLowerCase()) {
@@ -310,7 +315,7 @@ export default function Dashboard() {
             ) : (
               logs.map((log) => (
                 <div key={log.id} className={`ha-log-entry ha-log-${log.level.toLowerCase()}`}>
-                  <span className="ha-log-time">{formatTimestampForLogs(log.timestamp)}</span>
+                  <span className="ha-log-time">{formattedTimestamps.get(log.id) || log.timestamp}</span>
                   <span className={getLogLevelClass(log.level)}>[{log.level.toUpperCase()}]</span>
                   <span className="ha-log-message">{log.message}</span>
                 </div>

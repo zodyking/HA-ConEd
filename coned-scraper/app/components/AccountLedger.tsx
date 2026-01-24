@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { formatDate, formatTime } from '../lib/timezone'
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api'
 
@@ -26,11 +27,10 @@ interface ScrapedData {
   screenshot_path?: string
 }
 
-function formatTimestamp(timestamp: string): { date: string, time: string } {
+async function formatTimestampWithTZ(timestamp: string): Promise<{ date: string, time: string }> {
   try {
-    const date = new Date(timestamp)
-    const dateStr = date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
-    const timeStr = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })
+    const dateStr = await formatDate(timestamp)
+    const timeStr = await formatTime(timestamp)
     return { date: dateStr, time: timeStr }
   } catch {
     return { date: timestamp, time: '' }
@@ -41,6 +41,7 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
   const [scrapedData, setScrapedData] = useState<ScrapedData[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [apiError, setApiError] = useState<string | null>(null)
+  const [formattedTimestamp, setFormattedTimestamp] = useState<{ date: string, time: string }>({ date: '', time: '' })
 
   const loadScrapedData = useCallback(async () => {
     try {
@@ -65,6 +66,13 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
     const interval = setInterval(loadScrapedData, 30000)
     return () => clearInterval(interval)
   }, [loadScrapedData])
+
+  // Format timestamp when data changes
+  useEffect(() => {
+    if (scrapedData.length > 0) {
+      formatTimestampWithTZ(scrapedData[0].timestamp).then(setFormattedTimestamp)
+    }
+  }, [scrapedData])
 
   if (isLoading) {
     return (
@@ -187,7 +195,6 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
   }
 
   const latestData = scrapedData[0]
-  const timestamp = formatTimestamp(latestData.timestamp)
   const accountBalance = latestData.data?.account_balance || '-'
   const screenshotPath = latestData.screenshot_path
   const billHistory = latestData.data?.bill_history
@@ -325,8 +332,8 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
         </div>
         <div className="ha-card-content">
           <div className="ha-summary-grid">
-            <strong>Date:</strong> <span>{timestamp.date}</span>
-            <strong>Time:</strong> <span>{timestamp.time}</span>
+            <strong>Date:</strong> <span>{formattedTimestamp.date}</span>
+            <strong>Time:</strong> <span>{formattedTimestamp.time}</span>
             <strong>Account Balance:</strong> <span className="ha-summary-balance">{accountBalance}</span>
             {screenshotPath && (
               <>

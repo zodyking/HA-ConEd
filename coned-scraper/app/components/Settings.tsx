@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { formatTimestamp as formatTZ, clearTimezoneCache } from '../lib/timezone'
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api'
 
@@ -661,11 +662,18 @@ function AppSettingsTab() {
         setMessage({ type: 'success', text: 'App settings saved successfully!' })
         setNewPassword('')
         setConfirmPassword('')
+        // Clear timezone cache so new timezone takes effect
+        clearTimezoneCache()
         if (newPassword) {
           sessionStorage.removeItem('settings_unlocked')
           setTimeout(() => {
             window.location.reload()
           }, 2000)
+        } else {
+          // Reload to apply timezone changes
+          setTimeout(() => {
+            window.location.reload()
+          }, 1000)
         }
       } else {
         const error = await response.json()
@@ -991,6 +999,7 @@ function AutomatedScrapeTab() {
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
   const [status, setStatus] = useState<{ enabled: boolean, frequency: number, nextRun?: string } | null>(null)
   const [scrapeHistory, setScrapeHistory] = useState<ScrapeHistoryEntry[]>([])
+  const [formattedTimestamps, setFormattedTimestamps] = useState<Map<number, string>>(new Map())
 
   useEffect(() => {
     loadSchedule()
@@ -998,6 +1007,23 @@ function AutomatedScrapeTab() {
     const interval = setInterval(loadScrapeHistory, 30000) // Refresh every 30s
     return () => clearInterval(interval)
   }, [])
+
+  // Format timestamps when history changes
+  useEffect(() => {
+    const formatAllTimestamps = async () => {
+      const newMap = new Map<number, string>()
+      for (const entry of scrapeHistory) {
+        try {
+          const formatted = await formatTZ(entry.timestamp)
+          newMap.set(entry.id, formatted)
+        } catch {
+          newMap.set(entry.id, entry.timestamp)
+        }
+      }
+      setFormattedTimestamps(newMap)
+    }
+    formatAllTimestamps()
+  }, [scrapeHistory])
 
   const loadSchedule = async () => {
     try {
@@ -1074,13 +1100,6 @@ function AutomatedScrapeTab() {
     return `${seconds.toFixed(1)}s`
   }
 
-  const formatTimestamp = (timestamp: string) => {
-    try {
-      return new Date(timestamp).toLocaleString()
-    } catch {
-      return timestamp
-    }
-  }
 
   return (
     <>
@@ -1171,7 +1190,7 @@ function AutomatedScrapeTab() {
           {status && status.enabled && status.nextRun && (
             <div className="ha-card ha-card-status" style={{ marginTop: '1rem' }}>
               <div className="ha-card-content">
-                <strong>Next scheduled run:</strong> {new Date(status.nextRun).toLocaleString()}
+                <strong>Next scheduled run:</strong> <NextRunTime timestamp={status.nextRun} />
               </div>
             </div>
           )}
@@ -1202,7 +1221,7 @@ function AutomatedScrapeTab() {
                   {scrapeHistory.map((entry) => (
                     <tr key={entry.id} style={{ borderBottom: '1px solid #eee' }}>
                       <td style={{ padding: '0.75rem 0.5rem' }}>
-                        {formatTimestamp(entry.timestamp)}
+                        {formattedTimestamps.get(entry.id) || entry.timestamp}
                       </td>
                       <td style={{ padding: '0.75rem 0.5rem' }}>
                         <span style={{
@@ -1241,4 +1260,14 @@ function AutomatedScrapeTab() {
       </div>
     </>
   )
+}
+
+function NextRunTime({ timestamp }: { timestamp: string }) {
+  const [formatted, setFormatted] = useState(timestamp)
+  
+  useEffect(() => {
+    formatTZ(timestamp).then(setFormatted).catch(() => setFormatted(timestamp))
+  }, [timestamp])
+  
+  return <span>{formatted}</span>
 }
