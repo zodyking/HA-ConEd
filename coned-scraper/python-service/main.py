@@ -126,6 +126,11 @@ async def run_scheduled_scrape():
                     bills = [item for item in ledger if item.get("type") == "bill"]
                     payments = [item for item in ledger if item.get("type") == "payment"]
                     
+                    # Sort bills by date (newest first)
+                    bills.sort(key=lambda x: x.get("bill_cycle_date") or x.get("bill_date") or "", reverse=True)
+                    # Sort payments by date (newest first)
+                    payments.sort(key=lambda x: x.get("payment_date") or x.get("bill_cycle_date") or "", reverse=True)
+                    
                     if len(bills) > 0:
                         await mqtt_client.publish_latest_bill(bills[0], timestamp)
                     if len(bills) > 1:
