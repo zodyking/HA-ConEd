@@ -602,7 +602,7 @@ function MQTTTab() {
 }
 
 function AppSettingsTab() {
-  const [timeOffset, setTimeOffset] = useState('0')
+  const [currentTime, setCurrentTime] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [isLoading, setIsLoading] = useState(false)
@@ -610,17 +610,57 @@ function AppSettingsTab() {
 
   useEffect(() => {
     loadAppSettings()
+    // Update current time display every second
+    const interval = setInterval(() => {
+      const now = new Date()
+      setCurrentTime(now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }))
+    }, 1000)
+    return () => clearInterval(interval)
   }, [])
 
   const loadAppSettings = async () => {
     try {
       const response = await fetch(`${API_BASE_URL}/app-settings`)
       if (response.ok) {
-        const data = await response.json()
-        setTimeOffset(String(data.time_offset_hours || 0))
+        // Just load settings, don't need to display offset
       }
     } catch (error) {
       console.error('Failed to load app settings:', error)
+    }
+  }
+
+  const handleSetTime = async (userTime: string) => {
+    // User enters what time they think it is now (e.g., "8:42 AM")
+    // Calculate offset from system time
+    try {
+      const userDate = new Date(`1970-01-01 ${userTime}`)
+      const systemDate = new Date()
+      
+      const userMinutes = userDate.getHours() * 60 + userDate.getMinutes()
+      const systemMinutes = systemDate.getHours() * 60 + systemDate.getMinutes()
+      
+      const offsetMinutes = userMinutes - systemMinutes
+      const offsetHours = offsetMinutes / 60
+      
+      const response = await fetch(`${API_BASE_URL}/app-settings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          time_offset_hours: offsetHours,
+          settings_password: '0000'
+        }),
+      })
+
+      if (response.ok) {
+        setMessage({ type: 'success', text: 'Time adjusted successfully!' })
+        clearTimezoneCache()
+        setTimeout(() => window.location.reload(), 1000)
+      } else {
+        const error = await response.json()
+        setMessage({ type: 'error', text: error.detail || 'Failed to save time' })
+      }
+    } catch (error) {
+      setMessage({ type: 'error', text: 'Invalid time format. Use format like "8:42 AM"' })
     }
   }
 
@@ -646,26 +686,19 @@ function AppSettingsTab() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          time_offset_hours: parseFloat(timeOffset),
+          time_offset_hours: 0,
           settings_password: newPassword || '0000'
         }),
       })
 
       if (response.ok) {
-        setMessage({ type: 'success', text: 'App settings saved successfully!' })
+        setMessage({ type: 'success', text: 'Password changed successfully!' })
         setNewPassword('')
         setConfirmPassword('')
-        // Clear time offset cache so new offset takes effect
-        clearTimezoneCache()
         if (newPassword) {
           setTimeout(() => {
             window.location.reload()
           }, 2000)
-        } else {
-          // Reload to apply time offset changes
-          setTimeout(() => {
-            window.location.reload()
-          }, 1000)
         }
       } else {
         const error = await response.json()
@@ -685,22 +718,64 @@ function AppSettingsTab() {
         <span>App Settings</span>
       </div>
       <div className="ha-card-content">
-        <form onSubmit={handleSave}>
+        <div style={{ marginBottom: '2rem' }}>
           <div className="ha-form-group">
-            <label htmlFor="time-offset" className="ha-form-label">Time Offset (hours)</label>
-            <input
-              type="number"
-              step="0.5"
-              id="time-offset"
-              className="ha-form-input"
-              value={timeOffset}
-              onChange={(e) => setTimeOffset(e.target.value)}
-              placeholder="0"
-            />
+            <label className="ha-form-label">Set Current Time</label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.5rem' }}>
+              <div style={{ 
+                padding: '0.75rem 1.25rem',
+                background: '#f5f5f5',
+                borderRadius: '4px',
+                fontFamily: 'monospace',
+                fontSize: '1.5rem',
+                fontWeight: 'bold',
+                color: '#03a9f4',
+                minWidth: '140px',
+                textAlign: 'center'
+              }}>
+                {currentTime || '--:--:--'}
+              </div>
+              <span style={{ color: '#666' }}>← System Time</span>
+            </div>
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-end' }}>
+              <div style={{ flex: 1 }}>
+                <input
+                  type="time"
+                  id="user-time"
+                  className="ha-form-input"
+                  placeholder="8:42 AM"
+                  style={{ fontSize: '1.1rem' }}
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  const input = document.getElementById('user-time') as HTMLInputElement
+                  if (input.value) {
+                    const [hours, minutes] = input.value.split(':')
+                    const hour = parseInt(hours)
+                    const ampm = hour >= 12 ? 'PM' : 'AM'
+                    const hour12 = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour
+                    handleSetTime(`${hour12}:${minutes} ${ampm}`)
+                  }
+                }}
+                className="ha-button ha-button-primary"
+                style={{ whiteSpace: 'nowrap' }}
+              >
+                Set Time
+              </button>
+            </div>
             <div className="info-text">
-              Adjust displayed times by this many hours (e.g., -5 for EST, -8 for PST, 0 for UTC)
+              Enter what the current time should be, and the app will adjust all timestamps accordingly
             </div>
           </div>
+        </div>
+
+        <form onSubmit={handleSave}>
+          <div className="ha-form-group" style={{ marginTop: '2rem', paddingTop: '2rem', borderTop: '1px solid #e0e0e0' }}>
+            <div style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '1rem', color: '#333' }}>
+              Change Settings Password
+            </div>
 
           <div className="ha-form-group">
             <label htmlFor="new-password" className="ha-form-label">
