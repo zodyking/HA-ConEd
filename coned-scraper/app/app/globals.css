@@ -295,6 +295,7 @@ body {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  max-height: calc(100vh - 350px);
 }
 
 .ha-log-container {
@@ -307,6 +308,7 @@ body {
   flex: 1;
   overflow-y: auto;
   min-height: 0;
+  max-height: 100%;
 }
 
 .ha-log-entry {
