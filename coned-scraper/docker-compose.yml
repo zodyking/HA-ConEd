@@ -1,4 +1,4 @@
-version: '3.8'
+version: "3.8"
 
 services:
   web:
@@ -6,8 +6,8 @@ services:
       context: .
       dockerfile: Dockerfile.web
     environment:
-      - NODE_ENV=production
-      - API_BASE_URL=http://api:8000
+      NODE_ENV: production
+      API_BASE_URL: http://api:8000
     depends_on:
       - api
     networks:
@@ -19,8 +19,8 @@ services:
       context: ./python-service
       dockerfile: Dockerfile
     environment:
-      - PLAYWRIGHT_HEADLESS=true
-      - PYTHONUNBUFFERED=1
+      PLAYWRIGHT_HEADLESS: "true"
+      PYTHONUNBUFFERED: "1"
     volumes:
       - api-data:/app/data
     networks:
