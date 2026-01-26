@@ -504,32 +504,62 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
             <strong>Date:</strong> <span>{formattedTimestamp.date}</span>
             <strong>Time:</strong> <span>{formattedTimestamp.time}</span>
             <strong>Account Balance:</strong> <span className="ha-summary-balance">{accountBalance}</span>
-            {screenshotPath && (
-              <>
-                <strong>Screenshot:</strong>
+          </div>
+          {/* Action buttons row */}
+          {(screenshotPath || pdfBillUrl) && (
+            <div style={{ 
+              display: 'flex', 
+              gap: '0.75rem', 
+              marginTop: '1rem', 
+              flexWrap: 'wrap' 
+            }}>
+              {screenshotPath && (
                 <button
                   onClick={() => setShowScreenshotModal(true)}
                   className="ha-button ha-button-primary"
-                  style={{ fontSize: '0.7rem', padding: '0.4rem 0.75rem', display: 'inline-flex', alignItems: 'center', gap: '0.4rem', border: 'none', cursor: 'pointer' }}
+                  style={{ 
+                    fontSize: '0.75rem', 
+                    padding: '0.5rem 1rem', 
+                    display: 'inline-flex', 
+                    alignItems: 'center', 
+                    gap: '0.5rem', 
+                    border: 'none', 
+                    cursor: 'pointer',
+                    borderRadius: '6px',
+                    flex: '1 1 auto',
+                    maxWidth: '280px',
+                    justifyContent: 'center'
+                  }}
                 >
-                  <img src="/images/Coned_snapshot.svg" alt="Screenshot" style={{ width: '16px', height: '16px' }} />
-                  View Account Balance Screenshot
+                  <img src="/images/Coned_snapshot.svg" alt="Screenshot" style={{ width: '18px', height: '18px' }} />
+                  View Account Screenshot
                 </button>
-              </>
-            )}
-            {pdfBillUrl && (
-              <>
-                <strong>Bill PDF:</strong>
+              )}
+              {pdfBillUrl && (
                 <button
                   onClick={() => setShowPdfModal(true)}
-                  className="ha-button ha-button-primary"
-                  style={{ fontSize: '0.7rem', padding: '0.4rem 0.75rem', display: 'inline-flex', alignItems: 'center', gap: '0.4rem', border: 'none', cursor: 'pointer', backgroundColor: '#4caf50' }}
+                  className="ha-button"
+                  style={{ 
+                    fontSize: '0.75rem', 
+                    padding: '0.5rem 1rem', 
+                    display: 'inline-flex', 
+                    alignItems: 'center', 
+                    gap: '0.5rem', 
+                    border: 'none', 
+                    cursor: 'pointer', 
+                    backgroundColor: '#4caf50',
+                    color: 'white',
+                    borderRadius: '6px',
+                    flex: '1 1 auto',
+                    maxWidth: '280px',
+                    justifyContent: 'center'
+                  }}
                 >
                   📄 View Latest Bill PDF
                 </button>
-              </>
-            )}
-          </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
