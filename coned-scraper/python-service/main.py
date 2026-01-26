@@ -391,9 +391,9 @@ def load_mqtt_config() -> dict:
         return {}
 
 def save_app_settings(settings: dict):
-    """Save app settings (timezone, password) to file"""
+    """Save app settings (time offset, password) to file"""
     settings_data = {
-        "timezone": settings.get("timezone", "America/New_York"),
+        "time_offset_hours": float(settings.get("time_offset_hours", 0.0)),
         "settings_password": encrypt_data(settings.get("settings_password", "0000")),
         "updated_at": datetime.now().isoformat()
     }
@@ -820,11 +820,11 @@ async def get_mqtt_config():
 
 @app.post("/api/app-settings")
 async def save_app_settings_endpoint(settings: AppSettingsModel):
-    """Save app settings (timezone, password)"""
+    """Save app settings (time offset, password)"""
     try:
         settings_dict = {
-            "timezone": settings.timezone.strip() or "America/New_York",
-            "settings_password": settings.settings_password.strip()
+            "time_offset_hours": settings.time_offset_hours,
+            "settings_password": settings.settings_password.strip() if settings.settings_password else "0000"
         }
         save_app_settings(settings_dict)
         add_log("success", "App settings saved successfully")
@@ -839,14 +839,15 @@ async def get_app_settings_endpoint():
     """Get app settings"""
     try:
         settings = load_app_settings()
-        # Don't return the password
+        # Don't return the actual password, just whether one exists
         return {
-            "timezone": settings.get("timezone", "America/New_York"),
-            "has_password": bool(settings.get("settings_password"))
+            "time_offset_hours": settings.get("time_offset_hours", 0.0),
+            "has_password": bool(settings.get("settings_password")),
+            "settings_password": settings.get("settings_password", "0000")  # Needed for preservation
         }
     except Exception as e:
         add_log("error", f"Failed to get app settings: {str(e)}")
-        return {"timezone": "America/New_York", "has_password": True}
+        return {"time_offset_hours": 0.0, "has_password": True, "settings_password": "0000"}
 
 class PasswordVerifyModel(BaseModel):
     password: str
