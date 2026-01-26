@@ -297,3 +297,4 @@ def get_mqtt_client() -> Optional[MQTTClient]:
     """Get the global MQTT client instance"""
     return _mqtt_client
 
+

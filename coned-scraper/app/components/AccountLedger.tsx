@@ -42,6 +42,7 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
   const [isLoading, setIsLoading] = useState(true)
   const [apiError, setApiError] = useState<string | null>(null)
   const [formattedTimestamp, setFormattedTimestamp] = useState<{ date: string, time: string }>({ date: '', time: '' })
+  const [showScreenshotModal, setShowScreenshotModal] = useState(false)
 
   const loadScrapedData = useCallback(async () => {
     try {
@@ -325,8 +326,64 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
   })
 
   return (
-    <div className="ha-ledger">
-      <div className="ha-card ha-card-summary">
+    <>
+      {/* Screenshot Modal for Mobile */}
+      {showScreenshotModal && screenshotPath && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.9)',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            padding: '1rem'
+          }}
+          onClick={() => setShowScreenshotModal(false)}
+        >
+          <button
+            onClick={() => setShowScreenshotModal(false)}
+            style={{
+              position: 'absolute',
+              top: '1rem',
+              right: '1rem',
+              backgroundColor: 'white',
+              border: 'none',
+              borderRadius: '50%',
+              width: '40px',
+              height: '40px',
+              fontSize: '1.5rem',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+              zIndex: 10000
+            }}
+          >
+            ✕
+          </button>
+          <img
+            src={`${API_BASE_URL}/screenshot/${screenshotPath.split('/').pop() || screenshotPath}`}
+            alt="Account Balance Screenshot"
+            style={{
+              maxWidth: '100%',
+              maxHeight: '100%',
+              objectFit: 'contain',
+              borderRadius: '4px'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
+
+      <div className="ha-ledger">
+        <div className="ha-card ha-card-summary">
         <div className="ha-card-header">
           <span className="ha-card-icon">💰</span>
           <span>Account Summary</span>
@@ -339,16 +396,23 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
             {screenshotPath && (
               <>
                 <strong>Screenshot:</strong>
-                <a 
-                  href={`${API_BASE_URL}/screenshot/${screenshotPath.split('/').pop() || screenshotPath}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                <button
+                  onClick={() => {
+                    // Check if mobile device
+                    const isMobile = window.innerWidth < 768
+                    if (isMobile) {
+                      setShowScreenshotModal(true)
+                    } else {
+                      // Desktop: Open in new tab
+                      window.open(`${API_BASE_URL}/screenshot/${screenshotPath.split('/').pop() || screenshotPath}`, '_blank')
+                    }
+                  }}
                   className="ha-button ha-button-primary"
-                  style={{ fontSize: '0.7rem', padding: '0.4rem 0.75rem', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
+                  style={{ fontSize: '0.7rem', padding: '0.4rem 0.75rem', display: 'inline-flex', alignItems: 'center', gap: '0.4rem', border: 'none', cursor: 'pointer' }}
                 >
                   <img src="/images/Coned_snapshot.svg" alt="Screenshot" style={{ width: '16px', height: '16px' }} />
                   View Account Balance Screenshot
-                </a>
+                </button>
               </>
             )}
           </div>
@@ -482,7 +546,7 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
           )}
         </div>
       </div>
-    </div>
+    </>
   )
 }
 

@@ -244,9 +244,28 @@ export default function Settings() {
                   Default password is <strong>0000</strong>. Change it in App Settings after unlocking.
                 </div>
               </div>
-              <button type="submit" className="ha-button ha-button-primary">
-                Unlock Settings
-              </button>
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <button
+                  type="button"
+                  className="ha-button"
+                  onClick={() => {
+                    if (typeof window !== 'undefined') {
+                      const event = new CustomEvent('navigateToLedger')
+                      window.dispatchEvent(event)
+                    }
+                  }}
+                  style={{
+                    flex: 1,
+                    backgroundColor: '#757575',
+                    color: 'white'
+                  }}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="ha-button ha-button-primary" style={{ flex: 1 }}>
+                  Unlock Settings
+                </button>
+              </div>
             </form>
           </div>
         </div>

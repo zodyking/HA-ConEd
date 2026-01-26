@@ -1,12 +1,25 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Dashboard from '../components/Dashboard'
 import Settings from '../components/Settings'
 import AccountLedger from '../components/AccountLedger'
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<'console' | 'account-ledger' | 'settings'>('account-ledger')
+  
+  // Listen for custom events from Settings password modal
+  useEffect(() => {
+    const handleNavigateToLedger = () => {
+      setActiveTab('account-ledger')
+    }
+    
+    window.addEventListener('navigateToLedger', handleNavigateToLedger)
+    
+    return () => {
+      window.removeEventListener('navigateToLedger', handleNavigateToLedger)
+    }
+  }, [])
 
   return (
     <div className="ha-container">
