@@ -546,6 +546,7 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
           )}
         </div>
       </div>
+    </div>
     </>
   )
 }
