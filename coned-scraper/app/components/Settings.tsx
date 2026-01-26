@@ -650,23 +650,13 @@ function AppSettingsTab() {
     return () => clearInterval(interval)
   }, [savedOffset])
 
-  const handleSetTime = async (userTime: string) => {
-    // User enters what time they think it is now (e.g., "8:42 AM")
-    // Calculate offset from system time
+  const handleCalibrateTime = async () => {
+    // Reset time offset to 0 - sync app time with system time
     setIsLoading(true)
     setMessage(null)
     
     try {
-      const userDate = new Date(`1970-01-01 ${userTime}`)
-      const systemDate = new Date()
-      
-      const userMinutes = userDate.getHours() * 60 + userDate.getMinutes()
-      const systemMinutes = systemDate.getHours() * 60 + systemDate.getMinutes()
-      
-      const offsetMinutes = userMinutes - systemMinutes
-      const offsetHours = offsetMinutes / 60
-      
-      // Get current settings first
+      // Get current settings first to preserve password
       const currentSettings = await fetch(`${API_BASE_URL}/app-settings`)
       const currentData = await currentSettings.json()
       
@@ -674,22 +664,22 @@ function AppSettingsTab() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          time_offset_hours: offsetHours,
+          time_offset_hours: 0,
           settings_password: currentData.settings_password || '0000'
         }),
       })
 
       if (response.ok) {
-        setMessage({ type: 'success', text: 'Time adjusted successfully!' })
-        setSavedOffset(offsetHours) // Update local state immediately
+        setMessage({ type: 'success', text: 'Time synchronized with system!' })
+        setSavedOffset(0)
         clearTimezoneCache()
         setTimeout(() => window.location.reload(), 1000)
       } else {
         const error = await response.json()
-        setMessage({ type: 'error', text: error.detail || 'Failed to save time' })
+        setMessage({ type: 'error', text: error.detail || 'Failed to calibrate time' })
       }
     } catch (error) {
-      setMessage({ type: 'error', text: 'Invalid time format. Use format like "8:42 AM"' })
+      setMessage({ type: 'error', text: 'Failed to connect to API.' })
     } finally {
       setIsLoading(false)
     }
@@ -755,53 +745,34 @@ function AppSettingsTab() {
       <div className="ha-card-content">
         <div style={{ marginBottom: '2rem' }}>
           <div className="ha-form-group">
-            <label className="ha-form-label">Set Current Time</label>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.5rem' }}>
+            <label className="ha-form-label">System Time</label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1rem' }}>
               <div style={{ 
                 padding: '0.75rem 1.25rem',
-                background: '#f5f5f5',
-                borderRadius: '4px',
+                background: '#1a1a2e',
+                borderRadius: '8px',
                 fontFamily: 'monospace',
                 fontSize: '1.5rem',
                 fontWeight: 'bold',
-                color: '#03a9f4',
-                minWidth: '140px',
-                textAlign: 'center'
+                color: '#4ade80',
+                minWidth: '150px',
+                textAlign: 'center',
+                border: '1px solid #333'
               }}>
                 {currentTime || '--:--:--'}
               </div>
-              <span style={{ color: '#666' }}>← System Time</span>
             </div>
-            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-end' }}>
-              <div style={{ flex: 1 }}>
-                <input
-                  type="time"
-                  id="user-time"
-                  className="ha-form-input"
-                  placeholder="8:42 AM"
-                  style={{ fontSize: '1.1rem' }}
-                />
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  const input = document.getElementById('user-time') as HTMLInputElement
-                  if (input.value) {
-                    const [hours, minutes] = input.value.split(':')
-                    const hour = parseInt(hours)
-                    const ampm = hour >= 12 ? 'PM' : 'AM'
-                    const hour12 = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour
-                    handleSetTime(`${hour12}:${minutes} ${ampm}`)
-                  }
-                }}
-                className="ha-button ha-button-primary"
-                style={{ whiteSpace: 'nowrap' }}
-              >
-                Set Time
-              </button>
-            </div>
-            <div className="info-text">
-              Enter what the current time should be, and the app will adjust all timestamps accordingly
+            <button
+              type="button"
+              onClick={handleCalibrateTime}
+              disabled={isLoading}
+              className="ha-button ha-button-primary"
+              style={{ width: '100%', padding: '0.75rem' }}
+            >
+              {isLoading ? 'Calibrating...' : '🔄 Sync App Time to System Time'}
+            </button>
+            <div className="info-text" style={{ marginTop: '0.5rem' }}>
+              Click to reset time offset and sync all timestamps with system time
             </div>
           </div>
         </div>
