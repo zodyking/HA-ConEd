@@ -626,27 +626,29 @@ function AppSettingsTab() {
   const [confirmPassword, setConfirmPassword] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
+  const [savedOffset, setSavedOffset] = useState(0)
 
   useEffect(() => {
-    loadAppSettings()
-    // Update current time display every second
+    // Load saved time offset
+    fetch(`${API_BASE_URL}/app-settings`)
+      .then(res => res.json())
+      .then(data => {
+        const offset = parseFloat(data.time_offset_hours || 0)
+        setSavedOffset(offset)
+      })
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    // Update current time display every second WITH saved offset
     const interval = setInterval(() => {
       const now = new Date()
+      // Apply the saved offset in hours
+      now.setTime(now.getTime() + (savedOffset * 60 * 60 * 1000))
       setCurrentTime(now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }))
     }, 1000)
     return () => clearInterval(interval)
-  }, [])
-
-  const loadAppSettings = async () => {
-    try {
-      const response = await fetch(`${API_BASE_URL}/app-settings`)
-      if (response.ok) {
-        // Just load settings, don't need to display offset
-      }
-    } catch (error) {
-      console.error('Failed to load app settings:', error)
-    }
-  }
+  }, [savedOffset])
 
   const handleSetTime = async (userTime: string) => {
     // User enters what time they think it is now (e.g., "8:42 AM")
@@ -679,6 +681,7 @@ function AppSettingsTab() {
 
       if (response.ok) {
         setMessage({ type: 'success', text: 'Time adjusted successfully!' })
+        setSavedOffset(offsetHours) // Update local state immediately
         clearTimezoneCache()
         setTimeout(() => window.location.reload(), 1000)
       } else {
@@ -710,12 +713,16 @@ function AppSettingsTab() {
     }
 
     try {
+      // First, get current settings to preserve time_offset_hours
+      const currentSettings = await fetch(`${API_BASE_URL}/app-settings`)
+      const currentData = await currentSettings.json()
+      
       const response = await fetch(`${API_BASE_URL}/app-settings`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          time_offset_hours: 0,
-          settings_password: newPassword || '0000'
+          time_offset_hours: currentData.time_offset_hours || 0,
+          settings_password: newPassword || currentData.settings_password || '0000'
         }),
       })
 

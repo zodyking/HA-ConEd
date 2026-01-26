@@ -1,9 +1,24 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { formatDate, formatTime } from '../lib/timezone'
+import { formatDate, formatTime, formatTimestamp } from '../lib/timezone'
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api'
+
+// Helper component to format dates asynchronously
+function FormattedDate({ date, fallback }: { date: string | null | undefined, fallback?: string }) {
+  const [formatted, setFormatted] = useState(fallback || date || '')
+  
+  useEffect(() => {
+    if (date) {
+      formatDate(date, { year: 'numeric', month: 'short', day: 'numeric' })
+        .then(setFormatted)
+        .catch(() => setFormatted(fallback || date))
+    }
+  }, [date, fallback])
+  
+  return <>{formatted}</>
+}
 
 interface ScrapedData {
   id: number
@@ -439,7 +454,7 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
                               {bill.month_range || 'Bill'}
                             </div>
                             <div style={{ fontSize: '0.7rem', color: '#666' }}>
-                              {bill.bill_date ? new Date(bill.bill_date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : cycleKey}
+                              {bill.bill_date ? <FormattedDate date={bill.bill_date} fallback={cycleKey} /> : cycleKey}
                             </div>
                           </div>
                         </div>
