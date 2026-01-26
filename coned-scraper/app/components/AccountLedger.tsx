@@ -397,16 +397,7 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
               <>
                 <strong>Screenshot:</strong>
                 <button
-                  onClick={() => {
-                    // Check if mobile device
-                    const isMobile = window.innerWidth < 768
-                    if (isMobile) {
-                      setShowScreenshotModal(true)
-                    } else {
-                      // Desktop: Open in new tab
-                      window.open(`${API_BASE_URL}/screenshot/${screenshotPath.split('/').pop() || screenshotPath}`, '_blank')
-                    }
-                  }}
+                  onClick={() => setShowScreenshotModal(true)}
                   className="ha-button ha-button-primary"
                   style={{ fontSize: '0.7rem', padding: '0.4rem 0.75rem', display: 'inline-flex', alignItems: 'center', gap: '0.4rem', border: 'none', cursor: 'pointer' }}
                 >
