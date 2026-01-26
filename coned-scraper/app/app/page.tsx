@@ -1,12 +1,11 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import Dashboard from '../components/Dashboard'
 import Settings from '../components/Settings'
 import AccountLedger from '../components/AccountLedger'
 
 export default function Home() {
-  const [activeTab, setActiveTab] = useState<'console' | 'account-ledger' | 'settings'>('account-ledger')
+  const [activeTab, setActiveTab] = useState<'account-ledger' | 'settings'>('account-ledger')
   
   // Listen for custom events from Settings password modal
   useEffect(() => {
@@ -44,14 +43,6 @@ export default function Home() {
               <span>Account Ledger</span>
             </button>
             <button
-              className={`ha-nav-button ${activeTab === 'console' ? 'active' : ''}`}
-              onClick={() => setActiveTab('console')}
-              aria-label="Console"
-            >
-              <span className="ha-nav-icon">📊</span>
-              <span>Console</span>
-            </button>
-            <button
               className={`ha-nav-button ${activeTab === 'settings' ? 'active' : ''}`}
               onClick={() => setActiveTab('settings')}
               aria-label="Settings"
@@ -64,8 +55,7 @@ export default function Home() {
       </div>
 
       <div className="ha-content">
-        {activeTab === 'console' && <Dashboard />}
-        {activeTab === 'account-ledger' && <AccountLedger onNavigate={(tab) => setActiveTab(tab)} />}
+        {activeTab === 'account-ledger' && <AccountLedger onNavigate={(tab) => setActiveTab(tab === 'console' ? 'settings' : tab)} />}
         {activeTab === 'settings' && <Settings />}
       </div>
     </div>

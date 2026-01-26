@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { formatTimestamp as formatTZ, clearTimezoneCache } from '../lib/timezone'
+import Dashboard from './Dashboard'
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api'
 
@@ -33,7 +34,7 @@ export default function Settings() {
   const [timeRemaining, setTimeRemaining] = useState<number>(30)
   const [isLoading, setIsLoading] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
-  const [activeTab, setActiveTab] = useState<'credentials' | 'automated' | 'webhooks' | 'mqtt' | 'app-settings'>('credentials')
+  const [activeTab, setActiveTab] = useState<'console' | 'credentials' | 'automated' | 'webhooks' | 'mqtt' | 'app-settings'>('console')
   
   // Password protection
   const [isUnlocked, setIsUnlocked] = useState(false)
@@ -278,6 +279,13 @@ export default function Settings() {
       <div className="ha-tabs" style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
         <button
           type="button"
+          className={`ha-tab ${activeTab === 'console' ? 'active' : ''}`}
+          onClick={() => setActiveTab('console')}
+        >
+          📊 Console
+        </button>
+        <button
+          type="button"
           className={`ha-tab ${activeTab === 'credentials' ? 'active' : ''}`}
           onClick={() => setActiveTab('credentials')}
         >
@@ -312,6 +320,10 @@ export default function Settings() {
           ⚙️ App Settings
         </button>
       </div>
+
+      {activeTab === 'console' && (
+        <Dashboard />
+      )}
 
       {activeTab === 'credentials' && (
         <div className="ha-card">
