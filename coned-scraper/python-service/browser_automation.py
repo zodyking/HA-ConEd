@@ -497,11 +497,54 @@ async def scrape_account_data(page, context):
     
     return scraped_data
 
+async def download_pdf_from_url(pdf_url: str) -> bool:
+    """
+    Download PDF from URL and save it locally.
+    Returns True if successful, False otherwise.
+    """
+    import aiohttp
+    from pathlib import Path
+    
+    try:
+        add_log("info", f"Downloading PDF from: {pdf_url[:80]}...")
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(pdf_url, timeout=aiohttp.ClientTimeout(total=60)) as response:
+                if response.status == 200:
+                    content_type = response.headers.get('content-type', '')
+                    add_log("info", f"PDF response: status={response.status}, content-type={content_type}")
+                    
+                    # Read the PDF content
+                    pdf_content = await response.read()
+                    
+                    if len(pdf_content) > 1000:  # Sanity check - PDF should be at least 1KB
+                        # Save to data directory
+                        pdf_dir = Path("./data")
+                        pdf_dir.mkdir(parents=True, exist_ok=True)
+                        pdf_path = pdf_dir / "latest_bill.pdf"
+                        
+                        with open(pdf_path, 'wb') as f:
+                            f.write(pdf_content)
+                        
+                        add_log("success", f"PDF saved: {pdf_path} ({len(pdf_content)} bytes)")
+                        return True
+                    else:
+                        add_log("warning", f"PDF content too small: {len(pdf_content)} bytes")
+                        return False
+                else:
+                    add_log("warning", f"PDF download failed: HTTP {response.status}")
+                    return False
+                    
+    except Exception as e:
+        add_log("warning", f"Error downloading PDF: {str(e)}")
+        return False
+
 async def scrape_pdf_bill_url(page, context):
     """
     Scrape the PDF bill URL from ConEd account page.
     First tries to get the href directly from the View Current Bill link.
     If that doesn't work, clicks and waits for the new tab URL.
+    Downloads the PDF and saves it locally.
     """
     pdf_url = None
     
@@ -664,6 +707,16 @@ async def scrape_pdf_bill_url(page, context):
         error_msg = f"Error scraping PDF URL: {str(e)}"
         add_log("warning", error_msg)
         logger.warning(error_msg)
+    
+    # If we captured a URL, download the PDF
+    if pdf_url:
+        download_success = await download_pdf_from_url(pdf_url)
+        if download_success:
+            # Return a local path indicator instead of the expiring URL
+            return "local:latest_bill.pdf"
+        else:
+            # Return the URL anyway as fallback
+            return pdf_url
     
     return pdf_url
 

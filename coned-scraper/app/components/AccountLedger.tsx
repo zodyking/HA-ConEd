@@ -456,7 +456,7 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
           >
             <div style={{
               padding: '1rem',
-              backgroundColor: '#03a9f4',
+              backgroundColor: '#4caf50',
               color: 'white',
               display: 'flex',
               justifyContent: 'space-between',
@@ -464,9 +464,10 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
             }}>
               <span style={{ fontWeight: 600 }}>📄 Latest Bill PDF</span>
               <a
-                href={pdfBillUrl}
+                href={`${API_BASE_URL}/latest-bill-pdf`}
                 target="_blank"
                 rel="noopener noreferrer"
+                download="ConEd_Latest_Bill.pdf"
                 style={{
                   color: 'white',
                   textDecoration: 'none',
@@ -476,11 +477,11 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
                   borderRadius: '4px'
                 }}
               >
-                Open in New Tab ↗
+                ⬇ Download PDF
               </a>
             </div>
             <iframe
-              src={pdfBillUrl}
+              src={`${API_BASE_URL}/latest-bill-pdf`}
               style={{
                 flex: 1,
                 width: '100%',

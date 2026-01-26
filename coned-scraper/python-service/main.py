@@ -927,6 +927,32 @@ async def get_screenshot(filename: str):
             status_code=404
         )
 
+@app.get("/api/latest-bill-pdf")
+async def get_latest_bill_pdf():
+    """Get the latest bill PDF (downloaded and stored locally)"""
+    import os
+    from fastapi.responses import FileResponse, JSONResponse
+    
+    pdf_path = DATA_DIR / "latest_bill.pdf"
+    
+    if os.path.exists(pdf_path):
+        return FileResponse(
+            str(pdf_path),
+            media_type="application/pdf",
+            filename="ConEd_Latest_Bill.pdf",
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0",
+                "Content-Disposition": "inline; filename=ConEd_Latest_Bill.pdf"
+            }
+        )
+    else:
+        return JSONResponse(
+            {"error": "No bill PDF available. Run the scraper to fetch the latest bill."},
+            status_code=404
+        )
+
 @app.get("/api/live-preview")
 async def get_live_preview():
     """Get the latest live preview screenshot"""
