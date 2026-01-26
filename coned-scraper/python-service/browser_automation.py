@@ -616,12 +616,14 @@ async def scrape_pdf_bill_url(page, context):
                     
                     # Check if URL is a valid PDF URL
                     if current_pdf_url and current_pdf_url not in ["about:blank", "", "about:srcdoc"]:
-                        # Check for PDF indicators
+                        # Check for PDF indicators - specifically Azure Blob Storage URL for ConEd
                         url_lower = current_pdf_url.lower()
-                        if ('pdf' in url_lower or 
+                        if ('blob.core.windows.net' in url_lower or  # Azure Blob Storage
+                            'cecony-bill' in url_lower or  # ConEd bill container
+                            '.pdf' in url_lower or
+                            'pdf' in url_lower or 
                             'document' in url_lower or
                             'viewbill' in url_lower or
-                            'blob:' in url_lower or
                             len(current_pdf_url) > 100):  # Long URLs usually mean actual content
                             pdf_url = current_pdf_url
                             add_log("success", f"PDF URL captured: {pdf_url[:100]}...")
