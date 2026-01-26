@@ -132,7 +132,7 @@ body {
   padding: 1rem;
 }
 
-.ha-dashboard > div[style*="grid"] {
+.ha-panels-grid {
   flex: 1;
   min-height: 0;
   display: grid;
@@ -141,9 +141,15 @@ body {
   gap: 1rem;
 }
 
+.ha-panels-grid > .ha-card {
+  min-height: 0;
+  height: 100%;
+}
+
 @media (max-width: 1024px) {
-  .ha-dashboard > div[style*="grid"] {
+  .ha-panels-grid {
     grid-template-columns: 1fr;
+    grid-template-rows: 1fr 1fr;
   }
 }
 
@@ -296,7 +302,15 @@ body {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  max-height: calc(100vh - 350px);
+}
+
+/* Browser Preview Card */
+.ha-card-preview {
+  border-left: 4px solid #9c27b0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .ha-log-container {
@@ -309,7 +323,17 @@ body {
   flex: 1;
   overflow-y: auto;
   min-height: 0;
-  max-height: 100%;
+}
+
+.ha-preview-container {
+  background: #1a1a1a;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  overflow: hidden;
 }
 
 .ha-log-entry {

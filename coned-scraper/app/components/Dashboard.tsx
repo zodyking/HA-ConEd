@@ -289,13 +289,13 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', height: '100%' }}>
-        <div className="ha-card ha-card-logs" style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      <div className="ha-panels-grid">
+        <div className="ha-card ha-card-logs">
           <div className="ha-card-header">
             <span className="ha-card-icon">📝</span>
             <span>Console Logs</span>
           </div>
-          <div className="ha-card-content ha-log-container" ref={logContainerRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+          <div className="ha-card-content ha-log-container" ref={logContainerRef}>
             {logs.length === 0 ? (
               <div className="ha-empty-state">No logs yet. Start the scraper to see activity.</div>
             ) : (
@@ -310,12 +310,12 @@ export default function Dashboard() {
           </div>
         </div>
 
-        <div className="ha-card" style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+        <div className="ha-card ha-card-preview">
           <div className="ha-card-header">
             <span className="ha-card-icon">🖥️</span>
             <span>Browser Preview</span>
           </div>
-          <div className="ha-card-content" style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#1a1a1a', padding: '1rem' }}>
+          <div className="ha-card-content ha-preview-container">
             {previewUrl ? (
               <img 
                 src={previewUrl} 
