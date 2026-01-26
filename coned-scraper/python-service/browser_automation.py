@@ -500,13 +500,13 @@ async def scrape_account_data(page, context):
 async def scrape_pdf_bill_url(page, context):
     """
     Scrape the PDF bill URL from ConEd account page.
-    Clicks "View Current Bill" button which opens a new tab,
-    waits for the PDF URL to load, captures it, and closes the tab.
+    First tries to get the href directly from the View Current Bill link.
+    If that doesn't work, clicks and waits for the new tab URL.
     """
     pdf_url = None
     
     try:
-        add_log("info", "Looking for View Current Bill button...")
+        add_log("info", "Looking for View Current Bill link...")
         
         # Make sure we're on the account page
         account_url = "https://www.coned.com/en/accounts-billing/my-account"
@@ -516,14 +516,60 @@ async def scrape_pdf_bill_url(page, context):
             await page.goto(account_url, wait_until="networkidle", timeout=30000)
             await asyncio.sleep(3)
         
-        # Selectors for the "View Current Bill" button
+        await take_live_preview(page, "Looking for PDF link")
+        
+        # Selectors for the "View Current Bill" button/link
+        # Priority: links with href first (we can extract URL directly)
+        pdf_link_selectors = [
+            'a:has-text("View Current Bill")',
+            'a.overview-bill-card__button',
+            '.overview-bill-card a[href]',
+            'a[href*="ViewBill"]',
+            'a[href*="viewbill"]', 
+            'a[href*="bill"][href*="pdf"]',
+            '.js-overview-bill-card a[href]',
+        ]
+        
+        # First approach: Try to get the href directly (no click needed)
+        for selector in pdf_link_selectors:
+            try:
+                element = page.locator(selector).first
+                count = await element.count()
+                if count > 0:
+                    add_log("info", f"Found element with selector: {selector}")
+                    
+                    # Try to get href attribute directly
+                    href = await element.get_attribute('href')
+                    if href:
+                        add_log("info", f"Found href attribute: {href[:100]}...")
+                        
+                        # Check if it's a valid PDF URL or needs to be made absolute
+                        if href.startswith('http'):
+                            pdf_url = href
+                            add_log("success", f"PDF URL extracted from href: {pdf_url[:100]}...")
+                            return pdf_url
+                        elif href.startswith('/'):
+                            # Relative URL - make it absolute
+                            pdf_url = f"https://www.coned.com{href}"
+                            add_log("success", f"PDF URL (made absolute): {pdf_url[:100]}...")
+                            return pdf_url
+                        elif 'javascript:' not in href.lower():
+                            pdf_url = href
+                            add_log("success", f"PDF URL from href: {pdf_url[:100]}...")
+                            return pdf_url
+            except Exception as e:
+                add_log("debug", f"Selector {selector} failed: {str(e)}")
+                continue
+        
+        add_log("info", "No direct href found, trying click approach...")
+        
+        # Second approach: Click and capture new tab URL
         pdf_button_selectors = [
             'a:has-text("View Current Bill")',
             'button:has-text("View Current Bill")',
+            'a:has-text("View Bill")',
+            '.overview-bill-card__button',
             '[class*="view-bill"]',
-            'a[href*="bill"]',
-            '.overview-bill-card a:has-text("View")',
-            '.js-overview-bill-card a',
         ]
         
         pdf_button = None
@@ -532,9 +578,9 @@ async def scrape_pdf_bill_url(page, context):
                 element = page.locator(selector).first
                 count = await element.count()
                 if count > 0:
-                    await element.wait_for(state="visible", timeout=3000)
+                    await element.wait_for(state="visible", timeout=5000)
                     pdf_button = element
-                    add_log("info", f"Found PDF button with selector: {selector}")
+                    add_log("info", f"Found clickable PDF button: {selector}")
                     break
             except:
                 continue
@@ -543,62 +589,74 @@ async def scrape_pdf_bill_url(page, context):
             add_log("warning", "Could not find View Current Bill button")
             return None
         
-        # Listen for new page (popup) before clicking
-        async with context.expect_page(timeout=30000) as new_page_info:
-            await pdf_button.click()
-            add_log("info", "Clicked View Current Bill button, waiting for new tab...")
-        
-        new_page = await new_page_info.value
-        
-        # Wait for the PDF page to fully load
-        # The page initially shows blank, then the URL updates when PDF is ready
-        add_log("info", "New tab opened, waiting for PDF to load...")
-        
-        max_wait_time = 60  # Maximum 60 seconds to wait
-        wait_interval = 2   # Check every 2 seconds
-        elapsed = 0
-        
-        while elapsed < max_wait_time:
-            await asyncio.sleep(wait_interval)
-            elapsed += wait_interval
+        # Click and wait for new tab
+        try:
+            add_log("info", "Clicking View Current Bill button...")
             
-            current_pdf_url = new_page.url
-            add_log("info", f"PDF tab URL: {current_pdf_url}")
+            # Listen for new page (popup) before clicking
+            async with context.expect_page(timeout=30000) as new_page_info:
+                await pdf_button.click()
+                add_log("info", "Button clicked, waiting for new tab to open...")
             
-            # Check if URL contains PDF indicators
-            # ConEd PDFs typically have patterns like:
-            # - Contains 'pdf' or 'document' or 'bill'
-            # - Contains blob: or specific domain patterns
-            # - URL has changed from initial blank/about:blank
-            if (current_pdf_url and 
-                current_pdf_url != "about:blank" and 
-                current_pdf_url != "" and
-                ('pdf' in current_pdf_url.lower() or 
-                 'document' in current_pdf_url.lower() or
-                 'blob:' in current_pdf_url.lower() or
-                 'coned' in current_pdf_url.lower() or
-                 '.pdf' in current_pdf_url.lower() or
-                 'aem' in current_pdf_url.lower())):  # AEM is Adobe Experience Manager
-                pdf_url = current_pdf_url
-                add_log("success", f"PDF URL captured: {pdf_url[:100]}...")
-                break
+            new_page = await new_page_info.value
+            add_log("info", f"New tab opened with initial URL: {new_page.url}")
             
-            # Also check if URL has significantly changed
-            if (current_pdf_url and 
-                len(current_pdf_url) > 50 and 
-                current_pdf_url != "about:blank"):
-                pdf_url = current_pdf_url
-                add_log("success", f"PDF URL captured (by length): {pdf_url[:100]}...")
-                break
+            # Wait for the PDF page to fully load
+            max_wait_time = 45  # Maximum 45 seconds to wait
+            wait_interval = 3   # Check every 3 seconds
+            elapsed = 0
             
-            await take_live_preview(new_page, f"Waiting for PDF ({elapsed}s)")
-        
-        if not pdf_url:
-            add_log("warning", f"PDF did not load within {max_wait_time} seconds")
-        
-        # Close the PDF tab
-        await new_page.close()
-        add_log("info", "Closed PDF tab")
+            while elapsed < max_wait_time:
+                await asyncio.sleep(wait_interval)
+                elapsed += wait_interval
+                
+                try:
+                    current_pdf_url = new_page.url
+                    add_log("info", f"PDF tab URL ({elapsed}s): {current_pdf_url}")
+                    
+                    # Check if URL is a valid PDF URL
+                    if current_pdf_url and current_pdf_url not in ["about:blank", "", "about:srcdoc"]:
+                        # Check for PDF indicators
+                        url_lower = current_pdf_url.lower()
+                        if ('pdf' in url_lower or 
+                            'document' in url_lower or
+                            'viewbill' in url_lower or
+                            'blob:' in url_lower or
+                            len(current_pdf_url) > 100):  # Long URLs usually mean actual content
+                            pdf_url = current_pdf_url
+                            add_log("success", f"PDF URL captured: {pdf_url[:100]}...")
+                            break
+                    
+                    # Also try to get any redirected URL from page content
+                    try:
+                        # Check for meta refresh or JavaScript redirect
+                        meta_refresh = await new_page.locator('meta[http-equiv="refresh"]').get_attribute('content')
+                        if meta_refresh and 'url=' in meta_refresh.lower():
+                            redirect_url = meta_refresh.split('url=')[-1].strip()
+                            if redirect_url:
+                                add_log("info", f"Found meta refresh URL: {redirect_url}")
+                                pdf_url = redirect_url if redirect_url.startswith('http') else f"https://www.coned.com{redirect_url}"
+                                break
+                    except:
+                        pass
+                    
+                except Exception as e:
+                    add_log("debug", f"Error checking PDF URL: {str(e)}")
+                
+                await take_live_preview(new_page, f"Waiting for PDF ({elapsed}s)")
+            
+            if not pdf_url:
+                add_log("warning", f"PDF URL did not load within {max_wait_time} seconds")
+            
+            # Close the PDF tab
+            try:
+                await new_page.close()
+                add_log("info", "Closed PDF tab")
+            except:
+                pass
+                
+        except Exception as e:
+            add_log("warning", f"Click approach failed: {str(e)}")
         
     except Exception as e:
         error_msg = f"Error scraping PDF URL: {str(e)}"
