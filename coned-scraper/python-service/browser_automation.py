@@ -374,6 +374,12 @@ async def perform_login(username: str, password: str, totp_code: str):
                         await asyncio.sleep(3)  # Wait for page to load
                     
                     scraped_data = await scrape_account_data(page, context)
+                    
+                    # Scrape PDF bill URL
+                    pdf_bill_url = await scrape_pdf_bill_url(page, context)
+                    if pdf_bill_url:
+                        scraped_data["pdf_bill_url"] = pdf_bill_url
+                    
                     # Scrape bill history ledger
                     bill_history = await scrape_bill_history(page)
                     scraped_data["bill_history"] = bill_history
@@ -490,6 +496,116 @@ async def scrape_account_data(page, context):
         scraped_data["error"] = str(e)
     
     return scraped_data
+
+async def scrape_pdf_bill_url(page, context):
+    """
+    Scrape the PDF bill URL from ConEd account page.
+    Clicks "View Current Bill" button which opens a new tab,
+    waits for the PDF URL to load, captures it, and closes the tab.
+    """
+    pdf_url = None
+    
+    try:
+        add_log("info", "Looking for View Current Bill button...")
+        
+        # Make sure we're on the account page
+        account_url = "https://www.coned.com/en/accounts-billing/my-account"
+        current_url = page.url
+        if account_url not in current_url:
+            add_log("info", f"Navigating to account page for PDF: {account_url}")
+            await page.goto(account_url, wait_until="networkidle", timeout=30000)
+            await asyncio.sleep(3)
+        
+        # Selectors for the "View Current Bill" button
+        pdf_button_selectors = [
+            'a:has-text("View Current Bill")',
+            'button:has-text("View Current Bill")',
+            '[class*="view-bill"]',
+            'a[href*="bill"]',
+            '.overview-bill-card a:has-text("View")',
+            '.js-overview-bill-card a',
+        ]
+        
+        pdf_button = None
+        for selector in pdf_button_selectors:
+            try:
+                element = page.locator(selector).first
+                count = await element.count()
+                if count > 0:
+                    await element.wait_for(state="visible", timeout=3000)
+                    pdf_button = element
+                    add_log("info", f"Found PDF button with selector: {selector}")
+                    break
+            except:
+                continue
+        
+        if not pdf_button:
+            add_log("warning", "Could not find View Current Bill button")
+            return None
+        
+        # Listen for new page (popup) before clicking
+        async with context.expect_page(timeout=30000) as new_page_info:
+            await pdf_button.click()
+            add_log("info", "Clicked View Current Bill button, waiting for new tab...")
+        
+        new_page = await new_page_info.value
+        
+        # Wait for the PDF page to fully load
+        # The page initially shows blank, then the URL updates when PDF is ready
+        add_log("info", "New tab opened, waiting for PDF to load...")
+        
+        max_wait_time = 60  # Maximum 60 seconds to wait
+        wait_interval = 2   # Check every 2 seconds
+        elapsed = 0
+        
+        while elapsed < max_wait_time:
+            await asyncio.sleep(wait_interval)
+            elapsed += wait_interval
+            
+            current_pdf_url = new_page.url
+            add_log("info", f"PDF tab URL: {current_pdf_url}")
+            
+            # Check if URL contains PDF indicators
+            # ConEd PDFs typically have patterns like:
+            # - Contains 'pdf' or 'document' or 'bill'
+            # - Contains blob: or specific domain patterns
+            # - URL has changed from initial blank/about:blank
+            if (current_pdf_url and 
+                current_pdf_url != "about:blank" and 
+                current_pdf_url != "" and
+                ('pdf' in current_pdf_url.lower() or 
+                 'document' in current_pdf_url.lower() or
+                 'blob:' in current_pdf_url.lower() or
+                 'coned' in current_pdf_url.lower() or
+                 '.pdf' in current_pdf_url.lower() or
+                 'aem' in current_pdf_url.lower())):  # AEM is Adobe Experience Manager
+                pdf_url = current_pdf_url
+                add_log("success", f"PDF URL captured: {pdf_url[:100]}...")
+                break
+            
+            # Also check if URL has significantly changed
+            if (current_pdf_url and 
+                len(current_pdf_url) > 50 and 
+                current_pdf_url != "about:blank"):
+                pdf_url = current_pdf_url
+                add_log("success", f"PDF URL captured (by length): {pdf_url[:100]}...")
+                break
+            
+            await take_live_preview(new_page, f"Waiting for PDF ({elapsed}s)")
+        
+        if not pdf_url:
+            add_log("warning", f"PDF did not load within {max_wait_time} seconds")
+        
+        # Close the PDF tab
+        await new_page.close()
+        add_log("info", "Closed PDF tab")
+        
+    except Exception as e:
+        error_msg = f"Error scraping PDF URL: {str(e)}"
+        add_log("warning", error_msg)
+        logger.warning(error_msg)
+    
+    return pdf_url
 
 async def scrape_bill_history(page):
     """

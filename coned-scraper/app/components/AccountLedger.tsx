@@ -25,6 +25,7 @@ interface ScrapedData {
   timestamp: string
   data: {
     account_balance?: string
+    pdf_bill_url?: string
     bill_history?: {
       ledger: Array<{
         type: 'payment' | 'bill'
@@ -58,6 +59,7 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
   const [apiError, setApiError] = useState<string | null>(null)
   const [formattedTimestamp, setFormattedTimestamp] = useState<{ date: string, time: string }>({ date: '', time: '' })
   const [showScreenshotModal, setShowScreenshotModal] = useState(false)
+  const [showPdfModal, setShowPdfModal] = useState(false)
 
   const loadScrapedData = useCallback(async () => {
     try {
@@ -213,6 +215,7 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
   const latestData = scrapedData[0]
   const accountBalance = latestData.data?.account_balance || '-'
   const screenshotPath = latestData.screenshot_path
+  const pdfBillUrl = latestData.data?.pdf_bill_url
   const billHistory = latestData.data?.bill_history
 
   // Group bills and payments correctly
@@ -397,6 +400,98 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
         </div>
       )}
 
+      {/* PDF Bill Modal */}
+      {showPdfModal && pdfBillUrl && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.85)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            padding: '1rem'
+          }}
+          onClick={() => setShowPdfModal(false)}
+        >
+          <button
+            onClick={() => setShowPdfModal(false)}
+            style={{
+              position: 'absolute',
+              top: '1rem',
+              right: '1rem',
+              background: '#ff4444',
+              color: 'white',
+              border: 'none',
+              borderRadius: '50%',
+              width: '40px',
+              height: '40px',
+              fontSize: '1.5rem',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+              zIndex: 10000
+            }}
+          >
+            ✕
+          </button>
+          <div
+            style={{
+              width: '95%',
+              maxWidth: '900px',
+              height: '90vh',
+              backgroundColor: 'white',
+              borderRadius: '8px',
+              overflow: 'hidden',
+              display: 'flex',
+              flexDirection: 'column'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{
+              padding: '1rem',
+              backgroundColor: '#03a9f4',
+              color: 'white',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center'
+            }}>
+              <span style={{ fontWeight: 600 }}>📄 Latest Bill PDF</span>
+              <a
+                href={pdfBillUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  color: 'white',
+                  textDecoration: 'none',
+                  fontSize: '0.85rem',
+                  padding: '0.25rem 0.75rem',
+                  backgroundColor: 'rgba(255,255,255,0.2)',
+                  borderRadius: '4px'
+                }}
+              >
+                Open in New Tab ↗
+              </a>
+            </div>
+            <iframe
+              src={pdfBillUrl}
+              style={{
+                flex: 1,
+                width: '100%',
+                border: 'none'
+              }}
+              title="Bill PDF"
+            />
+          </div>
+        </div>
+      )}
+
       <div className="ha-ledger">
         <div className="ha-card ha-card-summary">
         <div className="ha-card-header">
@@ -418,6 +513,18 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
                 >
                   <img src="/images/Coned_snapshot.svg" alt="Screenshot" style={{ width: '16px', height: '16px' }} />
                   View Account Balance Screenshot
+                </button>
+              </>
+            )}
+            {pdfBillUrl && (
+              <>
+                <strong>Bill PDF:</strong>
+                <button
+                  onClick={() => setShowPdfModal(true)}
+                  className="ha-button ha-button-primary"
+                  style={{ fontSize: '0.7rem', padding: '0.4rem 0.75rem', display: 'inline-flex', alignItems: 'center', gap: '0.4rem', border: 'none', cursor: 'pointer', backgroundColor: '#4caf50' }}
+                >
+                  📄 View Latest Bill PDF
                 </button>
               </>
             )}
