@@ -450,7 +450,8 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
               borderRadius: '8px',
               overflow: 'hidden',
               display: 'flex',
-              flexDirection: 'column'
+              flexDirection: 'column',
+              position: 'relative'
             }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -485,10 +486,25 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
               style={{
                 flex: 1,
                 width: '100%',
-                border: 'none'
+                border: 'none',
+                backgroundColor: 'white'
               }}
               title="Bill PDF"
+              onError={() => console.log('PDF iframe failed to load')}
             />
+            <div style={{
+              position: 'absolute',
+              bottom: '1rem',
+              left: '50%',
+              transform: 'translateX(-50%)',
+              backgroundColor: 'rgba(0,0,0,0.7)',
+              color: 'white',
+              padding: '0.5rem 1rem',
+              borderRadius: '4px',
+              fontSize: '0.8rem'
+            }}>
+              If PDF doesn&apos;t load, run a fresh scrape to download it
+            </div>
           </div>
         </div>
       )}
