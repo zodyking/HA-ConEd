@@ -604,9 +604,9 @@ async def scrape_pdf_bill_url(page, context):
                 add_log("debug", f"Selector {selector} failed: {str(e)}")
                 continue
         
-        add_log("info", "No direct href found, trying click approach...")
+        add_log("info", "No direct href found, trying network interception approach...")
         
-        # Second approach: Click and capture new tab URL
+        # Second approach: Intercept network requests to capture the Azure Blob URL
         pdf_button_selectors = [
             'a:has-text("View Current Bill")',
             'button:has-text("View Current Bill")',
@@ -632,76 +632,101 @@ async def scrape_pdf_bill_url(page, context):
             add_log("warning", "Could not find View Current Bill button")
             return None
         
-        # Click and wait for new tab
+        # Set up network request interception to capture the PDF URL
+        captured_pdf_url = None
+        
+        async def handle_request(request):
+            nonlocal captured_pdf_url
+            url = request.url.lower()
+            # Look for Azure Blob Storage PDF requests
+            if ('blob.core.windows.net' in url or 
+                'cecony-bill' in url or 
+                '.pdf' in url or
+                'viewbill' in url):
+                captured_pdf_url = request.url
+                add_log("success", f"Intercepted PDF URL: {request.url[:100]}...")
+        
+        async def handle_response(response):
+            nonlocal captured_pdf_url
+            url = response.url.lower()
+            # Also check responses for PDF URLs
+            if ('blob.core.windows.net' in url or 
+                'cecony-bill' in url or 
+                '.pdf' in url):
+                captured_pdf_url = response.url
+                add_log("success", f"Captured PDF URL from response: {response.url[:100]}...")
+        
+        # Listen for network requests
+        page.on("request", handle_request)
+        page.on("response", handle_response)
+        
         try:
-            add_log("info", "Clicking View Current Bill button...")
+            add_log("info", "Clicking View Current Bill button (with network interception)...")
             
-            # Listen for new page (popup) before clicking
-            async with context.expect_page(timeout=30000) as new_page_info:
-                await pdf_button.click()
-                add_log("info", "Button clicked, waiting for new tab to open...")
-            
-            new_page = await new_page_info.value
-            add_log("info", f"New tab opened with initial URL: {new_page.url}")
-            
-            # Wait for the PDF page to fully load
-            max_wait_time = 45  # Maximum 45 seconds to wait
-            wait_interval = 3   # Check every 3 seconds
-            elapsed = 0
-            
-            while elapsed < max_wait_time:
-                await asyncio.sleep(wait_interval)
-                elapsed += wait_interval
+            # Try to click and handle the new tab
+            try:
+                async with context.expect_page(timeout=15000) as new_page_info:
+                    await pdf_button.click()
+                    add_log("info", "Button clicked, waiting for new tab...")
                 
-                try:
-                    current_pdf_url = new_page.url
-                    add_log("info", f"PDF tab URL ({elapsed}s): {current_pdf_url}")
+                new_page = await new_page_info.value
+                add_log("info", f"New tab opened: {new_page.url}")
+                
+                # Also listen on the new page
+                new_page.on("request", handle_request)
+                new_page.on("response", handle_response)
+                
+                # Wait for URL to change or network request to be captured
+                max_wait_time = 30
+                wait_interval = 2
+                elapsed = 0
+                
+                while elapsed < max_wait_time and not captured_pdf_url:
+                    await asyncio.sleep(wait_interval)
+                    elapsed += wait_interval
                     
-                    # Check if URL is a valid PDF URL
-                    if current_pdf_url and current_pdf_url not in ["about:blank", "", "about:srcdoc"]:
-                        # Check for PDF indicators - specifically Azure Blob Storage URL for ConEd
-                        url_lower = current_pdf_url.lower()
-                        if ('blob.core.windows.net' in url_lower or  # Azure Blob Storage
-                            'cecony-bill' in url_lower or  # ConEd bill container
-                            '.pdf' in url_lower or
-                            'pdf' in url_lower or 
-                            'document' in url_lower or
-                            'viewbill' in url_lower or
-                            len(current_pdf_url) > 100):  # Long URLs usually mean actual content
-                            pdf_url = current_pdf_url
-                            add_log("success", f"PDF URL captured: {pdf_url[:100]}...")
-                            break
-                    
-                    # Also try to get any redirected URL from page content
+                    # Check if new page URL changed
                     try:
-                        # Check for meta refresh or JavaScript redirect
-                        meta_refresh = await new_page.locator('meta[http-equiv="refresh"]').get_attribute('content')
-                        if meta_refresh and 'url=' in meta_refresh.lower():
-                            redirect_url = meta_refresh.split('url=')[-1].strip()
-                            if redirect_url:
-                                add_log("info", f"Found meta refresh URL: {redirect_url}")
-                                pdf_url = redirect_url if redirect_url.startswith('http') else f"https://www.coned.com{redirect_url}"
+                        current_url = new_page.url
+                        if current_url and current_url not in ["about:blank", "", "about:srcdoc"]:
+                            url_lower = current_url.lower()
+                            if ('blob.core.windows.net' in url_lower or 
+                                'cecony-bill' in url_lower or 
+                                '.pdf' in url_lower or
+                                len(current_url) > 100):
+                                captured_pdf_url = current_url
+                                add_log("success", f"PDF URL from new tab: {current_url[:100]}...")
                                 break
                     except:
                         pass
                     
-                except Exception as e:
-                    add_log("debug", f"Error checking PDF URL: {str(e)}")
+                    add_log("info", f"Waiting for PDF URL ({elapsed}s)... Current: {new_page.url[:50] if new_page.url else 'blank'}")
                 
-                await take_live_preview(new_page, f"Waiting for PDF ({elapsed}s)")
+                # Close the new tab
+                try:
+                    await new_page.close()
+                except:
+                    pass
+                    
+            except Exception as e:
+                add_log("info", f"New tab approach failed: {str(e)}, checking if URL was captured via network...")
+                # Wait a bit more for network capture
+                await asyncio.sleep(5)
             
-            if not pdf_url:
-                add_log("warning", f"PDF URL did not load within {max_wait_time} seconds")
-            
-            # Close the PDF tab
-            try:
-                await new_page.close()
-                add_log("info", "Closed PDF tab")
-            except:
-                pass
+            if captured_pdf_url:
+                pdf_url = captured_pdf_url
+            else:
+                add_log("warning", "Could not capture PDF URL via network interception")
                 
         except Exception as e:
-            add_log("warning", f"Click approach failed: {str(e)}")
+            add_log("warning", f"Network interception approach failed: {str(e)}")
+        finally:
+            # Remove listeners
+            try:
+                page.remove_listener("request", handle_request)
+                page.remove_listener("response", handle_response)
+            except:
+                pass
         
     except Exception as e:
         error_msg = f"Error scraping PDF URL: {str(e)}"
