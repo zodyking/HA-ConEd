@@ -250,36 +250,60 @@ def fetch_coned_payment_emails(
         mail.login(email_addr, password)
         
         # Select the Gmail label if specified, otherwise INBOX
-        folder = f'"{gmail_label}"' if gmail_label else 'INBOX'
-        try:
-            status, _ = mail.select(folder)
-            if status != 'OK':
-                logger.warning(f"Could not select folder {folder}, falling back to INBOX")
+        folder_selected = 'INBOX'
+        if gmail_label:
+            # Try different folder name formats for Gmail labels
+            folder_attempts = [
+                gmail_label,                    # Direct label name
+                f'"{gmail_label}"',             # Quoted
+                f'[Gmail]/{gmail_label}',       # Gmail nested format
+                f'"[Gmail]/{gmail_label}"',     # Gmail nested quoted
+            ]
+            
+            for folder in folder_attempts:
+                try:
+                    status, _ = mail.select(folder)
+                    if status == 'OK':
+                        folder_selected = folder
+                        logger.info(f"Selected folder: {folder}")
+                        break
+                except Exception as e:
+                    logger.debug(f"Could not select folder {folder}: {e}")
+            else:
+                logger.warning(f"Could not select Gmail label '{gmail_label}', using INBOX")
                 mail.select('INBOX')
-        except Exception as e:
-            logger.warning(f"Error selecting folder {folder}: {e}, falling back to INBOX")
+        else:
             mail.select('INBOX')
         
-        # Build STRICT search criteria
-        # MUST be from DoNotReply@billmatrix.com
-        search_parts = [f'FROM "{CONED_PAYMENT_SENDER}"']
+        # Search ALL emails in the folder (no date restriction)
+        # Build search criteria
+        search_parts = []
         
-        # Add subject filter if specified
+        # Filter by sender if we have subject filter (indicates ConEd payment emails)
         if subject_filter:
+            # Search for subject containing the filter text
             search_parts.append(f'SUBJECT "{subject_filter}"')
         
-        search_criteria = '(' + ' '.join(search_parts) + ')'
+        # If no filters, get ALL emails in the label
+        if search_parts:
+            search_criteria = '(' + ' '.join(search_parts) + ')'
+        else:
+            search_criteria = 'ALL'
         
-        logger.info(f"IMAP search criteria: {search_criteria}")
+        logger.info(f"IMAP folder: {folder_selected}, search: {search_criteria}")
         
         status, data = mail.search(None, search_criteria)
         if status != 'OK' or not data[0]:
-            logger.info("No emails found matching criteria")
+            logger.info(f"No emails found in {folder_selected} with criteria: {search_criteria}")
             mail.logout()
             return results
         
         email_ids = data[0].split()
-        logger.info(f"Found {len(email_ids)} emails matching criteria")
+        logger.info(f"Found {len(email_ids)} total emails in {folder_selected}")
+        
+        processed = 0
+        skipped_sender = 0
+        skipped_subject = 0
         
         for email_id in email_ids:
             try:
@@ -290,21 +314,26 @@ def fetch_coned_payment_emails(
                 raw_email = data[0][1]
                 msg = email.message_from_bytes(raw_email)
                 
-                # VERIFY sender is exactly DoNotReply@billmatrix.com
+                # Get sender
                 from_addr = msg.get('From', '')
+                
+                # STRICT: Only accept emails from DoNotReply@billmatrix.com
                 if CONED_PAYMENT_SENDER.lower() not in from_addr.lower():
-                    logger.debug(f"Skipping email from {from_addr} - not from {CONED_PAYMENT_SENDER}")
+                    skipped_sender += 1
                     continue
                 
-                # Get subject and verify it matches if filter is set
+                # Get subject
                 subject_raw = msg.get('Subject', '')
                 subject, encoding = decode_header(subject_raw)[0]
                 if isinstance(subject, bytes):
                     subject = subject.decode(encoding or 'utf-8', errors='replace')
                 
+                # STRICT: Subject must contain the filter text
                 if subject_filter and subject_filter.lower() not in subject.lower():
-                    logger.debug(f"Skipping email with subject '{subject}' - doesn't match filter")
+                    skipped_subject += 1
                     continue
+                
+                processed += 1
                 
                 # Get email date
                 email_date_str = msg.get('Date', '')
@@ -341,6 +370,7 @@ def fetch_coned_payment_emails(
             except Exception as e:
                 logger.warning(f"Failed to process email {email_id}: {e}")
         
+        logger.info(f"Email scan complete: {len(email_ids)} total, {processed} from BillMatrix, {skipped_sender} wrong sender, {skipped_subject} wrong subject, {len(results)} with card numbers")
         mail.logout()
         
     except imaplib.IMAP4.error as e:

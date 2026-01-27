@@ -233,35 +233,47 @@ def upsert_bill(bill_data: Dict[str, Any]) -> int:
     conn.close()
     return bill_id
 
-def date_to_sortable_sql(date_col: str) -> str:
+def parse_us_date_to_sortable(date_str: str) -> str:
     """
-    Return SQL expression to convert MM/DD/YYYY to sortable YYYY-MM-DD format.
-    This ensures proper chronological sorting of text date fields.
+    Convert M/D/YYYY or MM/DD/YYYY to YYYY-MM-DD for proper sorting.
+    Handles variable-length month/day formats.
+    Returns empty string if parsing fails.
     """
-    return f'''
-        SUBSTR({date_col}, 7, 4) || '-' || 
-        SUBSTR({date_col}, 1, 2) || '-' || 
-        SUBSTR({date_col}, 4, 2)
-    '''
+    if not date_str:
+        return ''
+    try:
+        # Try parsing M/D/YYYY format (variable length)
+        parts = date_str.split('/')
+        if len(parts) == 3:
+            month, day, year = parts
+            return f"{year}-{month.zfill(2)}-{day.zfill(2)}"
+    except:
+        pass
+    return date_str  # Return original if parsing fails
+
+def sort_bills_by_date(bills: List[Dict[str, Any]], desc: bool = True) -> List[Dict[str, Any]]:
+    """Sort bills by bill_cycle_date chronologically"""
+    def get_sort_key(bill):
+        date_str = bill.get('bill_cycle_date', '')
+        sortable = parse_us_date_to_sortable(date_str)
+        # Secondary sort by first_scraped_at
+        scraped = bill.get('first_scraped_at', '')
+        return (sortable, scraped)
+    
+    return sorted(bills, key=get_sort_key, reverse=desc)
 
 def get_all_bills(limit: int = 100) -> List[Dict[str, Any]]:
     """Get all bills ordered by bill_cycle_date (newest first)"""
     conn = get_connection()
     cursor = conn.cursor()
     
-    # Convert MM/DD/YYYY to YYYY-MM-DD for proper chronological sorting
-    date_sort = date_to_sortable_sql('bill_cycle_date')
-    
-    cursor.execute(f'''
-        SELECT * FROM bills
-        ORDER BY {date_sort} DESC, first_scraped_at DESC
-        LIMIT ?
-    ''', (limit,))
-    
+    cursor.execute('SELECT * FROM bills LIMIT ?', (limit,))
     rows = cursor.fetchall()
     conn.close()
     
-    return [dict(row) for row in rows]
+    bills = [dict(row) for row in rows]
+    # Sort in Python to handle variable date formats (M/D/YYYY, MM/DD/YYYY, etc.)
+    return sort_bills_by_date(bills, desc=True)
 
 def get_bill_by_id(bill_id: int) -> Optional[Dict[str, Any]]:
     """Get a single bill by ID"""
@@ -439,12 +451,8 @@ def get_all_bills_with_payments() -> List[Dict[str, Any]]:
     conn = get_connection()
     cursor = conn.cursor()
     
-    # Get all bills ordered newest first (convert MM/DD/YYYY to sortable format)
-    date_sort = date_to_sortable_sql('bill_cycle_date')
-    cursor.execute(f'''
-        SELECT * FROM bills
-        ORDER BY {date_sort} DESC
-    ''')
+    # Get all bills (will be sorted in Python)
+    cursor.execute('SELECT * FROM bills')
     bills = [dict(row) for row in cursor.fetchall()]
     
     # Get payments for each bill
@@ -472,7 +480,10 @@ def get_all_bills_with_payments() -> List[Dict[str, Any]]:
     
     conn.close()
     
-    return {'bills': bills, 'orphan_payments': orphan_payments}
+    # Sort bills by date (newest first) using Python to handle variable date formats
+    sorted_bills = sort_bills_by_date(bills, desc=True)
+    
+    return {'bills': sorted_bills, 'orphan_payments': orphan_payments}
 
 def wipe_bills_and_payments() -> Dict[str, int]:
     """Delete all bills and payments from the database"""
@@ -888,14 +899,12 @@ def get_ledger_data() -> Dict[str, Any]:
     # Get current balance
     balance = get_current_balance()
     
-    # Get all bills with their payments (convert MM/DD/YYYY to YYYY-MM-DD for proper chronological order)
-    date_sort = date_to_sortable_sql('bill_cycle_date')
-    cursor.execute(f'''
-        SELECT * FROM bills
-        ORDER BY {date_sort} DESC, first_scraped_at DESC
-        LIMIT 50
-    ''')
+    # Get all bills (will sort in Python to handle variable date formats like M/D/YYYY)
+    cursor.execute('SELECT * FROM bills LIMIT 50')
     bills = [dict(row) for row in cursor.fetchall()]
+    
+    # Sort bills by date (newest first)
+    bills = sort_bills_by_date(bills, desc=True)
     
     # Get payments grouped by bill
     # Order: manual_order first (if set), then payment_date DESC, then first_scraped_at ASC
