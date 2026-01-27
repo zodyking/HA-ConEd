@@ -432,89 +432,96 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
           <span className="ha-card-icon">💰</span>
           <span>Account Summary</span>
         </div>
-        <div className="ha-card-content">
-          <div className="ha-summary-grid">
-            <strong>Date:</strong> <span>{formattedTimestamp.date}</span>
-            <strong>Time:</strong> <span>{formattedTimestamp.time}</span>
-            <strong>Account Balance:</strong> <span className="ha-summary-balance">{accountBalance}</span>
-          </div>
-          {/* Action buttons row */}
-          {(screenshotPath || pdfBillUrl) && (
-            <div style={{ 
-              display: 'flex', 
-              gap: '0.75rem', 
-              marginTop: '1rem', 
-              flexWrap: 'wrap' 
-            }}>
-              {screenshotPath && (
-                <button
-                  onClick={() => setShowScreenshotModal(true)}
-                  className="ha-button ha-button-primary"
-                  style={{ 
-                    fontSize: '0.75rem', 
-                    padding: '0.5rem 1rem', 
-                    display: 'inline-flex', 
-                    alignItems: 'center', 
-                    gap: '0.5rem', 
-                    border: 'none', 
-                    cursor: 'pointer',
-                    borderRadius: '6px',
-                    flex: '1 1 auto',
-                    maxWidth: '280px',
-                    justifyContent: 'center'
-                  }}
-                >
-                  <img src="/images/Coned_snapshot.svg" alt="Screenshot" style={{ width: '18px', height: '18px' }} />
-                  View Account Screenshot
-                </button>
-              )}
-              {pdfExists ? (
-                <button
-                  onClick={() => setShowPdfModal(true)}
-                  className="ha-button"
-                  style={{ 
-                    fontSize: '0.75rem', 
-                    padding: '0.5rem 1rem', 
-                    display: 'inline-flex', 
-                    alignItems: 'center', 
-                    gap: '0.5rem', 
-                    border: 'none', 
-                    cursor: 'pointer', 
-                    backgroundColor: '#4caf50',
-                    color: 'white',
-                    borderRadius: '6px',
-                    flex: '1 1 auto',
-                    maxWidth: '280px',
-                    justifyContent: 'center'
-                  }}
-                >
-                  📄 View Latest Bill PDF
-                </button>
-              ) : (
-                <button
-                  onClick={() => onNavigate?.('settings')}
-                  className="ha-button"
-                  style={{ 
-                    fontSize: '0.75rem', 
-                    padding: '0.5rem 1rem', 
-                    display: 'inline-flex', 
-                    alignItems: 'center', 
-                    gap: '0.5rem', 
-                    border: 'none', 
-                    cursor: 'pointer', 
-                    backgroundColor: '#ff9800',
-                    color: 'white',
-                    borderRadius: '6px',
-                    flex: '1 1 auto',
-                    maxWidth: '280px',
-                    justifyContent: 'center'
-                  }}
-                >
-                  📄 Add Bill PDF Link
-                </button>
-              )}
+        <div className="ha-card-content" style={{ padding: '1.25rem' }}>
+          {/* Main Balance Display */}
+          <div style={{ 
+            textAlign: 'center', 
+            marginBottom: '1.25rem',
+            padding: '1rem',
+            background: 'linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)',
+            borderRadius: '8px'
+          }}>
+            <div style={{ fontSize: '0.75rem', color: '#666', marginBottom: '0.25rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              Account Balance
             </div>
-          )}
+            <div style={{ 
+              fontSize: '2.25rem', 
+              fontWeight: 700, 
+              color: '#0072ce',
+              fontFamily: 'system-ui, -apple-system, sans-serif'
+            }}>
+              {accountBalance}
+            </div>
+          </div>
+          
+          {/* Date/Time Row */}
+          <div style={{ 
+            display: 'flex', 
+            justifyContent: 'space-between',
+            padding: '0.75rem 0',
+            borderBottom: '1px solid #eee',
+            marginBottom: '1rem'
+          }}>
+            <div style={{ textAlign: 'left' }}>
+              <div style={{ fontSize: '0.65rem', color: '#999', textTransform: 'uppercase', marginBottom: '0.15rem' }}>Last Updated</div>
+              <div style={{ fontSize: '0.85rem', fontWeight: 500, color: '#333' }}>{formattedTimestamp.date}</div>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: '0.65rem', color: '#999', textTransform: 'uppercase', marginBottom: '0.15rem' }}>Time</div>
+              <div style={{ fontSize: '0.85rem', fontWeight: 500, color: '#333' }}>{formattedTimestamp.time}</div>
+            </div>
+          </div>
+          
+          {/* Action Buttons - Always 50/50 */}
+          <div style={{ 
+            display: 'grid', 
+            gridTemplateColumns: '1fr 1fr',
+            gap: '0.75rem'
+          }}>
+            <button
+              onClick={() => screenshotPath ? setShowScreenshotModal(true) : null}
+              disabled={!screenshotPath}
+              style={{ 
+                padding: '0.75rem 0.5rem',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.5rem',
+                border: 'none',
+                cursor: screenshotPath ? 'pointer' : 'not-allowed',
+                backgroundColor: screenshotPath ? '#0072ce' : '#ccc',
+                color: 'white',
+                borderRadius: '6px',
+                fontSize: '0.8rem',
+                fontWeight: 500,
+                transition: 'background-color 0.2s'
+              }}
+            >
+              <img src="/images/Coned_snapshot.svg" alt="" style={{ width: '16px', height: '16px', filter: 'brightness(0) invert(1)' }} />
+              Account
+            </button>
+            
+            <button
+              onClick={() => pdfExists ? setShowPdfModal(true) : onNavigate?.('settings')}
+              style={{ 
+                padding: '0.75rem 0.5rem',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.5rem',
+                border: 'none',
+                cursor: 'pointer',
+                backgroundColor: pdfExists ? '#4caf50' : '#ff9800',
+                color: 'white',
+                borderRadius: '6px',
+                fontSize: '0.8rem',
+                fontWeight: 500,
+                transition: 'background-color 0.2s'
+              }}
+            >
+              📄 {pdfExists ? 'Latest Bill' : 'Add Bill'}
+            </button>
+          </div>
         </div>
       </div>
 
