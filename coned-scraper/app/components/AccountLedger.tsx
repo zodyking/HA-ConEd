@@ -226,6 +226,21 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
   const screenshotPath = latestData.screenshot_path
   const pdfBillUrl = latestData.data?.pdf_bill_url
   const billHistory = latestData.data?.bill_history
+  
+  // Extract last payment and latest bill from ledger
+  const ledgerItems = billHistory?.ledger || []
+  const firstPayment = ledgerItems.find(item => item.type === 'payment')
+  const firstBill = ledgerItems.find(item => item.type === 'bill')
+  
+  const lastPayment = firstPayment ? {
+    amount: firstPayment.amount || '—',
+    date: firstPayment.bill_cycle_date || ''
+  } : null
+  
+  const latestBill = firstBill ? {
+    amount: firstBill.bill_total || '—',
+    date: firstBill.month_range || ''
+  } : null
 
   // Group bills and payments correctly
   const bills: Array<any> = []
@@ -423,85 +438,70 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
           <span className="ha-card-icon">💰</span>
           <span>Account Summary</span>
         </div>
-        <div className="ha-card-content" style={{ padding: '0.75rem' }}>
-          {/* Compact Balance Display */}
-          <div style={{ 
-            textAlign: 'center', 
-            marginBottom: '0.5rem',
-            padding: '0.5rem',
-            background: 'linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)',
-            borderRadius: '6px'
-          }}>
-            <div style={{ fontSize: '0.6rem', color: '#666', marginBottom: '0.1rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-              Account Balance
-            </div>
-            <div style={{ 
-              fontSize: '1.5rem', 
-              fontWeight: 700, 
-              color: '#006699',
-              fontFamily: 'system-ui, -apple-system, sans-serif'
-            }}>
-              {accountBalance}
-            </div>
-          </div>
-          
-          {/* Compact Date/Time Row */}
+        <div className="ha-card-content" style={{ padding: '0.5rem' }}>
+          {/* Compact Balance + Info Row */}
           <div style={{ 
             display: 'flex', 
+            alignItems: 'center',
             justifyContent: 'space-between',
-            padding: '0.4rem 0',
-            borderBottom: '1px solid #eee',
-            marginBottom: '0.5rem'
+            gap: '0.75rem',
+            marginBottom: '0.4rem'
           }}>
-            <div style={{ textAlign: 'left' }}>
-              <div style={{ fontSize: '0.55rem', color: '#999', textTransform: 'uppercase', marginBottom: '0.1rem' }}>Last Updated</div>
-              <div style={{ fontSize: '0.7rem', fontWeight: 500, color: '#333' }}>{formattedTimestamp.date}</div>
+            {/* Balance */}
+            <div style={{ 
+              textAlign: 'center',
+              padding: '0.4rem 0.75rem',
+              background: 'linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)',
+              borderRadius: '6px',
+              flex: '0 0 auto'
+            }}>
+              <div style={{ fontSize: '0.5rem', color: '#666', textTransform: 'uppercase', letterSpacing: '0.3px' }}>Balance</div>
+              <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#03a9f4' }}>{accountBalance}</div>
             </div>
-            <div style={{ textAlign: 'right' }}>
-              <div style={{ fontSize: '0.55rem', color: '#999', textTransform: 'uppercase', marginBottom: '0.1rem' }}>Time</div>
-              <div style={{ fontSize: '0.7rem', fontWeight: 500, color: '#333' }}>{formattedTimestamp.time}</div>
+            
+            {/* Last Payment */}
+            <div style={{ textAlign: 'center', flex: 1 }}>
+              <div style={{ fontSize: '0.5rem', color: '#999', textTransform: 'uppercase' }}>Last Payment</div>
+              <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#4caf50' }}>{lastPayment?.amount || '—'}</div>
+              <div style={{ fontSize: '0.55rem', color: '#666' }}>{lastPayment?.date || ''}</div>
+            </div>
+            
+            {/* Last Bill */}
+            <div style={{ textAlign: 'center', flex: 1 }}>
+              <div style={{ fontSize: '0.5rem', color: '#999', textTransform: 'uppercase' }}>Last Bill</div>
+              <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#f44336' }}>{latestBill?.amount || '—'}</div>
+              <div style={{ fontSize: '0.55rem', color: '#666' }}>{latestBill?.date || ''}</div>
             </div>
           </div>
           
-          {/* Compact Action Buttons - No icons */}
-          <div style={{ 
-            display: 'grid', 
-            gridTemplateColumns: '1fr 1fr',
-            gap: '0.5rem'
-          }}>
+          {/* Action Buttons */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4rem' }}>
             <button
               onClick={() => screenshotPath ? setShowScreenshotModal(true) : null}
               disabled={!screenshotPath}
               style={{ 
-                padding: '0.5rem',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
+                padding: '0.4rem',
                 border: 'none',
                 cursor: screenshotPath ? 'pointer' : 'not-allowed',
-                backgroundColor: screenshotPath ? '#006699' : '#ccc',
+                backgroundColor: screenshotPath ? '#03a9f4' : '#ccc',
                 color: 'white',
                 borderRadius: '4px',
-                fontSize: '0.7rem',
+                fontSize: '0.65rem',
                 fontWeight: 500
               }}
             >
               Account
             </button>
-            
             <button
               onClick={() => pdfExists ? setShowPdfModal(true) : onNavigate?.('settings')}
               style={{ 
-                padding: '0.5rem',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
+                padding: '0.4rem',
                 border: 'none',
                 cursor: 'pointer',
                 backgroundColor: pdfExists ? '#4caf50' : '#ff9800',
                 color: 'white',
                 borderRadius: '4px',
-                fontSize: '0.7rem',
+                fontSize: '0.65rem',
                 fontWeight: 500
               }}
             >
