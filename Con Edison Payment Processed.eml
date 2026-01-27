@@ -1,0 +1,107 @@
+Delivered-To: zodykinginbox@gmail.com
+Received: by 2002:a5d:4bc5:0:b0:432:9f9f:86f4 with SMTP id l5csp363646wrt;
+        Sat, 24 Jan 2026 14:01:44 -0800 (PST)
+X-Received: by 2002:a05:7022:619b:b0:123:3628:2ef9 with SMTP id a92af1059eb24-1248ec9c916mr48395c88.36.1769292104515;
+        Sat, 24 Jan 2026 14:01:44 -0800 (PST)
+ARC-Seal: i=1; a=rsa-sha256; t=1769292104; cv=none;
+        d=google.com; s=arc-20240605;
+        b=jWHaDNoMHrTzA4wh5OUNJdBOedrqjv5g5FE9Xt5c+N0ghVuq0IBN5wspiAOlY96wfe
+         nOrJDBdlvU36qPF0qB+g42xXtQbTCzXsLSfKjHjpSxFmbEvu1us9RrkTp8f+LS71tutr
+         JW6HxId7bFEE6Odc4GfE7nn08e65mHlW3PVUWZvmnSxIP5eUg6wSMIoOzlvPQJupMrz0
+         OmFO0JAAw4mkLVXuRyBhGWxNUWQ4ljijrjUS0MePm+WArO8Phg503yJS1ft0V/rCND4Z
+         O8bVLdotRMsMwaFp4ffPpCeZsMQHmloR8qZTEQQ5Jvd2EppdM9ow5KwXUC9yu7oJowBC
+         nqPA==
+ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed; d=google.com; s=arc-20240605;
+        h=message-id:content-transfer-encoding:subject:date:to:from
+         :mime-version:dkim-signature;
+        bh=Dz2R7ZdiNlrFWiaBRjuAgw2sRf1phWwrPv8V8dMSJ4o=;
+        fh=hQE7XjnSay8z8KQPdE/nV8rPgYsh88ZYu1iT1pJwjpc=;
+        b=e0pyGcin9Hw86cfaaAnQm2kp4B+T96biKQOJisCQUo1q5WZhJfDPL0UunLsLEVPuv6
+         bdjPLkdQmhiidmnTgj/n9xjHdf2S9i+MLcjSLdo3Yw/hnb0+ZHY8SQ5ecngSOpsxd4Fi
+         x6PlxR7whYIpjEzbiDkohZvI35q+ssptauM3uw00+pqXJLJa4iZ7A2bIOyLEkdTJ0071
+         FWmjulpPjDnmvk7qWuGl4puOTgrvbCTAIBlYm3onq+8bwZF4FHoGJ9Ry6sJxg5NuXbZB
+         /u6t9sesuYX5pev8zwfFKzjRZ5DgEhvjZN8u/KhAYXav3xENlKOxXewUuOt3nRQdV5E3
+         6smw==;
+        dara=google.com
+ARC-Authentication-Results: i=1; mx.google.com;
+       dkim=pass header.i=@billmatrix.com header.s=iron.lewisville2 header.b=exRHntOB;
+       spf=pass (google.com: domain of donotreply@billmatrix.com designates 205.220.171.229 as permitted sender) smtp.mailfrom=DoNotReply@billmatrix.com;
+       dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=billmatrix.com
+Return-Path: <DoNotReply@billmatrix.com>
+Received: from mx0a-0090d002.pphosted.com (mx0a-0090d002.pphosted.com. [205.220.171.229])
+        by mx.google.com with ESMTPS id a92af1059eb24-1247d91daccsi18727819c88.35.2026.01.24.14.01.44
+        for <Zodykinginbox@gmail.com>
+        (version=TLS1_2 cipher=ECDHE-ECDSA-AES128-GCM-SHA256 bits=128/128);
+        Sat, 24 Jan 2026 14:01:44 -0800 (PST)
+Received-SPF: pass (google.com: domain of donotreply@billmatrix.com designates 205.220.171.229 as permitted sender) client-ip=205.220.171.229;
+Authentication-Results: mx.google.com;
+       dkim=pass header.i=@billmatrix.com header.s=iron.lewisville2 header.b=exRHntOB;
+       spf=pass (google.com: domain of donotreply@billmatrix.com designates 205.220.171.229 as permitted sender) smtp.mailfrom=DoNotReply@billmatrix.com;
+       dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=billmatrix.com
+Received: from pps.filterd (m0381471.ppops.net [127.0.0.1])
+	by mx0a-0090d002.pphosted.com (8.18.1.2/8.18.1.2) with ESMTP id 60OHxHRw000424
+	for <Zodykinginbox@gmail.com>; Sat, 24 Jan 2026 17:01:43 -0500
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=billmatrix.com;
+	 h=content-transfer-encoding:content-type:date:from:message-id
+	:mime-version:subject:to; s=iron.lewisville2; bh=Dz2R7ZdiNlrFWia
+	BRjuAgw2sRf1phWwrPv8V8dMSJ4o=; b=exRHntOB5XHEEHwvGTzeFmcf/nY4lLK
+	S+oqG7LDePFFipMKzzUXhiGeQ3Nvv22lVtiO1ZX0swOUpTlgs5AphfMipmq3lWLy
+	JhzIyzbgI+Yf2NhQXyGCBPBgcaFxifRLrfBUlP5T0vknLI1j7XDkwWp11WqffCT5
+	ZCpaM0f8ix75OgUbnIJnZIgtLSrZJ3/azhq/aMK4CgxrBB/qGsyW2dQ7PdufAflU
+	TesWpI3DpTZj+O9TXZ6hGHKFhaWKsUNUtoiTgkMmRT3fDR7AxtFly0ii/oWAsI1l
+	glaywyym+DKbx9jwxMnmlE8OpIPpCKiPyjpQBrCUBtJNf9eo1OYngXw==
+Received: from ybxp2mgwppa0004.fiserv.one ([166.73.14.17])
+	by mx0a-0090d002.pphosted.com (PPS) with ESMTPS id 4bvpp7wdaa-1
+	(version=TLSv1.2 cipher=ECDHE-RSA-AES256-GCM-SHA384 bits=256 verify=NOT)
+	for <Zodykinginbox@gmail.com>; Sat, 24 Jan 2026 17:01:43 -0500 (EST)
+Received: from pps.filterd (ybxp2mgwppa0004.fiserv.one [127.0.0.1])
+	by ybxp2mgwppa0004.fiserv.one (8.18.1.2/8.18.1.2) with ESMTP id 60OLriMj004100
+	for <Zodykinginbox@gmail.com>; Sat, 24 Jan 2026 22:01:42 GMT
+Received: from lwppi01svc01 ([10.151.224.4])
+	by ybxp2mgwppa0004.fiserv.one (PPS) with ESMTPS id 4brnnabtt6-5
+	(version=TLSv1.2 cipher=ECDHE-RSA-AES256-GCM-SHA384 bits=256 verify=NOT)
+	for <Zodykinginbox@gmail.com>; Sat, 24 Jan 2026 22:01:42 +0000
+MIME-Version: 1.0
+From: "DoNotReply@billmatrix.com" <DoNotReply@billmatrix.com>
+To: "Zodykinginbox@gmail.com" <Zodykinginbox@gmail.com>
+Date: 24 Jan 2026 16:01:42 -0600
+Subject: Con Edison Payment Processed
+Content-Type: text/html; charset=us-ascii
+Content-Transfer-Encoding: quoted-printable
+Message-ID: <4brnnabtt6-5@ybxp2mgwppa0004.fiserv.one>
+X-Authority-Analysis: v=2.4 cv=eu7SD4pX c=1 sm=1 tr=0 ts=69754147 cx=c_pps
+ a=VWd2lGS7XgikeWbNKgdybw==:117 a=VWd2lGS7XgikeWbNKgdybw==:17
+ a=kj9zAlcOel0A:10 a=1oJP67jkp3AA:10 a=vUbySO9Y5rIA:10 a=7j0FZ4iXMVMA:10
+ a=g8TUdU_LZmEA:10 a=VkNPw1HP01LnGYTKEx00:22 a=qkBl9y_moc1MRaTEnD0A:9
+ a=_W_S_7VecoQA:10 a=CjuIK1q_8ugA:10 a=zgiPjhLxNE0A:10
+X-Proofpoint-Spam-Details-Enc: AW1haW4tMjYwMTI0MDE3OSBTYWx0ZWRfX9HZUNCLcn54C
+ NjZm4dIEiwvKE1zFPt1C/HfLei/eOjOEZKNFMaPzGKNyGgSrelGRrMrkJMYkzorl8fcla+aPHjT
+ jNsnZwdJLl7qZ1q6KurhjP21z/5S4TxW+AFgecWg1ktEUgzSoLfsz6HobwEZIkskwSBofcUH67M
+ 1B647bqGi8NeIRnexc1tf7hgQNm0gcD2dvBgi8ZDigyb8DjqZYkM751zw1UbqFEclgD4f76SYAj
+ xJvCYwWX8Noeax2v6Zy8TOIH11iOyXE5ztXaO/ipwiIb/yaxwNMjttrtyp5TcKm1cMZKTqUwGf/
+ dbWlgSNmMXBy8wl2IsXMZ6/jahUHz6G8fGrXXVRR1gdBsk6nGeIwy0ngo3PHK+PjhtzETmqya1K
+ eGOrxOXa0+pd2+gGArcAislsQlfcvQ==
+X-Proofpoint-GUID: mZUBd9c9lsOtKnZiLKUJp-vt2zcdg6h5
+X-Proofpoint-ORIG-GUID: mZUBd9c9lsOtKnZiLKUJp-vt2zcdg6h5
+X-Proofpoint-Virus-Version: vendor=baseguard
+ engine=ICAP:2.0.293,Aquarius:18.0.1121,Hydra:6.1.20,FMLib:17.12.100.49
+ definitions=2026-01-24_04,2026-01-22_02,2025-10-01_01
+X-Proofpoint-Spam-Details: rule=notspam policy=default score=0 bulkscore=0
+ lowpriorityscore=0 spamscore=0 adultscore=0 phishscore=0 suspectscore=0
+ malwarescore=0 classifier=typeunknown authscore=0 authtc= authcc=
+ route=outbound adjust=0 reason=mlx scancount=1 engine=8.19.0-2601150000
+ definitions=main-2601240179
+
+=0A<html>=0A<head></head>=0A<body>=0A<pre style=3D"font-family:Ca=
+libri;font-size:15px">Dear Con Edison Customer,=0A=0AYour one-tim=
+e payment made on 01/24/2026 05:01:34 PM ET of $248.50 was succes=
+sfully processed for account ending in 7259.=0A=0AHere are the de=
+tails of the payment:=0A=0AConfirmation Number: 1024995025=0APaym=
+ent Amount: $248.50=0A=0AThe payment was funded from the followin=
+g payment account:=0A=0AWallet: Visa *7545=0ACard Number ending i=
+n: 7545=0A=0APlease save this confirmation for future reference.=0A=
+=0AThank you,=0ACon Edison =0A=0APlease do not reply to this mess=
+age. Replies to this address are routed to an unmonitored mail bo=
+x.=0A=0ACon Edison=0ACooper Station=0APO Box 138=0ANew York, NY 1=
+0276=0A=0A</pre>=0A</body>=0A</html>=0A
+

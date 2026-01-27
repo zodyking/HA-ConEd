@@ -2460,7 +2460,7 @@ function IMAPTab() {
     password: '',
     use_ssl: true,
     gmail_label: 'ConEd',
-    subject_filter: 'Payment Confirmation',
+    subject_filter: 'Con Edison Payment Processed',
     auto_assign_mode: 'manual' as 'manual' | 'every_scrape' | 'custom',
     custom_interval_minutes: 60
   })
@@ -2487,7 +2487,7 @@ function IMAPTab() {
           password: data.password || '',
           use_ssl: data.use_ssl !== false,
           gmail_label: data.gmail_label || 'ConEd',
-          subject_filter: data.subject_filter || 'Payment Confirmation',
+          subject_filter: data.subject_filter || 'Con Edison Payment Processed',
           auto_assign_mode: data.auto_assign_mode || 'manual',
           custom_interval_minutes: data.custom_interval_minutes || 60
         })
@@ -2571,12 +2571,18 @@ function IMAPTab() {
 
   const handlePreview = async () => {
     setIsLoading(true)
+    setMessage(null)
     try {
-      const res = await fetch(`${API_BASE_URL}/imap-config/preview`)
+      const res = await fetch(`${API_BASE_URL}/imap-config/preview`, { method: 'POST' })
       if (res.ok) {
         const data = await res.json()
-        setPreviewEmails(data.emails || [])
-        setShowPreview(true)
+        if (data.success) {
+          setPreviewEmails(data.preview || [])
+          setShowPreview(true)
+          setMessage({ type: 'success', text: `Found ${data.emails_found} matching emails` })
+        } else {
+          setMessage({ type: 'error', text: data.message || 'Preview failed' })
+        }
       }
     } catch (e) {
       setMessage({ type: 'error', text: 'Failed to preview emails' })
@@ -2680,7 +2686,10 @@ function IMAPTab() {
           marginBottom: '1rem',
           marginTop: '1rem'
         }}>
-          <div style={{ fontWeight: 600, marginBottom: '0.75rem', color: '#333' }}>📁 Email Filtering</div>
+          <div style={{ fontWeight: 600, marginBottom: '0.5rem', color: '#333' }}>📁 Email Filtering (Strict Criteria)</div>
+          <div className="info-text" style={{ marginBottom: '0.75rem' }}>
+            Emails are ONLY fetched from <strong>DoNotReply@billmatrix.com</strong> that match all criteria below.
+          </div>
           
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
             <div className="ha-form-group" style={{ marginBottom: 0 }}>
@@ -2693,20 +2702,20 @@ function IMAPTab() {
                 placeholder="ConEd"
               />
               <div className="info-text">
-                The Gmail label or IMAP folder to search in
+                Gmail label to search (e.g., &quot;ConEd&quot;). Leave empty for INBOX.
               </div>
             </div>
             <div className="ha-form-group" style={{ marginBottom: 0 }}>
-              <label className="ha-form-label">Subject Contains</label>
+              <label className="ha-form-label">Subject Filter</label>
               <input
                 type="text"
                 className="ha-form-input"
                 value={config.subject_filter}
                 onChange={(e) => setConfig({ ...config, subject_filter: e.target.value })}
-                placeholder="Payment Confirmation"
+                placeholder="Con Edison Payment Processed"
               />
               <div className="info-text">
-                Only check emails with this text in subject
+                Exact subject text (e.g., &quot;Con Edison Payment Processed&quot;)
               </div>
             </div>
           </div>

@@ -1523,18 +1523,56 @@ async def test_imap_config(config: IMAPTestModel):
         existing = load_imap_config()
         password = existing.get('password', '')
     
+    # Get gmail_label from existing config if not in test model
+    existing = load_imap_config()
+    gmail_label = existing.get('gmail_label')
+    
     result = test_imap_connection(
         server=config.server,
         port=config.port,
         email_addr=config.email,
         password=password,
-        use_ssl=config.use_ssl
+        use_ssl=config.use_ssl,
+        gmail_label=gmail_label
     )
     
     if result['success']:
         add_log("success", "IMAP connection test successful")
     else:
         add_log("error", f"IMAP connection test failed: {result['message']}")
+    
+    return result
+
+@app.post("/api/imap-config/preview")
+async def preview_imap_emails():
+    """Preview emails that would be found with current settings"""
+    from imap_client import preview_email_search, load_imap_config
+    
+    config = load_imap_config()
+    
+    if not config.get('server') or not config.get('email'):
+        return {
+            'success': False,
+            'message': 'IMAP not configured'
+        }
+    
+    add_log("info", f"Previewing emails - Label: {config.get('gmail_label')}, Subject: {config.get('subject_filter')}")
+    
+    result = preview_email_search(
+        server=config['server'],
+        port=config.get('port', 993),
+        email_addr=config['email'],
+        password=config.get('password', ''),
+        use_ssl=config.get('use_ssl', True),
+        gmail_label=config.get('gmail_label'),
+        subject_filter=config.get('subject_filter'),
+        limit=10
+    )
+    
+    if result['success']:
+        add_log("success", f"Found {result['emails_found']} payment emails")
+    else:
+        add_log("error", f"Email preview failed: {result['message']}")
     
     return result
 

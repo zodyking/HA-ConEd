@@ -233,14 +233,28 @@ def upsert_bill(bill_data: Dict[str, Any]) -> int:
     conn.close()
     return bill_id
 
+def date_to_sortable_sql(date_col: str) -> str:
+    """
+    Return SQL expression to convert MM/DD/YYYY to sortable YYYY-MM-DD format.
+    This ensures proper chronological sorting of text date fields.
+    """
+    return f'''
+        SUBSTR({date_col}, 7, 4) || '-' || 
+        SUBSTR({date_col}, 1, 2) || '-' || 
+        SUBSTR({date_col}, 4, 2)
+    '''
+
 def get_all_bills(limit: int = 100) -> List[Dict[str, Any]]:
-    """Get all bills ordered by first_scraped_at (newest first)"""
+    """Get all bills ordered by bill_cycle_date (newest first)"""
     conn = get_connection()
     cursor = conn.cursor()
     
-    cursor.execute('''
+    # Convert MM/DD/YYYY to YYYY-MM-DD for proper chronological sorting
+    date_sort = date_to_sortable_sql('bill_cycle_date')
+    
+    cursor.execute(f'''
         SELECT * FROM bills
-        ORDER BY bill_cycle_date DESC, first_scraped_at DESC
+        ORDER BY {date_sort} DESC, first_scraped_at DESC
         LIMIT ?
     ''', (limit,))
     
@@ -425,10 +439,11 @@ def get_all_bills_with_payments() -> List[Dict[str, Any]]:
     conn = get_connection()
     cursor = conn.cursor()
     
-    # Get all bills ordered newest first
-    cursor.execute('''
+    # Get all bills ordered newest first (convert MM/DD/YYYY to sortable format)
+    date_sort = date_to_sortable_sql('bill_cycle_date')
+    cursor.execute(f'''
         SELECT * FROM bills
-        ORDER BY bill_cycle_date DESC
+        ORDER BY {date_sort} DESC
     ''')
     bills = [dict(row) for row in cursor.fetchall()]
     
@@ -873,10 +888,11 @@ def get_ledger_data() -> Dict[str, Any]:
     # Get current balance
     balance = get_current_balance()
     
-    # Get all bills with their payments (order by bill_cycle_date for proper chronological order)
-    cursor.execute('''
+    # Get all bills with their payments (convert MM/DD/YYYY to YYYY-MM-DD for proper chronological order)
+    date_sort = date_to_sortable_sql('bill_cycle_date')
+    cursor.execute(f'''
         SELECT * FROM bills
-        ORDER BY bill_cycle_date DESC, first_scraped_at DESC
+        ORDER BY {date_sort} DESC, first_scraped_at DESC
         LIMIT 50
     ''')
     bills = [dict(row) for row in cursor.fetchall()]

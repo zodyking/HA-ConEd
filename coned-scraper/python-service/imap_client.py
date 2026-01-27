@@ -1,10 +1,17 @@
 """
 IMAP client for fetching ConEd payment confirmation emails
 Extracts card last 4 digits for automatic payment attribution
+
+STRICT CRITERIA:
+- Only emails FROM: DoNotReply@billmatrix.com
+- Only emails with exact SUBJECT from config (e.g., "Con Edison Payment Processed")
+- Only emails in the specified Gmail label
+- Extracts card from "Card Number ending in: XXXX" pattern
 """
 import imaplib
 import email
 from email.header import decode_header
+import quopri
 import re
 import json
 import logging
@@ -16,6 +23,9 @@ logger = logging.getLogger(__name__)
 
 # Config file path
 IMAP_CONFIG_FILE = Path("./data") / "imap_config.json"
+
+# STRICT: Only accept emails from this sender
+CONED_PAYMENT_SENDER = "DoNotReply@billmatrix.com"
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -33,7 +43,7 @@ def save_imap_config(config: Dict[str, Any]):
     with open(IMAP_CONFIG_FILE, 'w') as f:
         json.dump(config, f, indent=2)
 
-def test_imap_connection(server: str, port: int, email_addr: str, password: str, use_ssl: bool = True) -> Dict[str, Any]:
+def test_imap_connection(server: str, port: int, email_addr: str, password: str, use_ssl: bool = True, gmail_label: str = None) -> Dict[str, Any]:
     """Test IMAP connection with provided credentials"""
     try:
         if use_ssl:
@@ -42,17 +52,44 @@ def test_imap_connection(server: str, port: int, email_addr: str, password: str,
             mail = imaplib.IMAP4(server, port)
         
         mail.login(email_addr, password)
-        mail.select('INBOX')
         
-        # Get mailbox status
+        # List available folders/labels
+        status, folders = mail.list()
+        folder_list = []
+        if status == 'OK':
+            for f in folders:
+                # Parse folder name from response
+                match = re.search(r'"([^"]+)"$', f.decode() if isinstance(f, bytes) else f)
+                if match:
+                    folder_list.append(match.group(1))
+        
+        # Try to select the specified Gmail label if provided
+        label_exists = False
+        if gmail_label:
+            # Gmail labels are accessed as folders
+            try:
+                status, data = mail.select(f'"{gmail_label}"')
+                label_exists = status == 'OK'
+            except:
+                pass
+        
+        mail.select('INBOX')
         status, data = mail.status('INBOX', '(MESSAGES UNSEEN)')
         mail.logout()
         
-        return {
+        result = {
             'success': True,
             'message': 'Connection successful!',
-            'mailbox_status': data[0].decode() if data else None
+            'mailbox_status': data[0].decode() if data else None,
+            'available_folders': folder_list[:20]  # Limit to first 20
         }
+        
+        if gmail_label:
+            result['label_exists'] = label_exists
+            if not label_exists:
+                result['message'] = f'Connected, but Gmail label "{gmail_label}" not found'
+        
+        return result
     except imaplib.IMAP4.error as e:
         return {
             'success': False,
@@ -64,38 +101,88 @@ def test_imap_connection(server: str, port: int, email_addr: str, password: str,
             'message': f'Connection failed: {str(e)}'
         }
 
+def decode_email_body(msg) -> str:
+    """Properly decode email body including quoted-printable encoding"""
+    body = ""
+    
+    if msg.is_multipart():
+        for part in msg.walk():
+            content_type = part.get_content_type()
+            if content_type in ('text/plain', 'text/html'):
+                try:
+                    payload = part.get_payload(decode=True)
+                    if payload:
+                        charset = part.get_content_charset() or 'utf-8'
+                        decoded = payload.decode(charset, errors='replace')
+                        
+                        # Handle quoted-printable encoded content
+                        # Replace =0A with newlines, =3D with =, etc.
+                        decoded = decoded.replace('=0A', '\n')
+                        decoded = decoded.replace('=0D', '\r')
+                        decoded = decoded.replace('=3D', '=')
+                        
+                        if content_type == 'text/html':
+                            # Strip HTML tags
+                            decoded = re.sub(r'<[^>]+>', ' ', decoded)
+                        
+                        body += decoded + "\n"
+                except Exception as e:
+                    logger.debug(f"Failed to decode part: {e}")
+    else:
+        try:
+            payload = msg.get_payload(decode=True)
+            if payload:
+                charset = msg.get_content_charset() or 'utf-8'
+                body = payload.decode(charset, errors='replace')
+                
+                # Handle quoted-printable
+                body = body.replace('=0A', '\n')
+                body = body.replace('=0D', '\r')
+                body = body.replace('=3D', '=')
+        except Exception as e:
+            logger.debug(f"Failed to decode body: {e}")
+    
+    return body
+
 def extract_card_from_email(email_body: str) -> Optional[str]:
-    """Extract card last 4 digits from ConEd payment confirmation email"""
-    # Patterns to look for card numbers
+    """
+    Extract card last 4 digits from ConEd payment confirmation email
+    
+    STRICT: Only looks for "Card Number ending in: XXXX" pattern
+    from BillMatrix emails
+    """
+    # Primary pattern from BillMatrix ConEd emails
+    # Example: "Card Number ending in: 7545"
     patterns = [
-        r'Card Number ending in[:\s]*\*?(\d{4})',
-        r'Wallet:\s*\w+\s*\*(\d{4})',
-        r'Card ending in[:\s]*\*?(\d{4})',
-        r'ending in[:\s]*\*?(\d{4})',
-        r'card[:\s]*\*+(\d{4})',
-        r'Visa\s*\*(\d{4})',
-        r'Mastercard\s*\*(\d{4})',
-        r'Amex\s*\*(\d{4})',
-        r'Discover\s*\*(\d{4})',
+        r'Card Number ending in[:\s]*(\d{4})',  # Primary: "Card Number ending in: 7545"
+        r'Card Number ending\s*in[:\s]*(\d{4})',  # Handle line breaks
     ]
     
     for pattern in patterns:
-        match = re.search(pattern, email_body, re.IGNORECASE)
+        match = re.search(pattern, email_body, re.IGNORECASE | re.MULTILINE)
         if match:
             card_last_four = match.group(1)
-            # Exclude account numbers (typically longer patterns we don't want)
-            # Also exclude confirmation numbers
-            if len(card_last_four) == 4:
+            if len(card_last_four) == 4 and card_last_four.isdigit():
+                logger.info(f"Extracted card ending: *{card_last_four}")
                 return card_last_four
+    
+    # Fallback: Also check for "Wallet: Visa *XXXX" format (also in BillMatrix emails)
+    wallet_match = re.search(r'Wallet:\s*\w+\s*\*(\d{4})', email_body, re.IGNORECASE)
+    if wallet_match:
+        card = wallet_match.group(1)
+        if len(card) == 4 and card.isdigit():
+            logger.info(f"Extracted card from wallet: *{card}")
+            return card
     
     return None
 
 def extract_payment_amount(email_body: str) -> Optional[str]:
     """Extract payment amount from email"""
+    # Look for specific BillMatrix patterns
     patterns = [
-        r'\$\s*([\d,]+\.?\d*)',
-        r'amount[:\s]*\$?\s*([\d,]+\.?\d*)',
-        r'payment of[:\s]*\$?\s*([\d,]+\.?\d*)',
+        r'payment[^$]*\$\s*([\d,]+\.?\d*)',  # "payment ... of $248.50"
+        r'Payment Amount[:\s]*\$\s*([\d,]+\.?\d*)',  # "Payment Amount: $248.50"
+        r'\$\s*([\d,]+\.\d{2})',  # Any dollar amount with cents
     ]
     
     for pattern in patterns:
@@ -112,10 +199,10 @@ def extract_payment_amount(email_body: str) -> Optional[str]:
 
 def extract_payment_date(email_body: str, email_date: datetime) -> str:
     """Extract payment date from email or use email date"""
-    # Try to find date in email body
+    # Look for date patterns in BillMatrix format
     patterns = [
-        r'(\d{1,2}/\d{1,2}/\d{4})',
-        r'(\d{1,2}-\d{1,2}-\d{4})',
+        r'made on\s*(\d{1,2}/\d{1,2}/\d{4})',  # "made on 01/24/2026"
+        r'(\d{1,2}/\d{1,2}/\d{4})',  # Generic MM/DD/YYYY
     ]
     
     for pattern in patterns:
@@ -132,20 +219,23 @@ def fetch_coned_payment_emails(
     email_addr: str,
     password: str,
     use_ssl: bool = True,
-    days_back: int = 30,
-    folder: str = 'INBOX'
+    gmail_label: str = None,
+    subject_filter: str = None
 ) -> List[Dict[str, Any]]:
     """
-    Fetch ConEd payment confirmation emails and extract card info
+    Fetch ConEd payment confirmation emails with STRICT criteria:
+    - FROM: DoNotReply@billmatrix.com
+    - SUBJECT: exact match from config (e.g., "Con Edison Payment Processed")
+    - LABEL: specified Gmail label
     
     Returns list of payment info:
     [
         {
             'card_last_four': '7545',
             'amount': '$248.50',
-            'date': '1/24/2026',
-            'email_date': '2026-01-24T10:30:00',
-            'subject': 'Payment Confirmation'
+            'date': '01/24/2026',
+            'email_date': '2026-01-24T16:01:42',
+            'subject': 'Con Edison Payment Processed'
         }
     ]
     """
@@ -158,27 +248,38 @@ def fetch_coned_payment_emails(
             mail = imaplib.IMAP4(server, port)
         
         mail.login(email_addr, password)
-        mail.select(folder)
         
-        # Search for ConEd payment emails
-        since_date = (datetime.now() - timedelta(days=days_back)).strftime('%d-%b-%Y')
+        # Select the Gmail label if specified, otherwise INBOX
+        folder = f'"{gmail_label}"' if gmail_label else 'INBOX'
+        try:
+            status, _ = mail.select(folder)
+            if status != 'OK':
+                logger.warning(f"Could not select folder {folder}, falling back to INBOX")
+                mail.select('INBOX')
+        except Exception as e:
+            logger.warning(f"Error selecting folder {folder}: {e}, falling back to INBOX")
+            mail.select('INBOX')
         
-        # Search criteria for ConEd payment emails
-        search_criteria = [
-            f'(FROM "coned" SINCE {since_date})',
-            f'(FROM "billmatrix" SINCE {since_date})',
-            f'(SUBJECT "payment" FROM "consolidated" SINCE {since_date})',
-            f'(SUBJECT "payment confirmation" SINCE {since_date})',
-        ]
+        # Build STRICT search criteria
+        # MUST be from DoNotReply@billmatrix.com
+        search_parts = [f'FROM "{CONED_PAYMENT_SENDER}"']
         
-        email_ids = set()
-        for criteria in search_criteria:
-            try:
-                status, data = mail.search(None, criteria)
-                if status == 'OK' and data[0]:
-                    email_ids.update(data[0].split())
-            except Exception as e:
-                logger.debug(f"Search criteria failed: {criteria}, error: {e}")
+        # Add subject filter if specified
+        if subject_filter:
+            search_parts.append(f'SUBJECT "{subject_filter}"')
+        
+        search_criteria = '(' + ' '.join(search_parts) + ')'
+        
+        logger.info(f"IMAP search criteria: {search_criteria}")
+        
+        status, data = mail.search(None, search_criteria)
+        if status != 'OK' or not data[0]:
+            logger.info("No emails found matching criteria")
+            mail.logout()
+            return results
+        
+        email_ids = data[0].split()
+        logger.info(f"Found {len(email_ids)} emails matching criteria")
         
         for email_id in email_ids:
             try:
@@ -189,51 +290,42 @@ def fetch_coned_payment_emails(
                 raw_email = data[0][1]
                 msg = email.message_from_bytes(raw_email)
                 
+                # VERIFY sender is exactly DoNotReply@billmatrix.com
+                from_addr = msg.get('From', '')
+                if CONED_PAYMENT_SENDER.lower() not in from_addr.lower():
+                    logger.debug(f"Skipping email from {from_addr} - not from {CONED_PAYMENT_SENDER}")
+                    continue
+                
+                # Get subject and verify it matches if filter is set
+                subject_raw = msg.get('Subject', '')
+                subject, encoding = decode_header(subject_raw)[0]
+                if isinstance(subject, bytes):
+                    subject = subject.decode(encoding or 'utf-8', errors='replace')
+                
+                if subject_filter and subject_filter.lower() not in subject.lower():
+                    logger.debug(f"Skipping email with subject '{subject}' - doesn't match filter")
+                    continue
+                
                 # Get email date
                 email_date_str = msg.get('Date', '')
                 try:
                     email_date = email.utils.parsedate_to_datetime(email_date_str)
                 except:
-                    email_date = datetime.now()
+                    email_date = datetime.now(timezone.utc)
                 
-                # Get subject
-                subject, encoding = decode_header(msg.get('Subject', ''))[0]
-                if isinstance(subject, bytes):
-                    subject = subject.decode(encoding or 'utf-8', errors='replace')
+                # Decode email body properly
+                body = decode_email_body(msg)
                 
-                # Get email body
-                body = ""
-                if msg.is_multipart():
-                    for part in msg.walk():
-                        content_type = part.get_content_type()
-                        if content_type == 'text/plain':
-                            try:
-                                body += part.get_payload(decode=True).decode('utf-8', errors='replace')
-                            except:
-                                pass
-                        elif content_type == 'text/html':
-                            try:
-                                html = part.get_payload(decode=True).decode('utf-8', errors='replace')
-                                # Strip HTML tags for searching
-                                body += re.sub(r'<[^>]+>', ' ', html)
-                            except:
-                                pass
-                else:
-                    try:
-                        body = msg.get_payload(decode=True).decode('utf-8', errors='replace')
-                    except:
-                        pass
-                
-                # Check if this is a payment confirmation
-                if not any(kw in body.lower() for kw in ['payment', 'received', 'confirmation', 'thank you']):
+                if not body:
+                    logger.warning(f"Empty body for email {email_id}")
                     continue
                 
-                # Extract card info
+                # Extract card info using strict pattern
                 card_last_four = extract_card_from_email(body)
                 amount = extract_payment_amount(body)
                 payment_date = extract_payment_date(body, email_date)
                 
-                if card_last_four or amount:
+                if card_last_four:
                     results.append({
                         'card_last_four': card_last_four,
                         'amount': amount,
@@ -242,6 +334,10 @@ def fetch_coned_payment_emails(
                         'subject': subject,
                         'email_id': email_id.decode() if isinstance(email_id, bytes) else str(email_id)
                     })
+                    logger.info(f"Extracted payment: {amount} on {payment_date}, card *{card_last_four}")
+                else:
+                    logger.warning(f"Could not extract card number from email: {subject}")
+                    
             except Exception as e:
                 logger.warning(f"Failed to process email {email_id}: {e}")
         
@@ -260,33 +356,45 @@ def match_payments_to_emails(email_data: List[Dict[str, Any]]) -> Dict[str, Any]
     """
     Match email payment info to database payments and auto-attribute
     
+    Matching logic:
+    1. Find unverified payments in database
+    2. For each payment, look for email with matching amount
+    3. If card number found in email, look up user by card and attribute
+    4. If no card match, use default payee if configured
+    
     Returns stats about matches made
     """
     from database import get_unverified_payments, attribute_payment, get_user_by_card, get_default_payee
     
     stats = {
         'emails_processed': len(email_data),
+        'payments_checked': 0,
         'matched_by_card': 0,
         'matched_by_default': 0,
-        'unmatched': 0
+        'unmatched': 0,
+        'details': []
     }
     
     unverified = get_unverified_payments(limit=100)
+    stats['payments_checked'] = len(unverified)
+    
+    logger.info(f"Processing {len(email_data)} emails against {len(unverified)} unverified payments")
     
     for payment in unverified:
         matched = False
+        payment_amount = payment.get('amount', '').replace('$', '').replace(',', '').strip()
+        payment_date = payment.get('payment_date', '')
         
-        # Try to find matching email by amount and date
+        # Try to find matching email by amount
         for email_info in email_data:
-            # Compare amounts (strip $ and whitespace)
-            payment_amount = payment.get('amount', '').replace('$', '').replace(',', '').strip()
             email_amount = (email_info.get('amount') or '').replace('$', '').replace(',', '').strip()
             
             if payment_amount and email_amount:
                 try:
                     if abs(float(payment_amount) - float(email_amount)) < 0.01:
-                        # Amount matches, check if card info available
+                        # Amount matches! Get card info
                         card_last_four = email_info.get('card_last_four')
+                        
                         if card_last_four:
                             # Find user by card
                             user = get_user_by_card(card_last_four)
@@ -298,9 +406,20 @@ def match_payments_to_emails(email_data: List[Dict[str, Any]]) -> Dict[str, Any]
                                     card_last_four=card_last_four
                                 )
                                 stats['matched_by_card'] += 1
+                                stats['details'].append({
+                                    'payment_id': payment['id'],
+                                    'amount': payment_amount,
+                                    'card': f"*{card_last_four}",
+                                    'user': user['name'],
+                                    'method': 'email_card'
+                                })
                                 matched = True
+                                logger.info(f"Matched payment ${payment_amount} to user {user['name']} via card *{card_last_four}")
                                 break
-                except (ValueError, TypeError):
+                            else:
+                                logger.warning(f"Card *{card_last_four} not registered to any user")
+                except (ValueError, TypeError) as e:
+                    logger.debug(f"Amount comparison error: {e}")
                     continue
         
         if not matched:
@@ -314,33 +433,49 @@ def match_payments_to_emails(email_data: List[Dict[str, Any]]) -> Dict[str, Any]
                     card_last_four=None
                 )
                 stats['matched_by_default'] += 1
+                stats['details'].append({
+                    'payment_id': payment['id'],
+                    'amount': payment_amount,
+                    'user': default_payee['name'],
+                    'method': 'default_rule'
+                })
                 matched = True
+                logger.info(f"Assigned payment ${payment_amount} to default user {default_payee['name']}")
         
         if not matched:
             stats['unmatched'] += 1
+            logger.info(f"Could not match payment ${payment_amount} from {payment_date}")
     
     return stats
 
 def run_email_sync() -> Dict[str, Any]:
-    """Run the full email sync process"""
+    """
+    Run the full email sync process with strict criteria:
+    - FROM: DoNotReply@billmatrix.com
+    - SUBJECT: from config (e.g., "Con Edison Payment Processed")
+    - LABEL: Gmail label from config
+    """
     config = load_imap_config()
     
     if not config.get('enabled') or not config.get('server'):
         return {
             'success': False,
-            'message': 'IMAP not configured'
+            'message': 'IMAP not configured or not enabled'
         }
     
     try:
-        # Fetch emails
+        # Fetch emails with STRICT criteria
         emails = fetch_coned_payment_emails(
             server=config['server'],
             port=config.get('port', 993),
             email_addr=config['email'],
             password=config['password'],
             use_ssl=config.get('use_ssl', True),
-            days_back=config.get('days_back', 30)
+            gmail_label=config.get('gmail_label'),  # Gmail label to search
+            subject_filter=config.get('subject_filter')  # Exact subject filter
         )
+        
+        logger.info(f"Fetched {len(emails)} payment confirmation emails")
         
         # Match to payments
         stats = match_payments_to_emails(emails)
@@ -352,13 +487,57 @@ def run_email_sync() -> Dict[str, Any]:
         
         return {
             'success': True,
-            'message': f"Synced {len(emails)} emails, {stats['matched_by_card']} matched by card",
+            'message': f"Found {len(emails)} payment emails, matched {stats['matched_by_card']} by card, {stats['matched_by_default']} by default",
+            'emails_found': len(emails),
             'stats': stats
         }
         
+    except Exception as e:
+        logger.error(f"Email sync failed: {e}")
+        return {
+            'success': False,
+            'message': str(e)
+        }
+
+def preview_email_search(
+    server: str,
+    port: int,
+    email_addr: str,
+    password: str,
+    use_ssl: bool = True,
+    gmail_label: str = None,
+    subject_filter: str = None,
+    limit: int = 5
+) -> Dict[str, Any]:
+    """
+    Preview what emails would be found with the current search criteria
+    Useful for testing/debugging IMAP settings
+    """
+    try:
+        emails = fetch_coned_payment_emails(
+            server=server,
+            port=port,
+            email_addr=email_addr,
+            password=password,
+            use_ssl=use_ssl,
+            gmail_label=gmail_label,
+            subject_filter=subject_filter
+        )
+        
+        return {
+            'success': True,
+            'emails_found': len(emails),
+            'preview': emails[:limit],
+            'search_criteria': {
+                'sender': CONED_PAYMENT_SENDER,
+                'label': gmail_label,
+                'subject': subject_filter
+            }
+        }
     except Exception as e:
         return {
             'success': False,
             'message': str(e)
         }
+
 
