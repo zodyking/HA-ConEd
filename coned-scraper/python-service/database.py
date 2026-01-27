@@ -143,9 +143,16 @@ def init_database():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL UNIQUE,
             is_default INTEGER DEFAULT 0,
+            responsibility_percent REAL DEFAULT 0,
             created_at TEXT NOT NULL
         )
     ''')
+    
+    # Add responsibility_percent column if it doesn't exist (migration)
+    try:
+        cursor.execute('ALTER TABLE payee_users ADD COLUMN responsibility_percent REAL DEFAULT 0')
+    except sqlite3.OperationalError:
+        pass
     
     # User cards - card endings linked to users
     cursor.execute('''
@@ -651,6 +658,150 @@ def update_payee_user(user_id: int, name: Optional[str] = None, is_default: Opti
     conn.commit()
     conn.close()
     return True
+
+def update_payee_responsibilities(responsibilities: Dict[int, float]) -> Dict[str, Any]:
+    """
+    Update responsibility percentages for multiple payees.
+    responsibilities: {user_id: percent}
+    Total must equal 100% (or all 0 if not configured)
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    total = sum(responsibilities.values())
+    
+    # Validate: must be 100% or 0%
+    if total > 0 and abs(total - 100.0) > 0.01:
+        conn.close()
+        return {'success': False, 'error': f'Total must equal 100%, got {total:.1f}%'}
+    
+    # Update all users
+    for user_id, percent in responsibilities.items():
+        cursor.execute('''
+            UPDATE payee_users SET responsibility_percent = ? WHERE id = ?
+        ''', (percent, user_id))
+    
+    conn.commit()
+    conn.close()
+    
+    return {'success': True, 'total': total}
+
+def get_bill_payee_summary(bill_id: int) -> Dict[str, Any]:
+    """
+    Calculate payee breakdown for a specific bill.
+    Shows how much each payee owes vs paid, with rollover from previous bills.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    # Get the bill
+    cursor.execute('SELECT * FROM bills WHERE id = ?', (bill_id,))
+    bill = cursor.fetchone()
+    if not bill:
+        conn.close()
+        return {}
+    
+    bill = dict(bill)
+    bill_total = parse_amount(bill.get('bill_total', '$0'))
+    
+    # Get all payees with their responsibility
+    cursor.execute('SELECT * FROM payee_users ORDER BY name')
+    payees = [dict(row) for row in cursor.fetchall()]
+    
+    # Get payments for this bill grouped by payee
+    cursor.execute('''
+        SELECT payee_user_id, SUM(amount_numeric) as total_paid
+        FROM payments
+        WHERE bill_id = ? AND payee_user_id IS NOT NULL
+        GROUP BY payee_user_id
+    ''', (bill_id,))
+    payments_by_payee = {row['payee_user_id']: row['total_paid'] or 0 for row in cursor.fetchall()}
+    
+    # Get previous bills to calculate rollover
+    cursor.execute('''
+        SELECT id FROM bills WHERE id < ? ORDER BY id DESC
+    ''', (bill_id,))
+    previous_bills = [row['id'] for row in cursor.fetchall()]
+    
+    # Calculate rollover for each payee (sum of unpaid amounts from previous bills)
+    payee_summaries = []
+    total_bill_paid = 0
+    
+    for payee in payees:
+        responsibility = payee.get('responsibility_percent', 0) or 0
+        amount_owed = bill_total * (responsibility / 100.0) if responsibility > 0 else 0
+        amount_paid = payments_by_payee.get(payee['id'], 0) or 0
+        total_bill_paid += amount_paid
+        
+        # Calculate rollover from previous periods
+        rollover = 0
+        for prev_bill_id in previous_bills[:12]:  # Look at last 12 bills max
+            cursor.execute('SELECT bill_total FROM bills WHERE id = ?', (prev_bill_id,))
+            prev_bill = cursor.fetchone()
+            if prev_bill:
+                prev_total = parse_amount(prev_bill['bill_total'] or '$0')
+                prev_owed = prev_total * (responsibility / 100.0) if responsibility > 0 else 0
+                
+                cursor.execute('''
+                    SELECT SUM(amount_numeric) as paid FROM payments
+                    WHERE bill_id = ? AND payee_user_id = ?
+                ''', (prev_bill_id, payee['id']))
+                prev_paid = cursor.fetchone()
+                prev_paid_amount = prev_paid['paid'] or 0 if prev_paid else 0
+                
+                rollover += (prev_owed - prev_paid_amount)
+        
+        balance = amount_owed - amount_paid + rollover
+        
+        payee_summaries.append({
+            'user_id': payee['id'],
+            'name': payee['name'],
+            'responsibility_percent': responsibility,
+            'amount_owed': round(amount_owed, 2),
+            'amount_paid': round(amount_paid, 2),
+            'rollover_from_previous': round(rollover, 2),
+            'current_balance': round(balance, 2),
+            'status': 'paid' if balance <= 0 else ('partial' if amount_paid > 0 else 'unpaid')
+        })
+    
+    # Calculate bill rollover (if total payments don't cover the bill)
+    unpaid_payments = sum(p.get('amount_numeric', 0) or 0 for p in payments_by_payee.values() if p)
+    
+    cursor.execute('''
+        SELECT SUM(amount_numeric) as total FROM payments WHERE bill_id = ?
+    ''', (bill_id,))
+    total_paid_result = cursor.fetchone()
+    total_paid = total_paid_result['total'] or 0 if total_paid_result else 0
+    
+    bill_balance = bill_total - total_paid
+    
+    conn.close()
+    
+    return {
+        'bill_id': bill_id,
+        'bill_total': bill_total,
+        'total_paid': round(total_paid, 2),
+        'bill_balance': round(bill_balance, 2),
+        'bill_status': 'paid' if bill_balance <= 0.01 else 'partial' if total_paid > 0 else 'unpaid',
+        'payee_summaries': payee_summaries
+    }
+
+def get_all_bill_summaries() -> List[Dict[str, Any]]:
+    """Get summaries for all bills"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute('SELECT id FROM bills')
+    bill_ids = [row['id'] for row in cursor.fetchall()]
+    conn.close()
+    
+    summaries = []
+    for bill_id in bill_ids:
+        summary = get_bill_payee_summary(bill_id)
+        if summary:
+            summaries.append(summary)
+    
+    return summaries
 
 # ==========================================
 # USER CARD FUNCTIONS

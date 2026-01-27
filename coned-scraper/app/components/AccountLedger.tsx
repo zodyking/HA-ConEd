@@ -56,11 +56,6 @@ function FormattedDate({ date, fallback }: { date: string | null | undefined, fa
   return <>{formatDate(date, { year: 'numeric', month: 'short', day: 'numeric' })}</>
 }
 
-interface PayeeUser {
-  id: number
-  name: string
-  is_default: boolean
-}
 
 export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'console' | 'settings') => void }) {
   const [ledgerData, setLedgerData] = useState<LedgerData | null>(null)
@@ -71,11 +66,8 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
   const [showPdfModal, setShowPdfModal] = useState(false)
   const [pdfExists, setPdfExists] = useState(false)
   
-  // Payment attribution modal state
-  const [showPaymentModal, setShowPaymentModal] = useState(false)
-  const [selectedPayment, setSelectedPayment] = useState<Payment | null>(null)
-  const [payeeUsers, setPayeeUsers] = useState<PayeeUser[]>([])
-  const [isAttributing, setIsAttributing] = useState(false)
+  // Bill summary state
+  const [billSummaries, setBillSummaries] = useState<{[billId: number]: any}>({})
 
   const loadLedgerData = useCallback(async () => {
     try {
@@ -135,63 +127,18 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
     }
   }, [])
 
-  const loadPayeeUsers = useCallback(async () => {
+  const loadBillSummary = useCallback(async (billId: number) => {
+    if (billSummaries[billId]) return // Already loaded
     try {
-      const res = await fetch(`${API_BASE_URL}/payee-users`)
+      const res = await fetch(`${API_BASE_URL}/bills/${billId}/summary`)
       if (res.ok) {
         const data = await res.json()
-        setPayeeUsers(data.users || [])
+        setBillSummaries(prev => ({ ...prev, [billId]: data }))
       }
     } catch {
       // Silently fail
     }
-  }, [])
-
-  const handlePaymentClick = (payment: Payment) => {
-    setSelectedPayment(payment)
-    loadPayeeUsers()
-    setShowPaymentModal(true)
-  }
-
-  const handleAttributePayment = async (userId: number) => {
-    if (!selectedPayment) return
-    setIsAttributing(true)
-    try {
-      const res = await fetch(`${API_BASE_URL}/payments/attribute`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          payment_id: selectedPayment.id,
-          user_id: userId,
-          method: 'manual'
-        })
-      })
-      if (res.ok) {
-        await loadLedgerData() // Refresh data
-        setShowPaymentModal(false)
-        setSelectedPayment(null)
-      }
-    } finally {
-      setIsAttributing(false)
-    }
-  }
-
-  const handleClearAttribution = async () => {
-    if (!selectedPayment) return
-    setIsAttributing(true)
-    try {
-      const res = await fetch(`${API_BASE_URL}/payments/${selectedPayment.id}/attribution`, {
-        method: 'DELETE'
-      })
-      if (res.ok) {
-        await loadLedgerData() // Refresh data
-        setShowPaymentModal(false)
-        setSelectedPayment(null)
-      }
-    } finally {
-      setIsAttributing(false)
-    }
-  }
+  }, [billSummaries])
 
   useEffect(() => {
     loadLedgerData()
@@ -332,122 +279,6 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
         />
       )}
 
-      {/* Payment Attribution Modal */}
-      {showPaymentModal && selectedPayment && (
-        <div
-          style={{
-            position: 'fixed',
-            top: 0, left: 0, right: 0, bottom: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.6)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 9999,
-            padding: '1rem'
-          }}
-          onClick={() => setShowPaymentModal(false)}
-        >
-          <div
-            style={{
-              backgroundColor: 'white',
-              borderRadius: '12px',
-              padding: '1.5rem',
-              maxWidth: '400px',
-              width: '100%',
-              boxShadow: '0 4px 20px rgba(0,0,0,0.3)'
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 style={{ margin: '0 0 1rem 0', fontSize: '1.1rem', color: '#333' }}>
-              Assign Payment
-            </h3>
-            
-            <div style={{ marginBottom: '1rem', padding: '0.75rem', backgroundColor: '#f5f5f5', borderRadius: '8px' }}>
-              <div style={{ fontSize: '0.75rem', color: '#666' }}>Payment Details</div>
-              <div style={{ fontWeight: 600, color: '#4caf50', fontSize: '1.1rem' }}>{selectedPayment.amount}</div>
-              <div style={{ fontSize: '0.75rem', color: '#666' }}>{selectedPayment.payment_date}</div>
-              {selectedPayment.payee_name && (
-                <div style={{ marginTop: '0.5rem', fontSize: '0.75rem' }}>
-                  <span style={{ color: '#999' }}>Currently assigned to: </span>
-                  <span style={{ fontWeight: 500, color: '#1565c0' }}>{selectedPayment.payee_name}</span>
-                </div>
-              )}
-            </div>
-
-            <div style={{ marginBottom: '1rem' }}>
-              <div style={{ fontSize: '0.75rem', color: '#666', marginBottom: '0.5rem' }}>Assign to:</div>
-              {payeeUsers.length > 0 ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                  {payeeUsers.map(user => (
-                    <button
-                      key={user.id}
-                      onClick={() => handleAttributePayment(user.id)}
-                      disabled={isAttributing}
-                      style={{
-                        padding: '0.6rem 1rem',
-                        backgroundColor: selectedPayment.payee_user_id === user.id ? '#e3f2fd' : '#f8f9fa',
-                        border: selectedPayment.payee_user_id === user.id ? '2px solid #03a9f4' : '1px solid #ddd',
-                        borderRadius: '8px',
-                        cursor: isAttributing ? 'wait' : 'pointer',
-                        fontSize: '0.9rem',
-                        fontWeight: 500,
-                        textAlign: 'left',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between'
-                      }}
-                    >
-                      <span>{user.name}</span>
-                      {user.is_default && (
-                        <span style={{ fontSize: '0.65rem', color: '#999' }}>(default)</span>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <div style={{ color: '#999', fontSize: '0.85rem', textAlign: 'center', padding: '1rem' }}>
-                  No payee users configured. Add users in Settings → Payees.
-                </div>
-              )}
-            </div>
-
-            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
-              {selectedPayment.payee_status === 'confirmed' && (
-                <button
-                  onClick={handleClearAttribution}
-                  disabled={isAttributing}
-                  style={{
-                    padding: '0.5rem 1rem',
-                    backgroundColor: '#fff3e0',
-                    color: '#e65100',
-                    border: '1px solid #ffcc80',
-                    borderRadius: '6px',
-                    cursor: isAttributing ? 'wait' : 'pointer',
-                    fontSize: '0.85rem'
-                  }}
-                >
-                  Unassign
-                </button>
-              )}
-              <button
-                onClick={() => setShowPaymentModal(false)}
-                style={{
-                  padding: '0.5rem 1rem',
-                  backgroundColor: '#e0e0e0',
-                  color: '#333',
-                  border: 'none',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  fontSize: '0.85rem'
-                }}
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
     <div className="ha-ledger">
         {/* Account Summary Card */}
       <div className="ha-card ha-card-summary">
@@ -578,9 +409,7 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
                         {bill.payments.map((payment) => (
                           <div 
                             key={payment.id} 
-                            className="ha-payment-entry ha-payment-clickable"
-                            onClick={() => handlePaymentClick(payment)}
-                            style={{ cursor: 'pointer' }}
+                            className="ha-payment-entry"
                           >
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>

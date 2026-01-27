@@ -30,7 +30,8 @@ from database import (
     add_user_card, delete_user_card, get_user_by_card,
     attribute_payment, get_unverified_payments, clear_payment_attribution,
     wipe_bills_and_payments, update_payment_bill, get_payment_by_id,
-    update_payment_order, get_payments_by_user, get_all_bills_with_payments
+    update_payment_order, get_payments_by_user, get_all_bills_with_payments,
+    update_payee_responsibilities, get_bill_payee_summary
 )
 
 app = FastAPI(title="ConEd Scraper API")
@@ -1314,6 +1315,34 @@ async def delete_user(user_id: int):
         raise HTTPException(status_code=404, detail="User not found")
     except HTTPException:
         raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+class ResponsibilitiesModel(BaseModel):
+    responsibilities: dict  # {user_id: percent}
+
+@app.put("/api/payee-users/responsibilities")
+async def update_responsibilities(data: ResponsibilitiesModel):
+    """Update bill responsibility percentages for payees (must total 100%)"""
+    try:
+        # Convert string keys to int
+        responsibilities = {int(k): float(v) for k, v in data.responsibilities.items()}
+        result = update_payee_responsibilities(responsibilities)
+        if result['success']:
+            add_log("info", f"Updated payee responsibilities: {result['total']}% total")
+            return result
+        raise HTTPException(status_code=400, detail=result.get('error', 'Invalid percentages'))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/bills/{bill_id}/summary")
+async def get_bill_summary(bill_id: int):
+    """Get payee payment summary for a specific bill"""
+    try:
+        summary = get_bill_payee_summary(bill_id)
+        return summary
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

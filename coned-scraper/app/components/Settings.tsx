@@ -1632,6 +1632,7 @@ function PayeesTab() {
   const [expandedUsers, setExpandedUsers] = useState<{ [userId: number]: boolean }>({})
   const [newUserName, setNewUserName] = useState('')
   const [newCardInput, setNewCardInput] = useState<{ [key: number]: string }>({})
+  const [responsibilities, setResponsibilities] = useState<{ [userId: number]: number }>({})
   const [isLoading, setIsLoading] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
 
@@ -1639,6 +1640,15 @@ function PayeesTab() {
     loadUsers()
     loadUnverifiedPayments()
   }, [])
+
+  // Initialize responsibilities from users
+  useEffect(() => {
+    const resp: { [userId: number]: number } = {}
+    users.forEach(u => {
+      resp[u.id] = (u as any).responsibility_percent || 0
+    })
+    setResponsibilities(resp)
+  }, [users])
 
   const loadUsers = async () => {
     try {
@@ -1784,6 +1794,41 @@ function PayeesTab() {
     }
   }
 
+  const totalResponsibility = Object.values(responsibilities).reduce((sum, v) => sum + (v || 0), 0)
+
+  const handleResponsibilityChange = (userId: number, value: string) => {
+    const num = parseFloat(value) || 0
+    setResponsibilities(prev => ({ ...prev, [userId]: Math.min(100, Math.max(0, num)) }))
+  }
+
+  const handleSaveResponsibilities = async () => {
+    if (totalResponsibility > 0 && Math.abs(totalResponsibility - 100) > 0.1) {
+      setMessage({ type: 'error', text: `Total must equal 100%. Currently: ${totalResponsibility.toFixed(1)}%` })
+      return
+    }
+    
+    setIsLoading(true)
+    try {
+      const res = await fetch(`${API_BASE_URL}/payee-users/responsibilities`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ responsibilities })
+      })
+      
+      if (res.ok) {
+        setMessage({ type: 'success', text: 'Bill responsibilities saved!' })
+        await loadUsers()
+      } else {
+        const err = await res.json()
+        setMessage({ type: 'error', text: err.detail || 'Failed to save' })
+      }
+    } catch (e) {
+      setMessage({ type: 'error', text: 'Failed to save responsibilities' })
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
   return (
     <div className="ha-settings-content">
       <div className="ha-card">
@@ -1881,6 +1926,27 @@ function PayeesTab() {
                         Delete
                       </button>
                     </div>
+                  </div>
+
+                  {/* Bill Responsibility */}
+                  <div style={{ marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <span style={{ fontSize: '0.75rem', color: '#666' }}>Bill Share:</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={responsibilities[user.id] || 0}
+                      onChange={(e) => handleResponsibilityChange(user.id, e.target.value)}
+                      style={{
+                        width: '60px',
+                        padding: '0.25rem 0.4rem',
+                        borderRadius: '4px',
+                        border: '1px solid #ddd',
+                        fontSize: '0.85rem',
+                        textAlign: 'right'
+                      }}
+                    />
+                    <span style={{ fontSize: '0.75rem', color: '#666' }}>%</span>
                   </div>
 
                   {/* Cards */}
@@ -1995,6 +2061,42 @@ function PayeesTab() {
                   </div>
                 </div>
               ))}
+
+              {/* Responsibility Total & Save */}
+              <div style={{ 
+                marginTop: '1rem', 
+                padding: '1rem', 
+                backgroundColor: totalResponsibility === 100 ? '#e8f5e9' : totalResponsibility > 0 ? '#fff3e0' : '#f5f5f5',
+                borderRadius: '8px',
+                border: totalResponsibility === 100 ? '1px solid #4caf50' : totalResponsibility > 0 ? '1px solid #ff9800' : '1px solid #ddd'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+                  <div>
+                    <div style={{ fontSize: '0.85rem', fontWeight: 600, color: totalResponsibility === 100 ? '#2e7d32' : totalResponsibility > 0 ? '#e65100' : '#666' }}>
+                      Total Bill Responsibility: {totalResponsibility.toFixed(1)}%
+                    </div>
+                    <div style={{ fontSize: '0.7rem', color: '#999' }}>
+                      {totalResponsibility === 100 ? '✓ Percentages add up to 100%' : totalResponsibility > 0 ? '⚠ Must equal 100% to track balances' : 'Set percentages to track who owes what'}
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleSaveResponsibilities}
+                    disabled={isLoading || (totalResponsibility > 0 && Math.abs(totalResponsibility - 100) > 0.1)}
+                    style={{
+                      padding: '0.5rem 1rem',
+                      backgroundColor: totalResponsibility === 100 ? '#4caf50' : '#999',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '6px',
+                      cursor: (totalResponsibility === 100 || totalResponsibility === 0) ? 'pointer' : 'not-allowed',
+                      fontSize: '0.85rem',
+                      fontWeight: 500
+                    }}
+                  >
+                    {isLoading ? 'Saving...' : 'Save Responsibilities'}
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 
@@ -2113,10 +2215,25 @@ function PaymentsTab() {
   const [draggedPayment, setDraggedPayment] = useState<PaymentAudit | null>(null)
   const [dragOverBillId, setDragOverBillId] = useState<number | null | 'orphan'>(null)
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
+  const [editingPayment, setEditingPayment] = useState<PaymentAudit | null>(null)
+  const [payeeUsers, setPayeeUsers] = useState<{id: number, name: string, is_default: boolean}[]>([])
 
   useEffect(() => {
     loadData()
+    loadPayeeUsers()
   }, [])
+
+  const loadPayeeUsers = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/payee-users`)
+      if (res.ok) {
+        const data = await res.json()
+        setPayeeUsers(data.users || [])
+      }
+    } catch (e) {
+      console.error('Failed to load payee users:', e)
+    }
+  }
 
   const loadData = async () => {
     setIsLoading(true)
@@ -2213,6 +2330,33 @@ function PaymentsTab() {
     }
   }
 
+  const handleAssignPayee = async (paymentId: number, userId: number | null) => {
+    try {
+      if (userId) {
+        const res = await fetch(`${API_BASE_URL}/payments/attribute`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ payment_id: paymentId, user_id: userId, method: 'manual' })
+        })
+        if (res.ok) {
+          setMessage({ type: 'success', text: 'Payment assigned' })
+          await loadData()
+          setEditingPayment(null)
+        }
+      } else {
+        // Unassign
+        const res = await fetch(`${API_BASE_URL}/payments/${paymentId}/attribution`, { method: 'DELETE' })
+        if (res.ok) {
+          setMessage({ type: 'success', text: 'Payment unassigned' })
+          await loadData()
+          setEditingPayment(null)
+        }
+      }
+    } catch (e) {
+      setMessage({ type: 'error', text: 'Failed to update payment' })
+    }
+  }
+
   const renderPayment = (payment: PaymentAudit, index: number, billId: number | null) => {
     const isDragOver = dragOverBillId === (billId ?? 'orphan') && dragOverIndex === index
     
@@ -2224,6 +2368,7 @@ function PaymentsTab() {
         onDragOver={(e) => handleDragOver(e, billId ?? 'orphan', index)}
         onDragLeave={handleDragLeave}
         onDrop={(e) => handleDrop(e, billId, index)}
+        onDoubleClick={() => setEditingPayment(payment)}
         style={{
           padding: '0.5rem 0.75rem',
           margin: '0.25rem 0',
@@ -2236,6 +2381,7 @@ function PaymentsTab() {
           border: isDragOver ? '2px dashed #03a9f4' : '1px solid #e0e0e0',
           transition: 'all 0.15s ease'
         }}
+        title="Double-click to assign payee"
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <span style={{ color: '#999', cursor: 'grab' }}>⋮⋮</span>
@@ -2253,9 +2399,13 @@ function PaymentsTab() {
           <div>
             <div style={{ fontWeight: 500, fontSize: '0.8rem' }}>
               {payment.amount}
-              {payment.payee_name && (
+              {payment.payee_name ? (
                 <span style={{ marginLeft: '0.5rem', color: '#1565c0', fontSize: '0.7rem' }}>
                   ({payment.payee_name})
+                </span>
+              ) : (
+                <span style={{ marginLeft: '0.5rem', color: '#ff9800', fontSize: '0.7rem' }}>
+                  (unassigned)
                 </span>
               )}
             </div>
@@ -2440,6 +2590,113 @@ function PaymentsTab() {
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Payment Assignment Modal (Double-click) */}
+        {editingPayment && (
+          <div
+            style={{
+              position: 'fixed',
+              top: 0, left: 0, right: 0, bottom: 0,
+              backgroundColor: 'rgba(0, 0, 0, 0.6)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 9999,
+              padding: '1rem'
+            }}
+            onClick={() => setEditingPayment(null)}
+          >
+            <div
+              style={{
+                backgroundColor: 'white',
+                borderRadius: '12px',
+                padding: '1.5rem',
+                maxWidth: '400px',
+                width: '100%',
+                boxShadow: '0 4px 20px rgba(0,0,0,0.3)'
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 style={{ margin: '0 0 1rem 0', fontSize: '1.1rem', color: '#333' }}>
+                Assign Payment to Payee
+              </h3>
+              
+              <div style={{ marginBottom: '1rem', padding: '0.75rem', backgroundColor: '#f5f5f5', borderRadius: '8px' }}>
+                <div style={{ fontWeight: 600, color: '#4caf50', fontSize: '1.1rem' }}>{editingPayment.amount}</div>
+                <div style={{ fontSize: '0.75rem', color: '#666' }}>{editingPayment.payment_date}</div>
+                {editingPayment.payee_name && (
+                  <div style={{ marginTop: '0.5rem', fontSize: '0.75rem' }}>
+                    <span style={{ color: '#999' }}>Currently: </span>
+                    <span style={{ fontWeight: 500, color: '#1565c0' }}>{editingPayment.payee_name}</span>
+                  </div>
+                )}
+              </div>
+
+              <div style={{ marginBottom: '1rem' }}>
+                <div style={{ fontSize: '0.75rem', color: '#666', marginBottom: '0.5rem' }}>Assign to:</div>
+                {payeeUsers.length > 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    {payeeUsers.map(user => (
+                      <button
+                        key={user.id}
+                        onClick={() => handleAssignPayee(editingPayment.id, user.id)}
+                        style={{
+                          padding: '0.6rem 1rem',
+                          backgroundColor: editingPayment.payee_name === user.name ? '#e3f2fd' : '#f8f9fa',
+                          border: editingPayment.payee_name === user.name ? '2px solid #03a9f4' : '1px solid #ddd',
+                          borderRadius: '8px',
+                          cursor: 'pointer',
+                          fontSize: '0.9rem',
+                          fontWeight: 500,
+                          textAlign: 'left'
+                        }}
+                      >
+                        {user.name} {user.is_default && <span style={{ fontSize: '0.65rem', color: '#999' }}>(default)</span>}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ color: '#999', fontSize: '0.85rem', textAlign: 'center', padding: '1rem' }}>
+                    No payee users configured. Add users in Payees tab.
+                  </div>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                {editingPayment.payee_name && (
+                  <button
+                    onClick={() => handleAssignPayee(editingPayment.id, null)}
+                    style={{
+                      padding: '0.5rem 1rem',
+                      backgroundColor: '#fff3e0',
+                      color: '#e65100',
+                      border: '1px solid #ffcc80',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      fontSize: '0.85rem'
+                    }}
+                  >
+                    Unassign
+                  </button>
+                )}
+                <button
+                  onClick={() => setEditingPayment(null)}
+                  style={{
+                    padding: '0.5rem 1rem',
+                    backgroundColor: '#e0e0e0',
+                    color: '#333',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontSize: '0.85rem'
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>
