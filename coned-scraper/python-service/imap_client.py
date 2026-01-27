@@ -249,57 +249,65 @@ def fetch_coned_payment_emails(
         
         mail.login(email_addr, password)
         
+        # List all available folders/labels for debugging
+        status, folder_list = mail.list()
+        if status == 'OK':
+            available_folders = []
+            for f in folder_list:
+                try:
+                    decoded = f.decode() if isinstance(f, bytes) else f
+                    available_folders.append(decoded)
+                except:
+                    pass
+            logger.info(f"Available folders: {available_folders[:10]}...")  # Show first 10
+        
         # Select the Gmail label if specified, otherwise INBOX
         folder_selected = 'INBOX'
+        folder_msg_count = 0
+        
         if gmail_label:
-            # Try different folder name formats for Gmail labels
+            # Gmail labels need special handling
+            # Try multiple formats - Gmail can be picky
             folder_attempts = [
-                gmail_label,                    # Direct label name
-                f'"{gmail_label}"',             # Quoted
-                f'[Gmail]/{gmail_label}',       # Gmail nested format
-                f'"[Gmail]/{gmail_label}"',     # Gmail nested quoted
+                gmail_label,                           # Direct: ConEd
+                f'"{gmail_label}"',                    # Quoted: "ConEd"
+                gmail_label.replace(' ', '-'),         # Dashes: Con-Ed  
+                f'INBOX/{gmail_label}',                # Nested: INBOX/ConEd
+                f'[Gmail]/{gmail_label}',              # Gmail system: [Gmail]/ConEd
             ]
             
             for folder in folder_attempts:
                 try:
-                    status, _ = mail.select(folder)
+                    # Use select to get message count
+                    status, data = mail.select(folder)
                     if status == 'OK':
                         folder_selected = folder
-                        logger.info(f"Selected folder: {folder}")
+                        # data[0] contains message count
+                        folder_msg_count = int(data[0]) if data and data[0] else 0
+                        logger.info(f"SUCCESS: Selected folder '{folder}' with {folder_msg_count} messages")
                         break
                 except Exception as e:
-                    logger.debug(f"Could not select folder {folder}: {e}")
+                    logger.debug(f"Could not select folder '{folder}': {e}")
             else:
-                logger.warning(f"Could not select Gmail label '{gmail_label}', using INBOX")
-                mail.select('INBOX')
+                logger.warning(f"Could not find Gmail label '{gmail_label}', falling back to INBOX")
+                status, data = mail.select('INBOX')
+                folder_msg_count = int(data[0]) if data and data[0] else 0
         else:
-            mail.select('INBOX')
+            status, data = mail.select('INBOX')
+            folder_msg_count = int(data[0]) if data and data[0] else 0
         
-        # Search ALL emails in the folder (no date restriction)
-        # Build search criteria
-        search_parts = []
+        logger.info(f"Working with folder: {folder_selected} ({folder_msg_count} total messages)")
         
-        # Filter by sender if we have subject filter (indicates ConEd payment emails)
-        if subject_filter:
-            # Search for subject containing the filter text
-            search_parts.append(f'SUBJECT "{subject_filter}"')
-        
-        # If no filters, get ALL emails in the label
-        if search_parts:
-            search_criteria = '(' + ' '.join(search_parts) + ')'
-        else:
-            search_criteria = 'ALL'
-        
-        logger.info(f"IMAP folder: {folder_selected}, search: {search_criteria}")
-        
-        status, data = mail.search(None, search_criteria)
+        # Search ALL emails in the folder - do filtering in Python for reliability
+        # Gmail IMAP search is notoriously unreliable for complex queries
+        status, data = mail.search(None, 'ALL')
         if status != 'OK' or not data[0]:
-            logger.info(f"No emails found in {folder_selected} with criteria: {search_criteria}")
+            logger.info(f"No emails found in {folder_selected}")
             mail.logout()
             return results
         
         email_ids = data[0].split()
-        logger.info(f"Found {len(email_ids)} total emails in {folder_selected}")
+        logger.info(f"Fetching {len(email_ids)} emails from {folder_selected} for processing...")
         
         processed = 0
         skipped_sender = 0
@@ -370,7 +378,13 @@ def fetch_coned_payment_emails(
             except Exception as e:
                 logger.warning(f"Failed to process email {email_id}: {e}")
         
-        logger.info(f"Email scan complete: {len(email_ids)} total, {processed} from BillMatrix, {skipped_sender} wrong sender, {skipped_subject} wrong subject, {len(results)} with card numbers")
+        logger.info(f"=== EMAIL SCAN RESULTS ===")
+        logger.info(f"Folder: {folder_selected}")
+        logger.info(f"Total emails scanned: {len(email_ids)}")
+        logger.info(f"From BillMatrix (DoNotReply@billmatrix.com): {processed}")
+        logger.info(f"Skipped - wrong sender: {skipped_sender}")
+        logger.info(f"Skipped - wrong subject: {skipped_subject}")
+        logger.info(f"Payment emails with card numbers extracted: {len(results)}")
         mail.logout()
         
     except imaplib.IMAP4.error as e:
