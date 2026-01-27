@@ -942,20 +942,28 @@ async def get_bill_document():
 async def get_latest_bill_pdf():
     """Get the latest bill PDF (downloaded and stored locally)"""
     import os
-    from fastapi.responses import FileResponse, JSONResponse
+    from fastapi.responses import FileResponse, JSONResponse, Response
     
     pdf_path = DATA_DIR / "latest_bill.pdf"
     
     if os.path.exists(pdf_path):
-        return FileResponse(
-            str(pdf_path),
+        # Read the file and return with proper headers for iframe embedding
+        with open(pdf_path, 'rb') as f:
+            pdf_content = f.read()
+        
+        return Response(
+            content=pdf_content,
             media_type="application/pdf",
-            filename="ConEd_Latest_Bill.pdf",
             headers={
                 "Cache-Control": "no-cache, no-store, must-revalidate",
                 "Pragma": "no-cache",
                 "Expires": "0",
-                "Content-Disposition": "inline; filename=ConEd_Latest_Bill.pdf"
+                "Content-Disposition": "inline",
+                "X-Frame-Options": "SAMEORIGIN",
+                "Content-Security-Policy": "frame-ancestors 'self' *",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET, OPTIONS",
+                "Access-Control-Allow-Headers": "*"
             }
         )
     else:
@@ -971,10 +979,20 @@ async def get_pdf_status():
     pdf_path = DATA_DIR / "latest_bill.pdf"
     exists = os.path.exists(pdf_path)
     size = os.path.getsize(pdf_path) if exists else 0
+    readable = False
+    if exists:
+        try:
+            with open(pdf_path, 'rb') as f:
+                first_bytes = f.read(10)
+                readable = len(first_bytes) > 0
+        except:
+            readable = False
     return {
         "exists": exists,
         "size_bytes": size,
-        "size_kb": round(size / 1024, 1) if size else 0
+        "size_kb": round(size / 1024, 1) if size else 0,
+        "readable": readable,
+        "path": str(pdf_path)
     }
 
 class PdfDownloadRequest(BaseModel):
