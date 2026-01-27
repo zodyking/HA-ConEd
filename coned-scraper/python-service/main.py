@@ -297,6 +297,7 @@ class MQTTConfigModel(BaseModel):
 class AppSettingsModel(BaseModel):
     time_offset_hours: float = 0.0
     settings_password: str = "0000"
+    app_base_url: str = ""  # e.g., https://coned.brandon-built.com
 
 def encrypt_data(data: str) -> str:
     """Encrypt sensitive data"""
@@ -391,10 +392,11 @@ def load_mqtt_config() -> dict:
         return {}
 
 def save_app_settings(settings: dict):
-    """Save app settings (time offset, password) to file"""
+    """Save app settings (time offset, password, base URL) to file"""
     settings_data = {
         "time_offset_hours": float(settings.get("time_offset_hours", 0.0)),
         "settings_password": encrypt_data(settings.get("settings_password", "0000")),
+        "app_base_url": settings.get("app_base_url", ""),
         "updated_at": datetime.now().isoformat()
     }
     SETTINGS_FILE.write_text(json.dumps(settings_data))
@@ -405,7 +407,8 @@ def load_app_settings() -> dict:
         # Create default settings
         default_settings = {
             "time_offset_hours": 0.0,
-            "settings_password": "0000"
+            "settings_password": "0000",
+            "app_base_url": ""
         }
         save_app_settings(default_settings)
         return default_settings
@@ -414,11 +417,12 @@ def load_app_settings() -> dict:
         data = json.loads(SETTINGS_FILE.read_text())
         return {
             "time_offset_hours": float(data.get("time_offset_hours", 0.0)),
-            "settings_password": decrypt_data(data.get("settings_password", encrypt_data("0000"))) if data.get("settings_password") else "0000"
+            "settings_password": decrypt_data(data.get("settings_password", encrypt_data("0000"))) if data.get("settings_password") else "0000",
+            "app_base_url": data.get("app_base_url", "")
         }
     except Exception as e:
         add_log("warning", f"Failed to load app settings: {str(e)}")
-        return {"time_offset_hours": 0.0, "settings_password": "0000"}
+        return {"time_offset_hours": 0.0, "settings_password": "0000", "app_base_url": ""}
 
 def verify_settings_password(password: str) -> bool:
     """Verify settings password"""
@@ -820,11 +824,12 @@ async def get_mqtt_config():
 
 @app.post("/api/app-settings")
 async def save_app_settings_endpoint(settings: AppSettingsModel):
-    """Save app settings (time offset, password)"""
+    """Save app settings (time offset, password, base URL)"""
     try:
         settings_dict = {
             "time_offset_hours": settings.time_offset_hours,
-            "settings_password": settings.settings_password.strip() if settings.settings_password else "0000"
+            "settings_password": settings.settings_password.strip() if settings.settings_password else "0000",
+            "app_base_url": settings.app_base_url.strip().rstrip('/') if settings.app_base_url else ""
         }
         save_app_settings(settings_dict)
         add_log("success", "App settings saved successfully")
@@ -843,11 +848,12 @@ async def get_app_settings_endpoint():
         return {
             "time_offset_hours": settings.get("time_offset_hours", 0.0),
             "has_password": bool(settings.get("settings_password")),
-            "settings_password": settings.get("settings_password", "0000")  # Needed for preservation
+            "settings_password": settings.get("settings_password", "0000"),  # Needed for preservation
+            "app_base_url": settings.get("app_base_url", "")
         }
     except Exception as e:
         add_log("error", f"Failed to get app settings: {str(e)}")
-        return {"time_offset_hours": 0.0, "has_password": True, "settings_password": "0000"}
+        return {"time_offset_hours": 0.0, "has_password": True, "settings_password": "0000", "app_base_url": ""}
 
 class PasswordVerifyModel(BaseModel):
     password: str
@@ -974,6 +980,7 @@ async def download_bill_pdf(request: PdfDownloadRequest):
     """Download a bill PDF from provided URL and store locally"""
     import aiohttp
     import os
+    from mqtt_client import get_mqtt_client
     
     pdf_url = request.url.strip()
     
@@ -1008,6 +1015,19 @@ async def download_bill_pdf(request: PdfDownloadRequest):
                     
                     size_kb = round(len(pdf_content) / 1024, 1)
                     add_log("success", f"PDF saved: {size_kb} KB")
+                    
+                    # Publish PDF URL to MQTT
+                    mqtt_client = get_mqtt_client()
+                    if mqtt_client:
+                        # Get the app's public URL for the PDF
+                        app_settings = load_app_settings()
+                        base_url = app_settings.get("app_base_url", "").rstrip("/")
+                        if base_url:
+                            hosted_pdf_url = f"{base_url}/api/latest-bill-pdf"
+                            await mqtt_client.publish_bill_pdf_url(hosted_pdf_url, datetime.now().isoformat())
+                            add_log("info", f"Published PDF URL to MQTT: {hosted_pdf_url}")
+                        else:
+                            add_log("warning", "App Base URL not configured, skipping MQTT publish for PDF")
                     
                     return {
                         "success": True,

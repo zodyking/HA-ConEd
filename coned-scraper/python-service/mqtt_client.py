@@ -262,6 +262,18 @@ class MQTTClient:
             }
         }
         await self.publish("last_payment", numeric_value, json_payload)
+    
+    async def publish_bill_pdf_url(self, pdf_url: str, timestamp: Optional[str] = None):
+        """Publish bill PDF URL for Home Assistant"""
+        json_payload = {
+            "event_type": "bill_pdf_url",
+            "timestamp": timestamp or datetime.now().isoformat(),
+            "data": {
+                "pdf_url": pdf_url,
+                "timestamp": timestamp or datetime.now().isoformat()
+            }
+        }
+        await self.publish("bill_pdf_url", pdf_url, json_payload)
 
 
 # Global MQTT client instance

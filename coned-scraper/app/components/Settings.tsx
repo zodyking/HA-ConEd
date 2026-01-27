@@ -645,14 +645,18 @@ function AppSettingsTab() {
   const [pdfStatus, setPdfStatus] = useState<{ exists: boolean, size_kb: number } | null>(null)
   const [pdfLoading, setPdfLoading] = useState(false)
   const [pdfMessage, setPdfMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
+  
+  // App Base URL for MQTT
+  const [appBaseUrl, setAppBaseUrl] = useState('')
 
   useEffect(() => {
-    // Load saved time offset
+    // Load saved time offset and app base URL
     fetch(`${API_BASE_URL}/app-settings`)
       .then(res => res.json())
       .then(data => {
         const offset = parseFloat(data.time_offset_hours || 0)
         setSavedOffset(offset)
+        setAppBaseUrl(data.app_base_url || '')
       })
       .catch(() => {})
     
@@ -718,6 +722,36 @@ function AppSettingsTab() {
       setPdfMessage({ type: 'error', text: 'Failed to delete PDF' })
     } finally {
       setPdfLoading(false)
+    }
+  }
+  
+  const handleSaveBaseUrl = async () => {
+    setIsLoading(true)
+    setMessage(null)
+    
+    try {
+      const currentSettings = await fetch(`${API_BASE_URL}/app-settings`)
+      const currentData = await currentSettings.json()
+      
+      const res = await fetch(`${API_BASE_URL}/app-settings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          time_offset_hours: currentData.time_offset_hours || 0,
+          settings_password: currentData.settings_password || '0000',
+          app_base_url: appBaseUrl.trim()
+        })
+      })
+      
+      if (res.ok) {
+        setMessage({ type: 'success', text: 'App Base URL saved!' })
+      } else {
+        setMessage({ type: 'error', text: 'Failed to save' })
+      }
+    } catch (e) {
+      setMessage({ type: 'error', text: 'Failed to connect' })
+    } finally {
+      setIsLoading(false)
     }
   }
 
@@ -957,6 +991,37 @@ function AppSettingsTab() {
               {pdfMessage.text}
             </div>
           )}
+        </div>
+
+        {/* App Base URL Section */}
+        <div style={{ marginTop: '2rem', paddingTop: '2rem', borderTop: '1px solid #e0e0e0' }}>
+          <div style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '1rem', color: '#333' }}>
+            🌐 App Base URL (for MQTT)
+          </div>
+          
+          <div className="ha-form-group">
+            <label className="ha-form-label">Base URL</label>
+            <input
+              type="text"
+              className="ha-form-input"
+              value={appBaseUrl}
+              onChange={(e) => setAppBaseUrl(e.target.value)}
+              placeholder="https://coned.your-domain.com"
+            />
+            <div className="info-text">
+              Used to publish full PDF URL to MQTT for Home Assistant
+            </div>
+          </div>
+          
+          <button
+            type="button"
+            onClick={handleSaveBaseUrl}
+            disabled={isLoading}
+            className="ha-button ha-button-primary"
+            style={{ width: '100%', padding: '0.75rem' }}
+          >
+            {isLoading ? 'Saving...' : 'Save Base URL'}
+          </button>
         </div>
 
         <form onSubmit={handleSave} style={{ marginTop: '2rem', paddingTop: '2rem', borderTop: '1px solid #e0e0e0' }}>

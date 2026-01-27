@@ -423,7 +423,7 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
             left: 0,
             right: 0,
             bottom: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.85)',
+            backgroundColor: 'rgba(0, 0, 0, 0.9)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -432,35 +432,12 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
           }}
           onClick={() => setShowPdfModal(false)}
         >
-          <button
-            onClick={() => setShowPdfModal(false)}
-            style={{
-              position: 'absolute',
-              top: '1rem',
-              right: '1rem',
-              background: '#ff4444',
-              color: 'white',
-              border: 'none',
-              borderRadius: '50%',
-              width: '40px',
-              height: '40px',
-              fontSize: '1.5rem',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
-              zIndex: 10000
-            }}
-          >
-            ✕
-          </button>
           <div
             style={{
               width: '95%',
               maxWidth: '900px',
               height: '90vh',
-              backgroundColor: 'white',
+              backgroundColor: '#525659',
               borderRadius: '8px',
               overflow: 'hidden',
               display: 'flex',
@@ -470,38 +447,35 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
             onClick={(e) => e.stopPropagation()}
           >
             <div style={{
-              padding: '1rem',
-              backgroundColor: '#4caf50',
+              padding: '0.75rem 1rem',
+              backgroundColor: '#323639',
               color: 'white',
               display: 'flex',
               justifyContent: 'space-between',
               alignItems: 'center'
             }}>
-              <span style={{ fontWeight: 600 }}>📄 Latest Bill PDF</span>
-              <a
-                href={`${API_BASE_URL}/latest-bill-pdf`}
-                target="_blank"
-                rel="noopener noreferrer"
-                download="ConEd_Latest_Bill.pdf"
+              <span style={{ fontWeight: 500, fontSize: '0.9rem' }}>📄 Latest Bill</span>
+              <button
+                onClick={() => setShowPdfModal(false)}
                 style={{
+                  background: 'none',
+                  border: 'none',
                   color: 'white',
-                  textDecoration: 'none',
-                  fontSize: '0.85rem',
-                  padding: '0.25rem 0.75rem',
-                  backgroundColor: 'rgba(255,255,255,0.2)',
-                  borderRadius: '4px'
+                  fontSize: '1.25rem',
+                  cursor: 'pointer',
+                  padding: '0.25rem'
                 }}
               >
-                ⬇ Download PDF
-              </a>
+                ✕
+              </button>
             </div>
             <iframe
-              src={`${API_BASE_URL}/latest-bill-pdf`}
+              src={`${API_BASE_URL}/latest-bill-pdf#toolbar=0&navpanes=0&scrollbar=1`}
               style={{
                 flex: 1,
                 width: '100%',
                 border: 'none',
-                backgroundColor: 'white'
+                backgroundColor: '#525659'
               }}
               title="Bill PDF"
             />
