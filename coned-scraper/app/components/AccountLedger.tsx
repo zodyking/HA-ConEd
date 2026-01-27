@@ -1,7 +1,11 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import dynamic from 'next/dynamic'
 import { formatDate, formatTime, formatTimestamp } from '../lib/timezone'
+
+// Dynamically import PDF viewer to avoid SSR issues
+const PdfViewer = dynamic(() => import('./PdfViewer'), { ssr: false })
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api'
 
@@ -416,71 +420,10 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
 
       {/* PDF Bill Modal */}
       {showPdfModal && pdfExists && (
-        <div
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.9)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 9999,
-            padding: '1rem'
-          }}
-          onClick={() => setShowPdfModal(false)}
-        >
-          <div
-            style={{
-              width: '95%',
-              maxWidth: '900px',
-              height: '90vh',
-              backgroundColor: '#525659',
-              borderRadius: '8px',
-              overflow: 'hidden',
-              display: 'flex',
-              flexDirection: 'column',
-              position: 'relative'
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{
-              padding: '0.75rem 1rem',
-              backgroundColor: '#323639',
-              color: 'white',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center'
-            }}>
-              <span style={{ fontWeight: 500, fontSize: '0.9rem' }}>📄 Latest Bill</span>
-              <button
-                onClick={() => setShowPdfModal(false)}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: 'white',
-                  fontSize: '1.25rem',
-                  cursor: 'pointer',
-                  padding: '0.25rem'
-                }}
-              >
-                ✕
-              </button>
-            </div>
-            <iframe
-              src={`${API_BASE_URL}/bill-document#toolbar=0&navpanes=0&scrollbar=1`}
-              style={{
-                flex: 1,
-                width: '100%',
-                border: 'none',
-                backgroundColor: '#525659'
-              }}
-              title="Bill PDF"
-            />
-          </div>
-        </div>
+        <PdfViewer
+          url={`${API_BASE_URL}/bill-document`}
+          onClose={() => setShowPdfModal(false)}
+        />
       )}
 
       <div className="ha-ledger">
