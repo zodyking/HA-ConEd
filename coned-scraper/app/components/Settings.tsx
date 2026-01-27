@@ -1820,7 +1820,13 @@ function PayeesTab() {
         await loadUsers()
       } else {
         const err = await res.json()
-        setMessage({ type: 'error', text: err.detail || 'Failed to save' })
+        // Handle Pydantic validation errors which return detail as array
+        const errorText = typeof err.detail === 'string' 
+          ? err.detail 
+          : Array.isArray(err.detail) 
+            ? err.detail.map((e: any) => e.msg || JSON.stringify(e)).join(', ')
+            : 'Failed to save'
+        setMessage({ type: 'error', text: errorText })
       }
     } catch (e) {
       setMessage({ type: 'error', text: 'Failed to save responsibilities' })
