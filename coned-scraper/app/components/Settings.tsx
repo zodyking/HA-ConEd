@@ -639,6 +639,12 @@ function AppSettingsTab() {
   const [isLoading, setIsLoading] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
   const [savedOffset, setSavedOffset] = useState(0)
+  
+  // PDF management
+  const [pdfUrl, setPdfUrl] = useState('')
+  const [pdfStatus, setPdfStatus] = useState<{ exists: boolean, size_kb: number } | null>(null)
+  const [pdfLoading, setPdfLoading] = useState(false)
+  const [pdfMessage, setPdfMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
 
   useEffect(() => {
     // Load saved time offset
@@ -649,7 +655,71 @@ function AppSettingsTab() {
         setSavedOffset(offset)
       })
       .catch(() => {})
+    
+    // Check PDF status
+    checkPdfStatus()
   }, [])
+  
+  const checkPdfStatus = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/latest-bill-pdf/status`)
+      if (res.ok) {
+        const data = await res.json()
+        setPdfStatus(data)
+      }
+    } catch (e) {
+      console.error('Failed to check PDF status:', e)
+    }
+  }
+  
+  const handleDownloadPdf = async () => {
+    if (!pdfUrl.trim()) {
+      setPdfMessage({ type: 'error', text: 'Please enter a PDF URL' })
+      return
+    }
+    
+    setPdfLoading(true)
+    setPdfMessage(null)
+    
+    try {
+      const res = await fetch(`${API_BASE_URL}/latest-bill-pdf/download`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: pdfUrl.trim() })
+      })
+      
+      const data = await res.json()
+      
+      if (res.ok) {
+        setPdfMessage({ type: 'success', text: data.message })
+        setPdfUrl('')
+        await checkPdfStatus()
+      } else {
+        setPdfMessage({ type: 'error', text: data.detail || 'Failed to download PDF' })
+      }
+    } catch (e) {
+      setPdfMessage({ type: 'error', text: 'Failed to connect to API' })
+    } finally {
+      setPdfLoading(false)
+    }
+  }
+  
+  const handleDeletePdf = async () => {
+    setPdfLoading(true)
+    setPdfMessage(null)
+    
+    try {
+      const res = await fetch(`${API_BASE_URL}/latest-bill-pdf`, { method: 'DELETE' })
+      if (res.ok) {
+        setPdfMessage({ type: 'success', text: 'PDF deleted' })
+        await checkPdfStatus()
+      }
+    } catch (e) {
+      setPdfMessage({ type: 'error', text: 'Failed to delete PDF' })
+    } finally {
+      setPdfLoading(false)
+    }
+  }
 
   useEffect(() => {
     // Update current time display every second WITH saved offset
@@ -787,6 +857,106 @@ function AppSettingsTab() {
               Click to reset time offset and sync all timestamps with system time
             </div>
           </div>
+        </div>
+
+        {/* Bill PDF Section */}
+        <div style={{ marginTop: '2rem', paddingTop: '2rem', borderTop: '1px solid #e0e0e0' }}>
+          <div style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '1rem', color: '#333' }}>
+            📄 Bill PDF
+          </div>
+          
+          {/* PDF Status */}
+          <div style={{ 
+            padding: '1rem', 
+            backgroundColor: pdfStatus?.exists ? '#e8f5e9' : '#fff3e0',
+            borderRadius: '8px',
+            marginBottom: '1rem',
+            border: `1px solid ${pdfStatus?.exists ? '#4caf50' : '#ff9800'}`
+          }}>
+            {pdfStatus?.exists ? (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
+                <span style={{ color: '#2e7d32', fontWeight: 500 }}>
+                  ✅ PDF available ({pdfStatus.size_kb} KB)
+                </span>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <a
+                    href={`${API_BASE_URL}/latest-bill-pdf`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      padding: '0.4rem 0.75rem',
+                      backgroundColor: '#03a9f4',
+                      color: 'white',
+                      textDecoration: 'none',
+                      borderRadius: '4px',
+                      fontSize: '0.8rem'
+                    }}
+                  >
+                    View PDF
+                  </a>
+                  <button
+                    type="button"
+                    onClick={handleDeletePdf}
+                    disabled={pdfLoading}
+                    style={{
+                      padding: '0.4rem 0.75rem',
+                      backgroundColor: '#f44336',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '4px',
+                      fontSize: '0.8rem',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <span style={{ color: '#e65100' }}>
+                ⚠️ No PDF available - add a link below
+              </span>
+            )}
+          </div>
+          
+          {/* PDF URL Input */}
+          <div className="ha-form-group">
+            <label className="ha-form-label">PDF Link</label>
+            <textarea
+              className="ha-form-input"
+              value={pdfUrl}
+              onChange={(e) => setPdfUrl(e.target.value)}
+              placeholder="Paste the ConEd bill PDF link here (from View Current Bill button)"
+              rows={3}
+              style={{ fontFamily: 'monospace', fontSize: '0.75rem' }}
+            />
+            <div className="info-text">
+              Get this link by clicking &quot;View Current Bill&quot; on ConEd website, then copy the URL from the new tab
+            </div>
+          </div>
+          
+          <button
+            type="button"
+            onClick={handleDownloadPdf}
+            disabled={pdfLoading || !pdfUrl.trim()}
+            className="ha-button ha-button-primary"
+            style={{ width: '100%', padding: '0.75rem', backgroundColor: '#4caf50' }}
+          >
+            {pdfLoading ? 'Downloading...' : '⬇️ Download & Save PDF'}
+          </button>
+          
+          {pdfMessage && (
+            <div style={{
+              marginTop: '0.75rem',
+              padding: '0.75rem',
+              borderRadius: '4px',
+              backgroundColor: pdfMessage.type === 'error' ? '#ffebee' : '#e8f5e9',
+              color: pdfMessage.type === 'error' ? '#c62828' : '#2e7d32',
+              fontSize: '0.85rem'
+            }}>
+              {pdfMessage.text}
+            </div>
+          )}
         </div>
 
         <form onSubmit={handleSave} style={{ marginTop: '2rem', paddingTop: '2rem', borderTop: '1px solid #e0e0e0' }}>

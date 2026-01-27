@@ -949,9 +949,97 @@ async def get_latest_bill_pdf():
         )
     else:
         return JSONResponse(
-            {"error": "No bill PDF available. Run the scraper to fetch the latest bill."},
+            {"error": "No bill PDF available. Add a PDF link in Settings."},
             status_code=404
         )
+
+@app.get("/api/latest-bill-pdf/status")
+async def get_pdf_status():
+    """Check if a bill PDF exists"""
+    import os
+    pdf_path = DATA_DIR / "latest_bill.pdf"
+    exists = os.path.exists(pdf_path)
+    size = os.path.getsize(pdf_path) if exists else 0
+    return {
+        "exists": exists,
+        "size_bytes": size,
+        "size_kb": round(size / 1024, 1) if size else 0
+    }
+
+class PdfDownloadRequest(BaseModel):
+    url: str
+
+@app.post("/api/latest-bill-pdf/download")
+async def download_bill_pdf(request: PdfDownloadRequest):
+    """Download a bill PDF from provided URL and store locally"""
+    import aiohttp
+    import os
+    
+    pdf_url = request.url.strip()
+    
+    if not pdf_url:
+        raise HTTPException(status_code=400, detail="PDF URL is required")
+    
+    # Validate URL looks like a PDF
+    if not ('blob.core.windows.net' in pdf_url or '.pdf' in pdf_url.lower() or 'cecony' in pdf_url.lower()):
+        add_log("warning", f"URL doesn't look like a ConEd PDF: {pdf_url[:50]}...")
+    
+    try:
+        add_log("info", f"Downloading PDF from: {pdf_url[:80]}...")
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(pdf_url, timeout=aiohttp.ClientTimeout(total=60)) as response:
+                if response.status == 200:
+                    pdf_content = await response.read()
+                    
+                    if len(pdf_content) < 1000:
+                        add_log("error", f"PDF content too small: {len(pdf_content)} bytes")
+                        raise HTTPException(status_code=400, detail="Downloaded file is too small to be a valid PDF")
+                    
+                    # Delete old PDF if exists
+                    pdf_path = DATA_DIR / "latest_bill.pdf"
+                    if os.path.exists(pdf_path):
+                        os.remove(pdf_path)
+                        add_log("info", "Deleted old PDF")
+                    
+                    # Save new PDF
+                    with open(pdf_path, 'wb') as f:
+                        f.write(pdf_content)
+                    
+                    size_kb = round(len(pdf_content) / 1024, 1)
+                    add_log("success", f"PDF saved: {size_kb} KB")
+                    
+                    return {
+                        "success": True,
+                        "message": f"PDF downloaded successfully ({size_kb} KB)",
+                        "size_bytes": len(pdf_content)
+                    }
+                else:
+                    add_log("error", f"PDF download failed: HTTP {response.status}")
+                    raise HTTPException(
+                        status_code=400, 
+                        detail=f"Failed to download PDF: HTTP {response.status}. The link may have expired."
+                    )
+                    
+    except aiohttp.ClientError as e:
+        add_log("error", f"PDF download error: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Download failed: {str(e)}")
+    except Exception as e:
+        add_log("error", f"PDF download error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Download failed: {str(e)}")
+
+@app.delete("/api/latest-bill-pdf")
+async def delete_bill_pdf():
+    """Delete the stored bill PDF"""
+    import os
+    pdf_path = DATA_DIR / "latest_bill.pdf"
+    
+    if os.path.exists(pdf_path):
+        os.remove(pdf_path)
+        add_log("info", "Bill PDF deleted")
+        return {"success": True, "message": "PDF deleted"}
+    else:
+        return {"success": True, "message": "No PDF to delete"}
 
 @app.get("/api/live-preview")
 async def get_live_preview():

@@ -60,6 +60,7 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
   const [formattedTimestamp, setFormattedTimestamp] = useState<{ date: string, time: string }>({ date: '', time: '' })
   const [showScreenshotModal, setShowScreenshotModal] = useState(false)
   const [showPdfModal, setShowPdfModal] = useState(false)
+  const [pdfExists, setPdfExists] = useState(false)
 
   const loadScrapedData = useCallback(async () => {
     try {
@@ -80,10 +81,23 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
 
   useEffect(() => {
     loadScrapedData()
+    checkPdfExists()
     // Refresh every 30 seconds
     const interval = setInterval(loadScrapedData, 30000)
     return () => clearInterval(interval)
   }, [loadScrapedData])
+  
+  const checkPdfExists = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/latest-bill-pdf/status`)
+      if (res.ok) {
+        const data = await res.json()
+        setPdfExists(data.exists)
+      }
+    } catch (e) {
+      setPdfExists(false)
+    }
+  }
 
   // Format timestamp when data changes
   useEffect(() => {
@@ -401,7 +415,7 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
       )}
 
       {/* PDF Bill Modal */}
-      {showPdfModal && pdfBillUrl && (
+      {showPdfModal && pdfExists && (
         <div
           style={{
             position: 'fixed',
@@ -490,21 +504,7 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
                 backgroundColor: 'white'
               }}
               title="Bill PDF"
-              onError={() => console.log('PDF iframe failed to load')}
             />
-            <div style={{
-              position: 'absolute',
-              bottom: '1rem',
-              left: '50%',
-              transform: 'translateX(-50%)',
-              backgroundColor: 'rgba(0,0,0,0.7)',
-              color: 'white',
-              padding: '0.5rem 1rem',
-              borderRadius: '4px',
-              fontSize: '0.8rem'
-            }}>
-              If PDF doesn&apos;t load, run a fresh scrape to download it
-            </div>
           </div>
         </div>
       )}
@@ -551,7 +551,7 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
                   View Account Screenshot
                 </button>
               )}
-              {pdfBillUrl && (
+              {pdfExists ? (
                 <button
                   onClick={() => setShowPdfModal(true)}
                   className="ha-button"
@@ -572,6 +572,28 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
                   }}
                 >
                   📄 View Latest Bill PDF
+                </button>
+              ) : (
+                <button
+                  onClick={() => onNavigate?.('settings')}
+                  className="ha-button"
+                  style={{ 
+                    fontSize: '0.75rem', 
+                    padding: '0.5rem 1rem', 
+                    display: 'inline-flex', 
+                    alignItems: 'center', 
+                    gap: '0.5rem', 
+                    border: 'none', 
+                    cursor: 'pointer', 
+                    backgroundColor: '#ff9800',
+                    color: 'white',
+                    borderRadius: '6px',
+                    flex: '1 1 auto',
+                    maxWidth: '280px',
+                    justifyContent: 'center'
+                  }}
+                >
+                  📄 Add Bill PDF Link
                 </button>
               )}
             </div>

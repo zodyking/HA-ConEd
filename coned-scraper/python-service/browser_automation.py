@@ -375,11 +375,6 @@ async def perform_login(username: str, password: str, totp_code: str):
                     
                     scraped_data = await scrape_account_data(page, context)
                     
-                    # Scrape PDF bill URL
-                    pdf_bill_url = await scrape_pdf_bill_url(page, context)
-                    if pdf_bill_url:
-                        scraped_data["pdf_bill_url"] = pdf_bill_url
-                    
                     # Scrape bill history ledger
                     bill_history = await scrape_bill_history(page)
                     scraped_data["bill_history"] = bill_history
