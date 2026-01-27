@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Dict, Any
 import pyotp
 import json
 import os
@@ -1319,7 +1319,7 @@ async def delete_user(user_id: int):
         raise HTTPException(status_code=500, detail=str(e))
 
 class ResponsibilitiesModel(BaseModel):
-    responsibilities: dict  # {user_id: percent}
+    responsibilities: Dict[str, Any]  # {user_id: percent}
 
 @app.put("/api/payee-users/responsibilities")
 async def update_responsibilities(data: ResponsibilitiesModel):
