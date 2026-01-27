@@ -29,7 +29,8 @@ from database import (
     get_payee_users, create_payee_user, update_payee_user, delete_payee_user,
     add_user_card, delete_user_card, get_user_by_card,
     attribute_payment, get_unverified_payments, clear_payment_attribution,
-    wipe_bills_and_payments, update_payment_bill, get_payment_by_id
+    wipe_bills_and_payments, update_payment_bill, get_payment_by_id,
+    update_payment_order, get_payments_by_user, get_all_bills_with_payments
 )
 
 app = FastAPI(title="ConEd Scraper API")
@@ -1406,6 +1407,42 @@ async def wipe_all_data():
         result = wipe_bills_and_payments()
         add_log("warning", f"Database wiped: {result['bills_deleted']} bills, {result['payments_deleted']} payments deleted")
         return {"success": True, **result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+class UpdatePaymentOrderModel(BaseModel):
+    bill_id: Optional[int] = None
+    order: int
+
+@app.put("/api/payments/{payment_id}/order")
+async def update_payment_order_endpoint(payment_id: int, data: UpdatePaymentOrderModel):
+    """Update payment's bill assignment and order position (manual audit)"""
+    try:
+        success = update_payment_order(payment_id, data.bill_id, data.order)
+        if success:
+            add_log("info", f"Manually set payment {payment_id} to bill {data.bill_id} at position {data.order}")
+            return {"success": True}
+        raise HTTPException(status_code=404, detail="Payment not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/payee-users/{user_id}/payments")
+async def get_user_payments(user_id: int):
+    """Get all payments assigned to a specific user"""
+    try:
+        payments = get_payments_by_user(user_id)
+        return {"payments": payments}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/bills-with-payments")
+async def get_bills_with_payments_endpoint():
+    """Get all bills with their payments for the audit tab"""
+    try:
+        data = get_all_bills_with_payments()
+        return data
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

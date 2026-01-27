@@ -60,7 +60,7 @@ export default function Settings() {
   // Load saved credentials on mount
   useEffect(() => {
     if (isUnlocked) {
-      loadSettings()
+    loadSettings()
     }
   }, [isUnlocked])
 
@@ -1300,15 +1300,15 @@ function WebhooksTab() {
               {isLoading ? 'Saving...' : 'Save Webhook URLs'}
             </button>
             {hasAnyWebhook && (
-              <button 
-                type="button" 
-                className="ha-button" 
-                onClick={handleTest}
+            <button 
+              type="button" 
+              className="ha-button" 
+              onClick={handleTest} 
                 disabled={isLoading}
                 style={{ backgroundColor: '#4caf50', color: 'white' }}
-              >
-                Test Webhooks
-              </button>
+            >
+              Test Webhooks
+            </button>
             )}
           </div>
         </form>
@@ -1435,93 +1435,93 @@ function AutomatedScrapeTab() {
 
   return (
     <>
-      <div className="ha-card">
-        <div className="ha-card-header">
-          <span className="ha-card-icon">⏰</span>
-          <span>Automated Scrape Schedule</span>
-        </div>
-        <div className="ha-card-content">
-          <form onSubmit={handleSave}>
-            <div className="ha-form-group">
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
-                <input
-                  type="checkbox"
-                  checked={enabled}
-                  onChange={(e) => setEnabled(e.target.checked)}
-                  style={{ width: '18px', height: '18px', cursor: 'pointer' }}
-                />
-                <span>Enable Automated Scraping</span>
-              </label>
-            </div>
+    <div className="ha-card">
+      <div className="ha-card-header">
+        <span className="ha-card-icon">⏰</span>
+        <span>Automated Scrape Schedule</span>
+      </div>
+      <div className="ha-card-content">
+        <form onSubmit={handleSave}>
+          <div className="ha-form-group">
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={enabled}
+                onChange={(e) => setEnabled(e.target.checked)}
+                style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+              />
+              <span>Enable Automated Scraping</span>
+            </label>
+          </div>
 
-            {enabled && (
-              <>
-                <div className="ha-form-group">
-                  <label className="ha-form-label">Scrape Frequency</label>
-                  <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start' }}>
-                    <div style={{ flex: 1 }}>
-                      <label htmlFor="hours" className="ha-form-label" style={{ fontSize: '0.85rem' }}>Hours</label>
-                      <input
-                        type="number"
-                        id="hours"
-                        className="ha-form-input"
-                        min="0"
-                        max="23"
-                        value={hours}
-                        onChange={(e) => setHours(e.target.value)}
-                        required
-                      />
-                    </div>
-                    <div style={{ flex: 1 }}>
-                      <label htmlFor="minutes" className="ha-form-label" style={{ fontSize: '0.85rem' }}>Minutes</label>
-                      <input
-                        type="number"
-                        id="minutes"
-                        className="ha-form-input"
-                        min="0"
-                        max="59"
-                        value={minutes}
-                        onChange={(e) => setMinutes(e.target.value)}
-                        required
-                      />
-                    </div>
-                    <div style={{ flex: 1 }}>
-                      <label htmlFor="seconds" className="ha-form-label" style={{ fontSize: '0.85rem' }}>Seconds</label>
-                      <input
-                        type="number"
-                        id="seconds"
-                        className="ha-form-input"
-                        min="0"
-                        max="59"
-                        value={seconds}
-                        onChange={(e) => setSeconds(e.target.value)}
-                        required
-                      />
-                    </div>
+          {enabled && (
+            <>
+              <div className="ha-form-group">
+                <label className="ha-form-label">Scrape Frequency</label>
+                <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start' }}>
+                  <div style={{ flex: 1 }}>
+                    <label htmlFor="hours" className="ha-form-label" style={{ fontSize: '0.85rem' }}>Hours</label>
+                    <input
+                      type="number"
+                      id="hours"
+                      className="ha-form-input"
+                      min="0"
+                      max="23"
+                      value={hours}
+                      onChange={(e) => setHours(e.target.value)}
+                      required
+                    />
                   </div>
-                  <div className="info-text" style={{ marginTop: '0.5rem' }}>
-                    Scraper will run automatically every {hours}:{String(minutes).padStart(2, '0')}:{String(seconds).padStart(2, '0')}
+                  <div style={{ flex: 1 }}>
+                    <label htmlFor="minutes" className="ha-form-label" style={{ fontSize: '0.85rem' }}>Minutes</label>
+                    <input
+                      type="number"
+                      id="minutes"
+                      className="ha-form-input"
+                      min="0"
+                      max="59"
+                      value={minutes}
+                      onChange={(e) => setMinutes(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label htmlFor="seconds" className="ha-form-label" style={{ fontSize: '0.85rem' }}>Seconds</label>
+                    <input
+                      type="number"
+                      id="seconds"
+                      className="ha-form-input"
+                      min="0"
+                      max="59"
+                      value={seconds}
+                      onChange={(e) => setSeconds(e.target.value)}
+                      required
+                    />
                   </div>
                 </div>
-              </>
-            )}
-
-            <button type="submit" className="ha-button ha-button-primary" disabled={isLoading}>
-              {isLoading ? 'Saving...' : 'Save Schedule'}
-            </button>
-          </form>
-
-          {message && (
-            <div className={`ha-card ha-card-${message.type === 'error' ? 'error' : 'status'}`} style={{ marginTop: '1rem' }}>
-              <div className="ha-card-content">
-                {message.text}
+                <div className="info-text" style={{ marginTop: '0.5rem' }}>
+                  Scraper will run automatically every {hours}:{String(minutes).padStart(2, '0')}:{String(seconds).padStart(2, '0')}
+                </div>
               </div>
-            </div>
+            </>
           )}
 
-          {status && status.enabled && status.nextRun && (
-            <div className="ha-card ha-card-status" style={{ marginTop: '1rem' }}>
-              <div className="ha-card-content">
+          <button type="submit" className="ha-button ha-button-primary" disabled={isLoading}>
+            {isLoading ? 'Saving...' : 'Save Schedule'}
+          </button>
+        </form>
+
+        {message && (
+          <div className={`ha-card ha-card-${message.type === 'error' ? 'error' : 'status'}`} style={{ marginTop: '1rem' }}>
+            <div className="ha-card-content">
+              {message.text}
+            </div>
+          </div>
+        )}
+
+        {status && status.enabled && status.nextRun && (
+          <div className="ha-card ha-card-status" style={{ marginTop: '1rem' }}>
+            <div className="ha-card-content">
                 <strong>Next scheduled run:</strong> <NextRunTime timestamp={status.nextRun} />
               </div>
             </div>
@@ -1618,9 +1618,18 @@ interface UnverifiedPayment {
   bill_month?: string
 }
 
+interface UserPayment {
+  id: number
+  payment_date: string
+  amount: string
+  bill_month?: string
+}
+
 function PayeesTab() {
   const [users, setUsers] = useState<PayeeUser[]>([])
   const [unverifiedPayments, setUnverifiedPayments] = useState<UnverifiedPayment[]>([])
+  const [userPayments, setUserPayments] = useState<{ [userId: number]: UserPayment[] }>({})
+  const [expandedUsers, setExpandedUsers] = useState<{ [userId: number]: boolean }>({})
   const [newUserName, setNewUserName] = useState('')
   const [newCardInput, setNewCardInput] = useState<{ [key: number]: string }>({})
   const [isLoading, setIsLoading] = useState(false)
@@ -1652,6 +1661,26 @@ function PayeesTab() {
       }
     } catch (e) {
       console.error('Failed to load unverified payments:', e)
+    }
+  }
+
+  const loadUserPayments = async (userId: number) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/payee-users/${userId}/payments`)
+      if (res.ok) {
+        const data = await res.json()
+        setUserPayments(prev => ({ ...prev, [userId]: data.payments || [] }))
+      }
+    } catch (e) {
+      console.error('Failed to load user payments:', e)
+    }
+  }
+
+  const toggleUserExpanded = (userId: number) => {
+    const newExpanded = !expandedUsers[userId]
+    setExpandedUsers(prev => ({ ...prev, [userId]: newExpanded }))
+    if (newExpanded && !userPayments[userId]) {
+      loadUserPayments(userId)
     }
   }
 
@@ -1905,6 +1934,65 @@ function PayeesTab() {
                       + Add Card
                     </button>
                   </div>
+
+                  {/* User's Payments */}
+                  <div style={{ marginTop: '0.75rem', borderTop: '1px solid #e0e0e0', paddingTop: '0.75rem' }}>
+                    <button
+                      onClick={() => toggleUserExpanded(user.id)}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.3rem',
+                        fontSize: '0.75rem',
+                        color: '#666',
+                        padding: 0
+                      }}
+                    >
+                      <span>{expandedUsers[user.id] ? '▼' : '▶'}</span>
+                      <span>Payments ({userPayments[user.id]?.length || '...'})</span>
+                    </button>
+                    
+                    {expandedUsers[user.id] && (
+                      <div style={{ marginTop: '0.5rem', maxHeight: '200px', overflowY: 'auto' }}>
+                        {!userPayments[user.id] ? (
+                          <div style={{ fontSize: '0.75rem', color: '#999', padding: '0.5rem' }}>Loading...</div>
+                        ) : userPayments[user.id].length === 0 ? (
+                          <div style={{ fontSize: '0.75rem', color: '#999', padding: '0.5rem' }}>No payments assigned</div>
+                        ) : (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+                            {userPayments[user.id].map((payment) => (
+                              <div 
+                                key={payment.id}
+                                style={{
+                                  padding: '0.4rem 0.6rem',
+                                  backgroundColor: 'white',
+                                  borderRadius: '4px',
+                                  border: '1px solid #e0e0e0',
+                                  fontSize: '0.75rem',
+                                  display: 'flex',
+                                  justifyContent: 'space-between',
+                                  alignItems: 'center'
+                                }}
+                              >
+                                <div>
+                                  <span style={{ fontWeight: 500, color: '#4caf50' }}>{payment.amount}</span>
+                                  <span style={{ color: '#999', marginLeft: '0.5rem' }}>{payment.payment_date}</span>
+                                </div>
+                                {payment.bill_month && (
+                                  <span style={{ fontSize: '0.65rem', color: '#666', backgroundColor: '#f5f5f5', padding: '0.1rem 0.3rem', borderRadius: '3px' }}>
+                                    {payment.bill_month}
+                                  </span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -2003,52 +2091,106 @@ interface PaymentAudit {
   payee_name: string | null
   payee_status: string
   bill_manually_set: number
+  manual_order: number | null
   first_scraped_at: string
 }
 
-interface BillOption {
+interface BillWithPayments {
   id: number
   bill_cycle_date: string
   month_range: string
+  bill_total: string
+  payments: PaymentAudit[]
 }
 
 function PaymentsTab() {
-  const [payments, setPayments] = useState<PaymentAudit[]>([])
-  const [bills, setBills] = useState<BillOption[]>([])
+  const [bills, setBills] = useState<BillWithPayments[]>([])
+  const [orphanPayments, setOrphanPayments] = useState<PaymentAudit[]>([])
+  const [allBills, setAllBills] = useState<{id: number, month_range: string, bill_cycle_date: string}[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
-  const [editingPayment, setEditingPayment] = useState<number | null>(null)
   const [showWipeConfirm, setShowWipeConfirm] = useState(false)
+  const [draggedPayment, setDraggedPayment] = useState<PaymentAudit | null>(null)
+  const [dragOverBillId, setDragOverBillId] = useState<number | null | 'orphan'>(null)
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
 
   useEffect(() => {
-    loadPayments()
-    loadBills()
+    loadData()
   }, [])
 
-  const loadPayments = async () => {
+  const loadData = async () => {
     setIsLoading(true)
     try {
-      const res = await fetch(`${API_BASE_URL}/payments?limit=500`)
+      const res = await fetch(`${API_BASE_URL}/bills-with-payments`)
       if (res.ok) {
         const data = await res.json()
-        setPayments(data.payments || [])
+        setBills(data.bills || [])
+        setOrphanPayments(data.orphan_payments || [])
+        setAllBills(data.bills?.map((b: BillWithPayments) => ({ id: b.id, month_range: b.month_range, bill_cycle_date: b.bill_cycle_date })) || [])
       }
     } catch (e) {
-      console.error('Failed to load payments:', e)
+      console.error('Failed to load data:', e)
     } finally {
       setIsLoading(false)
     }
   }
 
-  const loadBills = async () => {
+  const handleWipeDatabase = async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/bills`)
+      const res = await fetch(`${API_BASE_URL}/data/wipe`, { method: 'DELETE' })
       if (res.ok) {
         const data = await res.json()
-        setBills(data.bills || [])
+        setMessage({ type: 'success', text: `Wiped ${data.bills_deleted} bills and ${data.payments_deleted} payments` })
+        await loadData()
+        setShowWipeConfirm(false)
+      } else {
+        setMessage({ type: 'error', text: 'Failed to wipe database' })
       }
     } catch (e) {
-      console.error('Failed to load bills:', e)
+      setMessage({ type: 'error', text: 'Failed to connect' })
+    }
+  }
+
+  const handleDragStart = (e: React.DragEvent, payment: PaymentAudit) => {
+    setDraggedPayment(payment)
+    e.dataTransfer.effectAllowed = 'move'
+  }
+
+  const handleDragOver = (e: React.DragEvent, billId: number | null | 'orphan', index: number) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    setDragOverBillId(billId)
+    setDragOverIndex(index)
+  }
+
+  const handleDragLeave = () => {
+    setDragOverBillId(null)
+    setDragOverIndex(null)
+  }
+
+  const handleDrop = async (e: React.DragEvent, targetBillId: number | null, targetIndex: number) => {
+    e.preventDefault()
+    if (!draggedPayment) return
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/payments/${draggedPayment.id}/order`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bill_id: targetBillId, order: targetIndex + 1 })
+      })
+
+      if (res.ok) {
+        setMessage({ type: 'success', text: `Payment moved to position ${targetIndex + 1} (manually locked)` })
+        await loadData()
+      } else {
+        setMessage({ type: 'error', text: 'Failed to move payment' })
+      }
+    } catch (e) {
+      setMessage({ type: 'error', text: 'Failed to connect' })
+    } finally {
+      setDraggedPayment(null)
+      setDragOverBillId(null)
+      setDragOverIndex(null)
     }
   }
 
@@ -2061,8 +2203,7 @@ function PaymentsTab() {
       })
       
       if (res.ok) {
-        await loadPayments()
-        setEditingPayment(null)
+        await loadData()
         setMessage({ type: 'success', text: 'Payment bill assignment updated (manually locked)' })
       } else {
         setMessage({ type: 'error', text: 'Failed to update payment' })
@@ -2072,32 +2213,90 @@ function PaymentsTab() {
     }
   }
 
-  const handleWipeDatabase = async () => {
-    try {
-      const res = await fetch(`${API_BASE_URL}/data/wipe`, { method: 'DELETE' })
-      if (res.ok) {
-        const data = await res.json()
-        setMessage({ type: 'success', text: `Wiped ${data.bills_deleted} bills and ${data.payments_deleted} payments` })
-        await loadPayments()
-        await loadBills()
-        setShowWipeConfirm(false)
-      } else {
-        setMessage({ type: 'error', text: 'Failed to wipe database' })
-      }
-    } catch (e) {
-      setMessage({ type: 'error', text: 'Failed to connect' })
-    }
+  const renderPayment = (payment: PaymentAudit, index: number, billId: number | null) => {
+    const isDragOver = dragOverBillId === (billId ?? 'orphan') && dragOverIndex === index
+    
+    return (
+      <div
+        key={payment.id}
+        draggable
+        onDragStart={(e) => handleDragStart(e, payment)}
+        onDragOver={(e) => handleDragOver(e, billId ?? 'orphan', index)}
+        onDragLeave={handleDragLeave}
+        onDrop={(e) => handleDrop(e, billId, index)}
+        style={{
+          padding: '0.5rem 0.75rem',
+          margin: '0.25rem 0',
+          backgroundColor: isDragOver ? '#e3f2fd' : (payment.manual_order ? '#fff8e1' : '#f8f9fa'),
+          borderRadius: '6px',
+          cursor: 'grab',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          border: isDragOver ? '2px dashed #03a9f4' : '1px solid #e0e0e0',
+          transition: 'all 0.15s ease'
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <span style={{ color: '#999', cursor: 'grab' }}>⋮⋮</span>
+          {payment.manual_order && <span title="Position manually set">🔒</span>}
+          <span style={{ 
+            backgroundColor: '#4caf50', 
+            color: 'white', 
+            padding: '0.15rem 0.4rem', 
+            borderRadius: '4px', 
+            fontSize: '0.7rem',
+            fontWeight: 600
+          }}>
+            Payment
+          </span>
+          <div>
+            <div style={{ fontWeight: 500, fontSize: '0.8rem' }}>
+              {payment.amount}
+              {payment.payee_name && (
+                <span style={{ marginLeft: '0.5rem', color: '#1565c0', fontSize: '0.7rem' }}>
+                  ({payment.payee_name})
+                </span>
+              )}
+            </div>
+            <div style={{ fontSize: '0.7rem', color: '#666' }}>{payment.payment_date}</div>
+          </div>
+        </div>
+        <select
+          value={payment.bill_id || ''}
+          onChange={(e) => handleChangeBill(payment.id, e.target.value ? Number(e.target.value) : null)}
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            padding: '0.2rem 0.3rem',
+            borderRadius: '4px',
+            border: '1px solid #ddd',
+            fontSize: '0.65rem',
+            backgroundColor: 'white',
+            cursor: 'pointer'
+          }}
+        >
+          <option value="">Unlinked</option>
+          {allBills.map((bill) => (
+            <option key={bill.id} value={bill.id}>
+              {bill.month_range}
+            </option>
+          ))}
+        </select>
+      </div>
+    )
   }
+
+  const totalPayments = bills.reduce((sum, b) => sum + (b.payments?.length || 0), 0) + orphanPayments.length
 
   return (
     <div className="ha-card">
       <div className="ha-card-header">
         <span className="ha-card-icon">💳</span>
-        <span>All Payments</span>
+        <span>Payment Audit</span>
       </div>
       <div className="ha-card-content">
         {message && (
-          <div className={`ha-alert ha-alert-${message.type}`}>
+          <div className={`ha-alert ha-alert-${message.type}`} style={{ marginBottom: '1rem' }}>
             {message.text}
           </div>
         )}
@@ -2135,33 +2334,10 @@ function PaymentsTab() {
               </button>
             ) : (
               <div style={{ display: 'flex', gap: '0.5rem' }}>
-                <button
-                  onClick={handleWipeDatabase}
-                  style={{
-                    padding: '0.5rem 1rem',
-                    backgroundColor: '#d32f2f',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '6px',
-                    cursor: 'pointer',
-                    fontSize: '0.85rem',
-                    fontWeight: 600
-                  }}
-                >
+                <button onClick={handleWipeDatabase} style={{ padding: '0.5rem 1rem', backgroundColor: '#d32f2f', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600 }}>
                   Confirm Wipe
                 </button>
-                <button
-                  onClick={() => setShowWipeConfirm(false)}
-                  style={{
-                    padding: '0.5rem 1rem',
-                    backgroundColor: '#e0e0e0',
-                    color: '#333',
-                    border: 'none',
-                    borderRadius: '6px',
-                    cursor: 'pointer',
-                    fontSize: '0.85rem'
-                  }}
-                >
+                <button onClick={() => setShowWipeConfirm(false)} style={{ padding: '0.5rem 1rem', backgroundColor: '#e0e0e0', color: '#333', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '0.85rem' }}>
                   Cancel
                 </button>
               </div>
@@ -2169,100 +2345,101 @@ function PaymentsTab() {
           </div>
         </div>
 
-        {/* Payments Table */}
-        <div style={{ fontSize: '0.8rem', color: '#666', marginBottom: '0.5rem' }}>
-          {payments.length} payment(s) • 🔒 = manually set bill assignment (won&apos;t be changed by auto-logic)
+        <div style={{ fontSize: '0.8rem', color: '#666', marginBottom: '1rem' }}>
+          {bills.length} bill(s) • {totalPayments} payment(s) • Drag payments to reorder or move between bills • 🔒 = manually audited
         </div>
 
         {isLoading ? (
-          <div style={{ textAlign: 'center', padding: '2rem', color: '#666' }}>Loading payments...</div>
-        ) : payments.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '2rem', color: '#666' }}>Loading...</div>
+        ) : bills.length === 0 && orphanPayments.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '2rem', color: '#666' }}>
-            No payments in database. Run the scraper to populate data.
+            No data in database. Run the scraper to populate.
           </div>
         ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
-              <thead>
-                <tr style={{ backgroundColor: '#f5f5f5' }}>
-                  <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '1px solid #ddd' }}>Date</th>
-                  <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '1px solid #ddd' }}>Amount</th>
-                  <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '1px solid #ddd' }}>Payee</th>
-                  <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '1px solid #ddd' }}>Bill Assignment</th>
-                  <th style={{ padding: '0.5rem', textAlign: 'center', borderBottom: '1px solid #ddd' }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {payments.map((payment) => (
-                  <tr key={payment.id} style={{ borderBottom: '1px solid #eee' }}>
-                    <td style={{ padding: '0.5rem' }}>
-                      {payment.payment_date}
-                    </td>
-                    <td style={{ padding: '0.5rem', fontWeight: 500, color: '#4caf50' }}>
-                      {payment.amount}
-                    </td>
-                    <td style={{ padding: '0.5rem' }}>
-                      {payment.payee_name ? (
-                        <span style={{ color: '#1565c0' }}>{payment.payee_name}</span>
-                      ) : (
-                        <span style={{ color: '#999', fontStyle: 'italic' }}>Unassigned</span>
-                      )}
-                    </td>
-                    <td style={{ padding: '0.5rem' }}>
-                      {editingPayment === payment.id ? (
-                        <select
-                          value={payment.bill_id || ''}
-                          onChange={(e) => handleChangeBill(payment.id, e.target.value ? Number(e.target.value) : null)}
-                          style={{
-                            padding: '0.25rem',
-                            borderRadius: '4px',
-                            border: '1px solid #ddd',
-                            fontSize: '0.75rem',
-                            width: '100%'
-                          }}
-                          autoFocus
-                          onBlur={() => setEditingPayment(null)}
-                        >
-                          <option value="">-- No Bill --</option>
-                          {bills.map((bill) => (
-                            <option key={bill.id} value={bill.id}>
-                              {bill.month_range} ({bill.bill_cycle_date})
-                            </option>
-                          ))}
-                        </select>
-                      ) : (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                          {payment.bill_manually_set === 1 && (
-                            <span title="Manually set - won't be changed by auto-logic">🔒</span>
-                          )}
-                          {payment.bill_month ? (
-                            <span>{payment.bill_month}</span>
-                          ) : (
-                            <span style={{ color: '#ff9800', fontStyle: 'italic' }}>Unlinked</span>
-                          )}
-                        </div>
-                      )}
-                    </td>
-                    <td style={{ padding: '0.5rem', textAlign: 'center' }}>
-                      <button
-                        onClick={() => setEditingPayment(payment.id)}
-                        style={{
-                          padding: '0.25rem 0.5rem',
-                          backgroundColor: '#e3f2fd',
-                          color: '#1565c0',
-                          border: 'none',
-                          borderRadius: '4px',
-                          cursor: 'pointer',
-                          fontSize: '0.7rem'
-                        }}
-                      >
-                        Change Bill
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div>
+            {/* Bills with payments */}
+            {bills.map((bill) => (
+              <div 
+                key={bill.id} 
+                style={{ 
+                  marginBottom: '1rem', 
+                  border: '1px solid #ddd', 
+                  borderRadius: '8px', 
+                  overflow: 'hidden',
+                  borderLeft: '4px solid #03a9f4'
+                }}
+                onDragOver={(e) => {
+                  if (bill.payments.length === 0) {
+                    handleDragOver(e, bill.id, 0)
+                  }
+                }}
+                onDrop={(e) => {
+                  if (bill.payments.length === 0) {
+                    handleDrop(e, bill.id, 0)
+                  }
+                }}
+              >
+                <div style={{ 
+                  padding: '0.5rem 0.75rem', 
+                  backgroundColor: '#e3f2fd', 
+                  display: 'flex', 
+                  justifyContent: 'space-between',
+                  alignItems: 'center'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <span style={{ 
+                      backgroundColor: '#03a9f4', 
+                      color: 'white', 
+                      padding: '0.15rem 0.4rem', 
+                      borderRadius: '4px', 
+                      fontSize: '0.7rem',
+                      fontWeight: 600
+                    }}>
+                      BILL
+                    </span>
+                    <span style={{ fontWeight: 600, fontSize: '0.85rem' }}>{bill.month_range}</span>
+                    <span style={{ color: '#666', fontSize: '0.75rem' }}>({bill.bill_cycle_date})</span>
+                  </div>
+                  <span style={{ fontWeight: 600, color: '#f44336', fontSize: '0.9rem' }}>{bill.bill_total}</span>
+                </div>
+                <div style={{ padding: '0.5rem' }}>
+                  {bill.payments.length === 0 ? (
+                    <div style={{ 
+                      padding: '1rem', 
+                      textAlign: 'center', 
+                      color: '#999', 
+                      fontSize: '0.8rem',
+                      border: dragOverBillId === bill.id ? '2px dashed #03a9f4' : '2px dashed #e0e0e0',
+                      borderRadius: '6px'
+                    }}>
+                      Drop payment here
+                    </div>
+                  ) : (
+                    bill.payments.map((payment, index) => renderPayment(payment, index, bill.id))
+                  )}
+                </div>
+              </div>
+            ))}
+
+            {/* Orphan payments */}
+            {orphanPayments.length > 0 && (
+              <div 
+                style={{ 
+                  marginBottom: '1rem', 
+                  border: '1px solid #ddd', 
+                  borderRadius: '8px', 
+                  overflow: 'hidden',
+                  borderLeft: '4px solid #ff9800'
+                }}
+              >
+                <div style={{ padding: '0.5rem 0.75rem', backgroundColor: '#fff3e0' }}>
+                  <span style={{ fontWeight: 600, color: '#e65100', fontSize: '0.85rem' }}>⚠️ Unlinked Payments</span>
+                </div>
+                <div style={{ padding: '0.5rem' }}>
+                  {orphanPayments.map((payment, index) => renderPayment(payment, index, null))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

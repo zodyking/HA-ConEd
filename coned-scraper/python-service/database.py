@@ -108,6 +108,7 @@ def init_database():
             card_last_four TEXT,
             verification_method TEXT,
             bill_manually_set INTEGER DEFAULT 0,
+            manual_order INTEGER,
             FOREIGN KEY (bill_id) REFERENCES bills(id) ON DELETE SET NULL,
             FOREIGN KEY (payee_user_id) REFERENCES payee_users(id) ON DELETE SET NULL
         )
@@ -116,6 +117,12 @@ def init_database():
     # Add bill_manually_set column if it doesn't exist (migration)
     try:
         cursor.execute('ALTER TABLE payments ADD COLUMN bill_manually_set INTEGER DEFAULT 0')
+    except sqlite3.OperationalError:
+        pass
+    
+    # Add manual_order column if it doesn't exist (migration)
+    try:
+        cursor.execute('ALTER TABLE payments ADD COLUMN manual_order INTEGER')
     except sqlite3.OperationalError:
         pass
     
@@ -376,6 +383,81 @@ def update_payment_bill(payment_id: int, bill_id: Optional[int], manual: bool = 
     conn.commit()
     conn.close()
     return updated
+
+def update_payment_order(payment_id: int, bill_id: Optional[int], order: int) -> bool:
+    """Update payment's bill and manual order position"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        UPDATE payments SET 
+            bill_id = ?,
+            bill_manually_set = 1,
+            manual_order = ?
+        WHERE id = ?
+    ''', (bill_id, order, payment_id))
+    
+    updated = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return updated
+
+def get_payments_by_user(user_id: int) -> List[Dict[str, Any]]:
+    """Get all payments assigned to a specific user"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        SELECT p.*, b.month_range as bill_month, b.bill_cycle_date as bill_cycle
+        FROM payments p
+        LEFT JOIN bills b ON p.bill_id = b.id
+        WHERE p.payee_user_id = ?
+        ORDER BY p.payment_date DESC
+    ''', (user_id,))
+    
+    rows = cursor.fetchall()
+    conn.close()
+    
+    return [dict(row) for row in rows]
+
+def get_all_bills_with_payments() -> List[Dict[str, Any]]:
+    """Get all bills with their payments for the Payments audit tab"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    # Get all bills ordered newest first
+    cursor.execute('''
+        SELECT * FROM bills
+        ORDER BY bill_cycle_date DESC
+    ''')
+    bills = [dict(row) for row in cursor.fetchall()]
+    
+    # Get payments for each bill
+    for bill in bills:
+        cursor.execute('''
+            SELECT p.*, u.name as payee_name FROM payments p
+            LEFT JOIN payee_users u ON p.payee_user_id = u.id
+            WHERE p.bill_id = ?
+            ORDER BY 
+                CASE WHEN p.manual_order IS NOT NULL THEN 0 ELSE 1 END,
+                p.manual_order ASC,
+                p.payment_date DESC, 
+                p.first_scraped_at ASC
+        ''', (bill['id'],))
+        bill['payments'] = [dict(row) for row in cursor.fetchall()]
+    
+    # Get orphan payments
+    cursor.execute('''
+        SELECT p.*, u.name as payee_name FROM payments p
+        LEFT JOIN payee_users u ON p.payee_user_id = u.id
+        WHERE p.bill_id IS NULL
+        ORDER BY p.payment_date DESC
+    ''')
+    orphan_payments = [dict(row) for row in cursor.fetchall()]
+    
+    conn.close()
+    
+    return {'bills': bills, 'orphan_payments': orphan_payments}
 
 def wipe_bills_and_payments() -> Dict[str, int]:
     """Delete all bills and payments from the database"""
@@ -675,13 +757,17 @@ def parse_date_for_comparison(date_str: str) -> Optional[datetime]:
 def find_bill_for_payment(payment_date_str: str, bills: List[Dict[str, Any]]) -> Optional[int]:
     """
     Find the appropriate bill for a payment based on payment date.
-    A payment belongs to the bill whose cycle date is closest to but not after the payment date.
+    
+    bill_cycle_date = END of billing cycle (date bill was issued)
+    A payment belongs to a bill if:
+      - payment_date >= this_bill.cycle_date (can't be before the bill was issued)
+      - payment_date < next_bill.cycle_date (must be before the next bill)
     """
     payment_date = parse_date_for_comparison(payment_date_str)
     if not payment_date:
         return None
     
-    # Sort bills by cycle date descending (newest first)
+    # Sort bills by cycle date ascending (oldest first)
     sorted_bills = []
     for bill in bills:
         cycle_date = parse_date_for_comparison(bill['bill_cycle_date'])
@@ -691,18 +777,26 @@ def find_bill_for_payment(payment_date_str: str, bills: List[Dict[str, Any]]) ->
                 'cycle_date': cycle_date
             })
     
-    sorted_bills.sort(key=lambda x: x['cycle_date'], reverse=True)
+    sorted_bills.sort(key=lambda x: x['cycle_date'])  # Ascending (oldest first)
     
-    # Find the first bill whose cycle date is <= payment date
-    for bill in sorted_bills:
-        if bill['cycle_date'] <= payment_date:
+    if not sorted_bills:
+        return None
+    
+    # Find the bill where: bill.cycle_date <= payment_date < next_bill.cycle_date
+    for i, bill in enumerate(sorted_bills):
+        is_after_bill = payment_date >= bill['cycle_date']
+        
+        # Check if before next bill (or no next bill)
+        if i + 1 < len(sorted_bills):
+            is_before_next = payment_date < sorted_bills[i + 1]['cycle_date']
+        else:
+            is_before_next = True  # No next bill, so this is the latest
+        
+        if is_after_bill and is_before_next:
             return bill['bill_id']
     
     # If payment is before all bills, assign to the oldest bill
-    if sorted_bills:
-        return sorted_bills[-1]['bill_id']
-    
-    return None
+    return sorted_bills[0]['bill_id']
 
 def sync_from_scrape(scrape_data: Dict[str, Any]) -> Dict[str, Any]:
     """Sync scraped data to normalized tables, returns stats"""
@@ -787,13 +881,18 @@ def get_ledger_data() -> Dict[str, Any]:
     ''')
     bills = [dict(row) for row in cursor.fetchall()]
     
-    # Get payments grouped by bill (order by payment_date, then first_scraped_at for same-day payments)
+    # Get payments grouped by bill
+    # Order: manual_order first (if set), then payment_date DESC, then first_scraped_at ASC
     for bill in bills:
         cursor.execute('''
             SELECT p.*, u.name as payee_name FROM payments p
             LEFT JOIN payee_users u ON p.payee_user_id = u.id
             WHERE p.bill_id = ?
-            ORDER BY p.payment_date DESC, p.first_scraped_at ASC
+            ORDER BY 
+                CASE WHEN p.manual_order IS NOT NULL THEN 0 ELSE 1 END,
+                p.manual_order ASC,
+                p.payment_date DESC, 
+                p.first_scraped_at ASC
         ''', (bill['id'],))
         bill['payments'] = [dict(row) for row in cursor.fetchall()]
     
@@ -802,7 +901,11 @@ def get_ledger_data() -> Dict[str, Any]:
         SELECT p.*, u.name as payee_name FROM payments p
         LEFT JOIN payee_users u ON p.payee_user_id = u.id
         WHERE p.bill_id IS NULL
-        ORDER BY p.payment_date DESC, p.first_scraped_at ASC
+        ORDER BY 
+            CASE WHEN p.manual_order IS NOT NULL THEN 0 ELSE 1 END,
+            p.manual_order ASC,
+            p.payment_date DESC, 
+            p.first_scraped_at ASC
     ''')
     orphan_payments = [dict(row) for row in cursor.fetchall()]
     
