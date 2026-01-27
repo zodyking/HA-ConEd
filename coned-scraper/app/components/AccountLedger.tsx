@@ -56,6 +56,179 @@ function FormattedDate({ date, fallback }: { date: string | null | undefined, fa
   return <>{formatDate(date, { year: 'numeric', month: 'short', day: 'numeric' })}</>
 }
 
+// Bill Payee Summary Component
+interface PayeeSummary {
+  user_id: number
+  name: string
+  responsibility_percent: number
+  amount_owed: number
+  amount_paid: number
+  rollover_from_previous: number
+  current_balance: number
+  status: 'paid' | 'partial' | 'unpaid'
+}
+
+interface BillSummaryData {
+  bill_id: number
+  bill_total: number
+  total_paid: number
+  bill_balance: number
+  bill_status: 'paid' | 'partial' | 'unpaid'
+  payee_summaries: PayeeSummary[]
+}
+
+function BillPayeeSummary({ 
+  billId, 
+  billSummaries, 
+  loadBillSummary 
+}: { 
+  billId: number
+  billSummaries: {[key: number]: BillSummaryData}
+  loadBillSummary: (id: number) => void
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const summary = billSummaries[billId]
+  
+  const handleToggle = () => {
+    if (!expanded && !summary) {
+      loadBillSummary(billId)
+    }
+    setExpanded(!expanded)
+  }
+
+  // Check if there are any payee responsibilities configured
+  const hasResponsibilities = summary?.payee_summaries?.some(p => p.responsibility_percent > 0)
+
+  if (!expanded) {
+    return (
+      <button
+        onClick={handleToggle}
+        style={{
+          width: '100%',
+          padding: '0.4rem',
+          backgroundColor: '#f8f9fa',
+          border: '1px dashed #ddd',
+          borderRadius: '4px',
+          cursor: 'pointer',
+          fontSize: '0.7rem',
+          color: '#666',
+          marginTop: '0.5rem',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '0.3rem'
+        }}
+      >
+        <span>▶</span> View Payee Breakdown
+      </button>
+    )
+  }
+
+  return (
+    <div style={{ 
+      marginTop: '0.5rem', 
+      padding: '0.6rem', 
+      backgroundColor: '#f5f5f5', 
+      borderRadius: '6px',
+      border: '1px solid #e0e0e0'
+    }}>
+      <div 
+        onClick={handleToggle}
+        style={{ 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center',
+          cursor: 'pointer',
+          marginBottom: summary ? '0.5rem' : 0
+        }}
+      >
+        <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#333' }}>
+          Payee Breakdown
+        </span>
+        <span style={{ fontSize: '0.7rem', color: '#999' }}>▼ collapse</span>
+      </div>
+
+      {!summary ? (
+        <div style={{ fontSize: '0.7rem', color: '#999', textAlign: 'center', padding: '0.5rem' }}>
+          Loading...
+        </div>
+      ) : !hasResponsibilities ? (
+        <div style={{ fontSize: '0.7rem', color: '#999', textAlign: 'center', padding: '0.5rem' }}>
+          No payee responsibilities configured. Set them in Settings → Payees.
+        </div>
+      ) : (
+        <div>
+          {/* Bill Status */}
+          <div style={{ 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            marginBottom: '0.5rem',
+            padding: '0.4rem',
+            backgroundColor: summary.bill_status === 'paid' ? '#e8f5e9' : summary.bill_status === 'partial' ? '#fff3e0' : '#ffebee',
+            borderRadius: '4px',
+            fontSize: '0.7rem'
+          }}>
+            <span>Bill Total: <strong>${summary.bill_total.toFixed(2)}</strong></span>
+            <span>Paid: <strong style={{ color: '#4caf50' }}>${summary.total_paid.toFixed(2)}</strong></span>
+            {summary.bill_balance > 0.01 && (
+              <span>Remaining: <strong style={{ color: '#f44336' }}>${summary.bill_balance.toFixed(2)}</strong></span>
+            )}
+          </div>
+
+          {/* Payee Breakdown */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+            {summary.payee_summaries.filter(p => p.responsibility_percent > 0).map(payee => (
+              <div 
+                key={payee.user_id}
+                style={{
+                  padding: '0.4rem 0.5rem',
+                  backgroundColor: 'white',
+                  borderRadius: '4px',
+                  border: `1px solid ${payee.status === 'paid' ? '#4caf50' : payee.status === 'partial' ? '#ff9800' : '#f44336'}`,
+                  fontSize: '0.7rem'
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.2rem' }}>
+                  <span style={{ fontWeight: 600 }}>{payee.name}</span>
+                  <span style={{ 
+                    padding: '0.1rem 0.3rem', 
+                    borderRadius: '3px',
+                    backgroundColor: payee.status === 'paid' ? '#e8f5e9' : payee.status === 'partial' ? '#fff3e0' : '#ffebee',
+                    color: payee.status === 'paid' ? '#2e7d32' : payee.status === 'partial' ? '#e65100' : '#c62828',
+                    fontSize: '0.6rem',
+                    fontWeight: 600
+                  }}>
+                    {payee.responsibility_percent}% share
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#666', fontSize: '0.65rem' }}>
+                  <span>Owes: ${payee.amount_owed.toFixed(2)}</span>
+                  <span>Paid: ${payee.amount_paid.toFixed(2)}</span>
+                  {payee.rollover_from_previous !== 0 && (
+                    <span style={{ color: payee.rollover_from_previous > 0 ? '#f44336' : '#4caf50' }}>
+                      Rollover: {payee.rollover_from_previous > 0 ? '+' : ''}${payee.rollover_from_previous.toFixed(2)}
+                    </span>
+                  )}
+                </div>
+                {payee.current_balance !== 0 && (
+                  <div style={{ 
+                    marginTop: '0.2rem', 
+                    fontWeight: 600, 
+                    color: payee.current_balance > 0 ? '#f44336' : '#4caf50',
+                    fontSize: '0.7rem'
+                  }}>
+                    {payee.current_balance > 0 ? `Owes: $${payee.current_balance.toFixed(2)}` : `Credit: $${Math.abs(payee.current_balance).toFixed(2)}`}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 
 export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'console' | 'settings') => void }) {
   const [ledgerData, setLedgerData] = useState<LedgerData | null>(null)
@@ -65,7 +238,7 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
   const [showScreenshotModal, setShowScreenshotModal] = useState(false)
   const [showPdfModal, setShowPdfModal] = useState(false)
   const [pdfExists, setPdfExists] = useState(false)
-  
+
   // Bill summary state
   const [billSummaries, setBillSummaries] = useState<{[billId: number]: any}>({})
 
@@ -441,7 +614,7 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
                                           alignItems: 'center',
                                           gap: '0.2rem'
                                         }}
-                                        title="Click to assign payee"
+                                        title="Unassigned - edit in Settings → Payments"
                                       >
                                         <span className="spinner-mini">⟳</span>
                                       </span>
@@ -465,6 +638,9 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
                         ))}
                       </div>
                     )}
+
+                    {/* Payee Summary for this bill */}
+                    <BillPayeeSummary billId={bill.id} billSummaries={billSummaries} loadBillSummary={loadBillSummary} />
                   </div>
                 ))}
 
@@ -472,14 +648,12 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
                 {orphan_payments.length > 0 && (
                   <div className="ha-bill-card" style={{ borderLeftColor: '#ff9800' }}>
                     <div className="ha-bill-header" style={{ backgroundColor: '#fff3e0', color: '#e65100' }}>
-                      Unlinked Payments
+                      ⚠️ Unlinked Payments - Assign in Settings → Payments
                     </div>
                     {orphan_payments.map((payment) => (
                       <div 
                         key={payment.id} 
-                        className="ha-payment-entry ha-payment-clickable"
-                        onClick={() => handlePaymentClick(payment)}
-                        style={{ cursor: 'pointer' }}
+                        className="ha-payment-entry"
                       >
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
@@ -510,7 +684,7 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
                                       alignItems: 'center',
                                       gap: '0.2rem'
                                     }}
-                                    title="Click to assign payee"
+                                    title="Unassigned - edit in Settings → Payments"
                                   >
                                     <span className="spinner-mini">⟳</span>
                                   </span>
