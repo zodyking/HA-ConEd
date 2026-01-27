@@ -1324,6 +1324,7 @@ async def update_responsibilities(request: Request):
     try:
         # Bypass Pydantic entirely - parse raw JSON
         body = await request.json()
+        add_log("info", f"Received responsibilities request: {body}")
         raw_responsibilities = body.get('responsibilities', {})
         
         # Convert string keys to int, handle various value types

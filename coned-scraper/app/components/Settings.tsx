@@ -1808,28 +1808,35 @@ function PayeesTab() {
     }
     
     setIsLoading(true)
+    console.log('Saving responsibilities:', responsibilities)
     try {
       const res = await fetch(`${API_BASE_URL}/payee-users/responsibilities`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ responsibilities })
       })
+      console.log('Response status:', res.status)
       
       if (res.ok) {
         setMessage({ type: 'success', text: 'Bill responsibilities saved!' })
         await loadUsers()
       } else {
-        const err = await res.json()
-        // Handle Pydantic validation errors which return detail as array
-        const errorText = typeof err.detail === 'string' 
-          ? err.detail 
-          : Array.isArray(err.detail) 
-            ? err.detail.map((e: any) => e.msg || JSON.stringify(e)).join(', ')
-            : 'Failed to save'
+        let errorText = `HTTP ${res.status}`
+        try {
+          const err = await res.json()
+          errorText = typeof err.detail === 'string' 
+            ? err.detail 
+            : Array.isArray(err.detail) 
+              ? err.detail.map((e: any) => e.msg || JSON.stringify(e)).join(', ')
+              : JSON.stringify(err)
+        } catch {
+          errorText = `HTTP ${res.status}: ${res.statusText}`
+        }
         setMessage({ type: 'error', text: errorText })
       }
-    } catch (e) {
-      setMessage({ type: 'error', text: 'Failed to save responsibilities' })
+    } catch (e: any) {
+      console.error('Save responsibilities error:', e)
+      setMessage({ type: 'error', text: `Failed to save: ${e?.message || String(e)}` })
     } finally {
       setIsLoading(false)
     }
