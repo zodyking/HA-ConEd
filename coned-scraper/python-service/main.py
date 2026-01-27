@@ -933,6 +933,11 @@ async def get_screenshot(filename: str):
             status_code=404
         )
 
+@app.get("/api/bill-document")
+async def get_bill_document():
+    """Get the latest bill PDF (alt endpoint to avoid ad blockers)"""
+    return await get_latest_bill_pdf()
+
 @app.get("/api/latest-bill-pdf")
 async def get_latest_bill_pdf():
     """Get the latest bill PDF (downloaded and stored locally)"""

@@ -914,7 +914,7 @@ function AppSettingsTab() {
                 </span>
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
                   <a
-                    href={`${API_BASE_URL}/latest-bill-pdf`}
+                    href={`${API_BASE_URL}/bill-document`}
                     target="_blank"
                     rel="noopener noreferrer"
                     style={{

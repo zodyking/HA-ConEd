@@ -470,7 +470,7 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
               </button>
             </div>
             <iframe
-              src={`${API_BASE_URL}/latest-bill-pdf#toolbar=0&navpanes=0&scrollbar=1`}
+              src={`${API_BASE_URL}/bill-document#toolbar=0&navpanes=0&scrollbar=1`}
               style={{
                 flex: 1,
                 width: '100%',
