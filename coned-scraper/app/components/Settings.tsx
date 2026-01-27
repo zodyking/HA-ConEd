@@ -34,7 +34,7 @@ export default function Settings() {
   const [timeRemaining, setTimeRemaining] = useState<number>(30)
   const [isLoading, setIsLoading] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
-  const [activeTab, setActiveTab] = useState<'console' | 'credentials' | 'automated' | 'webhooks' | 'mqtt' | 'app-settings' | 'payees'>('console')
+  const [activeTab, setActiveTab] = useState<'console' | 'credentials' | 'automated' | 'webhooks' | 'mqtt' | 'app-settings' | 'payees' | 'payments' | 'imap'>('console')
   
   // Password protection
   const [isUnlocked, setIsUnlocked] = useState(false)
@@ -326,6 +326,20 @@ export default function Settings() {
         >
           👥 Payees
         </button>
+        <button
+          type="button"
+          className={`ha-tab ${activeTab === 'payments' ? 'active' : ''}`}
+          onClick={() => setActiveTab('payments')}
+        >
+          💳 Payments
+        </button>
+        <button
+          type="button"
+          className={`ha-tab ${activeTab === 'imap' ? 'active' : ''}`}
+          onClick={() => setActiveTab('imap')}
+        >
+          📧 Email
+        </button>
       </div>
 
       {activeTab === 'console' && (
@@ -454,6 +468,14 @@ export default function Settings() {
 
       {activeTab === 'payees' && (
         <PayeesTab />
+      )}
+
+      {activeTab === 'payments' && (
+        <PaymentsTab />
+      )}
+
+      {activeTab === 'imap' && (
+        <IMAPTab />
       )}
     </div>
   )
@@ -1962,25 +1984,297 @@ function PayeesTab() {
         </div>
       )}
 
-      {/* IMAP Email Configuration */}
-      <div className="ha-card" style={{ marginTop: '1rem' }}>
-        <div className="ha-card-header">
-          <span className="ha-card-icon">📧</span>
-          <span>Email Integration (IMAP)</span>
+    </div>
+  )
+}
+
+// ==========================================
+// PAYMENTS TAB - All payments for auditing
+// ==========================================
+
+interface PaymentAudit {
+  id: number
+  payment_date: string
+  amount: string
+  description: string
+  bill_id: number | null
+  bill_month: string | null
+  bill_cycle: string | null
+  payee_name: string | null
+  payee_status: string
+  bill_manually_set: number
+  first_scraped_at: string
+}
+
+interface BillOption {
+  id: number
+  bill_cycle_date: string
+  month_range: string
+}
+
+function PaymentsTab() {
+  const [payments, setPayments] = useState<PaymentAudit[]>([])
+  const [bills, setBills] = useState<BillOption[]>([])
+  const [isLoading, setIsLoading] = useState(false)
+  const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
+  const [editingPayment, setEditingPayment] = useState<number | null>(null)
+  const [showWipeConfirm, setShowWipeConfirm] = useState(false)
+
+  useEffect(() => {
+    loadPayments()
+    loadBills()
+  }, [])
+
+  const loadPayments = async () => {
+    setIsLoading(true)
+    try {
+      const res = await fetch(`${API_BASE_URL}/payments?limit=500`)
+      if (res.ok) {
+        const data = await res.json()
+        setPayments(data.payments || [])
+      }
+    } catch (e) {
+      console.error('Failed to load payments:', e)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const loadBills = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/bills`)
+      if (res.ok) {
+        const data = await res.json()
+        setBills(data.bills || [])
+      }
+    } catch (e) {
+      console.error('Failed to load bills:', e)
+    }
+  }
+
+  const handleChangeBill = async (paymentId: number, billId: number | null) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/payments/${paymentId}/bill`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bill_id: billId })
+      })
+      
+      if (res.ok) {
+        await loadPayments()
+        setEditingPayment(null)
+        setMessage({ type: 'success', text: 'Payment bill assignment updated (manually locked)' })
+      } else {
+        setMessage({ type: 'error', text: 'Failed to update payment' })
+      }
+    } catch (e) {
+      setMessage({ type: 'error', text: 'Failed to connect' })
+    }
+  }
+
+  const handleWipeDatabase = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/data/wipe`, { method: 'DELETE' })
+      if (res.ok) {
+        const data = await res.json()
+        setMessage({ type: 'success', text: `Wiped ${data.bills_deleted} bills and ${data.payments_deleted} payments` })
+        await loadPayments()
+        await loadBills()
+        setShowWipeConfirm(false)
+      } else {
+        setMessage({ type: 'error', text: 'Failed to wipe database' })
+      }
+    } catch (e) {
+      setMessage({ type: 'error', text: 'Failed to connect' })
+    }
+  }
+
+  return (
+    <div className="ha-card">
+      <div className="ha-card-header">
+        <span className="ha-card-icon">💳</span>
+        <span>All Payments</span>
+      </div>
+      <div className="ha-card-content">
+        {message && (
+          <div className={`ha-alert ha-alert-${message.type}`}>
+            {message.text}
+          </div>
+        )}
+
+        {/* Wipe Database Section */}
+        <div style={{ 
+          marginBottom: '1.5rem', 
+          padding: '1rem', 
+          backgroundColor: '#fff3e0', 
+          borderRadius: '8px',
+          border: '1px solid #ffcc80'
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+            <div>
+              <div style={{ fontWeight: 600, color: '#e65100', marginBottom: '0.25rem' }}>⚠️ Database Management</div>
+              <div style={{ fontSize: '0.8rem', color: '#666' }}>
+                Clear all bills and payments from database. This cannot be undone.
+              </div>
+            </div>
+            {!showWipeConfirm ? (
+              <button
+                onClick={() => setShowWipeConfirm(true)}
+                style={{
+                  padding: '0.5rem 1rem',
+                  backgroundColor: '#f44336',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontSize: '0.85rem',
+                  fontWeight: 500
+                }}
+              >
+                Wipe Database
+              </button>
+            ) : (
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <button
+                  onClick={handleWipeDatabase}
+                  style={{
+                    padding: '0.5rem 1rem',
+                    backgroundColor: '#d32f2f',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontSize: '0.85rem',
+                    fontWeight: 600
+                  }}
+                >
+                  Confirm Wipe
+                </button>
+                <button
+                  onClick={() => setShowWipeConfirm(false)}
+                  style={{
+                    padding: '0.5rem 1rem',
+                    backgroundColor: '#e0e0e0',
+                    color: '#333',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontSize: '0.85rem'
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+          </div>
         </div>
-        <div className="ha-card-content">
-          <IMAPSettingsSection />
+
+        {/* Payments Table */}
+        <div style={{ fontSize: '0.8rem', color: '#666', marginBottom: '0.5rem' }}>
+          {payments.length} payment(s) • 🔒 = manually set bill assignment (won&apos;t be changed by auto-logic)
         </div>
+
+        {isLoading ? (
+          <div style={{ textAlign: 'center', padding: '2rem', color: '#666' }}>Loading payments...</div>
+        ) : payments.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '2rem', color: '#666' }}>
+            No payments in database. Run the scraper to populate data.
+          </div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
+              <thead>
+                <tr style={{ backgroundColor: '#f5f5f5' }}>
+                  <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '1px solid #ddd' }}>Date</th>
+                  <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '1px solid #ddd' }}>Amount</th>
+                  <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '1px solid #ddd' }}>Payee</th>
+                  <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '1px solid #ddd' }}>Bill Assignment</th>
+                  <th style={{ padding: '0.5rem', textAlign: 'center', borderBottom: '1px solid #ddd' }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {payments.map((payment) => (
+                  <tr key={payment.id} style={{ borderBottom: '1px solid #eee' }}>
+                    <td style={{ padding: '0.5rem' }}>
+                      {payment.payment_date}
+                    </td>
+                    <td style={{ padding: '0.5rem', fontWeight: 500, color: '#4caf50' }}>
+                      {payment.amount}
+                    </td>
+                    <td style={{ padding: '0.5rem' }}>
+                      {payment.payee_name ? (
+                        <span style={{ color: '#1565c0' }}>{payment.payee_name}</span>
+                      ) : (
+                        <span style={{ color: '#999', fontStyle: 'italic' }}>Unassigned</span>
+                      )}
+                    </td>
+                    <td style={{ padding: '0.5rem' }}>
+                      {editingPayment === payment.id ? (
+                        <select
+                          value={payment.bill_id || ''}
+                          onChange={(e) => handleChangeBill(payment.id, e.target.value ? Number(e.target.value) : null)}
+                          style={{
+                            padding: '0.25rem',
+                            borderRadius: '4px',
+                            border: '1px solid #ddd',
+                            fontSize: '0.75rem',
+                            width: '100%'
+                          }}
+                          autoFocus
+                          onBlur={() => setEditingPayment(null)}
+                        >
+                          <option value="">-- No Bill --</option>
+                          {bills.map((bill) => (
+                            <option key={bill.id} value={bill.id}>
+                              {bill.month_range} ({bill.bill_cycle_date})
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                          {payment.bill_manually_set === 1 && (
+                            <span title="Manually set - won't be changed by auto-logic">🔒</span>
+                          )}
+                          {payment.bill_month ? (
+                            <span>{payment.bill_month}</span>
+                          ) : (
+                            <span style={{ color: '#ff9800', fontStyle: 'italic' }}>Unlinked</span>
+                          )}
+                        </div>
+                      )}
+                    </td>
+                    <td style={{ padding: '0.5rem', textAlign: 'center' }}>
+                      <button
+                        onClick={() => setEditingPayment(payment.id)}
+                        style={{
+                          padding: '0.25rem 0.5rem',
+                          backgroundColor: '#e3f2fd',
+                          color: '#1565c0',
+                          border: 'none',
+                          borderRadius: '4px',
+                          cursor: 'pointer',
+                          fontSize: '0.7rem'
+                        }}
+                      >
+                        Change Bill
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   )
 }
 
 // ==========================================
-// IMAP SETTINGS SECTION
+// IMAP TAB - Email Integration Settings
 // ==========================================
 
-function IMAPSettingsSection() {
+function IMAPTab() {
   const [config, setConfig] = useState({
     enabled: false,
     server: '',
@@ -1988,7 +2282,10 @@ function IMAPSettingsSection() {
     email: '',
     password: '',
     use_ssl: true,
-    days_back: 30
+    gmail_label: 'ConEd',
+    subject_filter: 'Payment Confirmation',
+    auto_assign_mode: 'manual' as 'manual' | 'every_scrape' | 'custom',
+    custom_interval_minutes: 60
   })
   const [isLoading, setIsLoading] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
@@ -2012,7 +2309,10 @@ function IMAPSettingsSection() {
           email: data.email || '',
           password: data.password || '',
           use_ssl: data.use_ssl !== false,
-          days_back: data.days_back || 30
+          gmail_label: data.gmail_label || 'ConEd',
+          subject_filter: data.subject_filter || 'Payment Confirmation',
+          auto_assign_mode: data.auto_assign_mode || 'manual',
+          custom_interval_minutes: data.custom_interval_minutes || 60
         })
         setLastSync(data.last_sync || null)
       }
@@ -2033,7 +2333,7 @@ function IMAPSettingsSection() {
       })
       
       if (res.ok) {
-        setMessage({ type: 'success', text: 'IMAP configuration saved!' })
+        setMessage({ type: 'success', text: 'Email configuration saved!' })
       } else {
         const err = await res.json()
         setMessage({ type: 'error', text: err.detail || 'Failed to save' })
@@ -2109,173 +2409,271 @@ function IMAPSettingsSection() {
   }
 
   return (
-    <div>
-      <div className="info-text" style={{ marginBottom: '1rem' }}>
-        Connect to your email to automatically identify who made each payment by matching card numbers in ConEd payment confirmation emails.
+    <div className="ha-card">
+      <div className="ha-card-header">
+        <span className="ha-card-icon">📧</span>
+        <span>Email Integration (IMAP)</span>
       </div>
-
-      {/* Enable Toggle */}
-      <div style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-        <input
-          type="checkbox"
-          id="imap-enabled"
-          checked={config.enabled}
-          onChange={(e) => setConfig({ ...config, enabled: e.target.checked })}
-        />
-        <label htmlFor="imap-enabled" style={{ fontWeight: 500 }}>Enable Email Integration</label>
-      </div>
-
-      {/* IMAP Server */}
-      <div className="ha-form-group">
-        <label className="ha-form-label">IMAP Server</label>
-        <input
-          type="text"
-          className="ha-form-input"
-          value={config.server}
-          onChange={(e) => setConfig({ ...config, server: e.target.value })}
-          placeholder="imap.gmail.com"
-        />
-        <div className="info-text">
-          Gmail: imap.gmail.com | Outlook: outlook.office365.com | Yahoo: imap.mail.yahoo.com
+      <div className="ha-card-content">
+        <div className="info-text" style={{ marginBottom: '1rem' }}>
+          Connect to your email to automatically identify who made each payment by matching card numbers in ConEd payment confirmation emails.
         </div>
-      </div>
 
-      {/* Port & SSL */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-        <div className="ha-form-group">
-          <label className="ha-form-label">Port</label>
+        {/* Enable Toggle */}
+        <div style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <input
-            type="number"
+            type="checkbox"
+            id="imap-enabled"
+            checked={config.enabled}
+            onChange={(e) => setConfig({ ...config, enabled: e.target.checked })}
+          />
+          <label htmlFor="imap-enabled" style={{ fontWeight: 500 }}>Enable Email Integration</label>
+        </div>
+
+        {/* IMAP Server */}
+        <div className="ha-form-group">
+          <label className="ha-form-label">IMAP Server</label>
+          <input
+            type="text"
             className="ha-form-input"
-            value={config.port}
-            onChange={(e) => setConfig({ ...config, port: parseInt(e.target.value) || 993 })}
+            value={config.server}
+            onChange={(e) => setConfig({ ...config, server: e.target.value })}
+            placeholder="imap.gmail.com"
+          />
+          <div className="info-text">
+            Gmail: imap.gmail.com | Outlook: outlook.office365.com | Yahoo: imap.mail.yahoo.com
+          </div>
+        </div>
+
+        {/* Port & SSL */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+          <div className="ha-form-group">
+            <label className="ha-form-label">Port</label>
+            <input
+              type="number"
+              className="ha-form-input"
+              value={config.port}
+              onChange={(e) => setConfig({ ...config, port: parseInt(e.target.value) || 993 })}
+            />
+          </div>
+          <div className="ha-form-group" style={{ display: 'flex', alignItems: 'flex-end', paddingBottom: '0.5rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <input
+                type="checkbox"
+                id="imap-ssl"
+                checked={config.use_ssl}
+                onChange={(e) => setConfig({ ...config, use_ssl: e.target.checked })}
+              />
+              <label htmlFor="imap-ssl">Use SSL/TLS</label>
+            </div>
+          </div>
+        </div>
+
+        {/* Email & Password */}
+        <div className="ha-form-group">
+          <label className="ha-form-label">Email Address</label>
+          <input
+            type="email"
+            className="ha-form-input"
+            value={config.email}
+            onChange={(e) => setConfig({ ...config, email: e.target.value })}
+            placeholder="your@email.com"
           />
         </div>
+
         <div className="ha-form-group">
-          <label className="ha-form-label">Days to Search</label>
+          <label className="ha-form-label">Password / App Password</label>
           <input
-            type="number"
+            type="password"
             className="ha-form-input"
-            value={config.days_back}
-            onChange={(e) => setConfig({ ...config, days_back: parseInt(e.target.value) || 30 })}
+            value={config.password}
+            onChange={(e) => setConfig({ ...config, password: e.target.value })}
+            placeholder="••••••••"
           />
+          <div className="info-text">
+            For Gmail, use an App Password (not your regular password). Enable 2FA first, then generate at: Google Account → Security → App passwords
+          </div>
         </div>
-      </div>
 
-      {/* Email & Password */}
-      <div className="ha-form-group">
-        <label className="ha-form-label">Email Address</label>
-        <input
-          type="email"
-          className="ha-form-input"
-          value={config.email}
-          onChange={(e) => setConfig({ ...config, email: e.target.value })}
-          placeholder="your@email.com"
-        />
-      </div>
-
-      <div className="ha-form-group">
-        <label className="ha-form-label">Password / App Password</label>
-        <input
-          type="password"
-          className="ha-form-input"
-          value={config.password}
-          onChange={(e) => setConfig({ ...config, password: e.target.value })}
-          placeholder="••••••••"
-        />
-        <div className="info-text">
-          For Gmail, use an App Password (not your regular password). Enable 2FA first, then generate at: Google Account → Security → App passwords
+        {/* Gmail Label & Subject Filter */}
+        <div style={{ 
+          padding: '1rem', 
+          backgroundColor: '#f5f5f5', 
+          borderRadius: '8px',
+          marginBottom: '1rem',
+          marginTop: '1rem'
+        }}>
+          <div style={{ fontWeight: 600, marginBottom: '0.75rem', color: '#333' }}>📁 Email Filtering</div>
+          
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+            <div className="ha-form-group" style={{ marginBottom: 0 }}>
+              <label className="ha-form-label">Gmail Label / Folder</label>
+              <input
+                type="text"
+                className="ha-form-input"
+                value={config.gmail_label}
+                onChange={(e) => setConfig({ ...config, gmail_label: e.target.value })}
+                placeholder="ConEd"
+              />
+              <div className="info-text">
+                The Gmail label or IMAP folder to search in
+              </div>
+            </div>
+            <div className="ha-form-group" style={{ marginBottom: 0 }}>
+              <label className="ha-form-label">Subject Contains</label>
+              <input
+                type="text"
+                className="ha-form-input"
+                value={config.subject_filter}
+                onChange={(e) => setConfig({ ...config, subject_filter: e.target.value })}
+                placeholder="Payment Confirmation"
+              />
+              <div className="info-text">
+                Only check emails with this text in subject
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
 
-      {/* SSL Toggle */}
-      <div style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-        <input
-          type="checkbox"
-          id="imap-ssl"
-          checked={config.use_ssl}
-          onChange={(e) => setConfig({ ...config, use_ssl: e.target.checked })}
-        />
-        <label htmlFor="imap-ssl">Use SSL/TLS</label>
-      </div>
-
-      {/* Action Buttons */}
-      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
-        <button
-          onClick={handleSave}
-          disabled={isLoading}
-          className="ha-button ha-button-primary"
-        >
-          {isLoading ? 'Saving...' : 'Save Configuration'}
-        </button>
-        <button
-          onClick={handleTest}
-          disabled={isLoading || !config.server}
-          className="ha-button"
-          style={{ backgroundColor: '#ff9800', color: 'white' }}
-        >
-          Test Connection
-        </button>
-        <button
-          onClick={handleSync}
-          disabled={isLoading || !config.enabled || !config.server}
-          className="ha-button"
-          style={{ backgroundColor: '#4caf50', color: 'white' }}
-        >
-          Sync Emails Now
-        </button>
-        <button
-          onClick={handlePreview}
-          disabled={isLoading || !config.server}
-          className="ha-button"
-          style={{ backgroundColor: '#9c27b0', color: 'white' }}
-        >
-          Preview Emails
-        </button>
-      </div>
-
-      {/* Last Sync */}
-      {lastSync && (
-        <div style={{ fontSize: '0.8rem', color: '#666', marginBottom: '1rem' }}>
-          Last sync: {formatTZ(lastSync)}
-        </div>
-      )}
-
-      {/* Message */}
-      {message && (
-        <div style={{
-          padding: '0.75rem',
-          borderRadius: '4px',
-          backgroundColor: message.type === 'error' ? '#ffebee' : '#e8f5e9',
-          color: message.type === 'error' ? '#c62828' : '#2e7d32',
-          fontSize: '0.85rem',
+        {/* Auto-Assignment Frequency */}
+        <div style={{ 
+          padding: '1rem', 
+          backgroundColor: '#e3f2fd', 
+          borderRadius: '8px',
           marginBottom: '1rem'
         }}>
-          {message.text}
-        </div>
-      )}
-
-      {/* Email Preview */}
-      {showPreview && (
-        <div style={{ marginTop: '1rem' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-            <strong>Found {previewEmails.length} payment emails</strong>
-            <button onClick={() => setShowPreview(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>✕</button>
-          </div>
-          <div style={{ maxHeight: '200px', overflow: 'auto', fontSize: '0.8rem', backgroundColor: '#f5f5f5', padding: '0.5rem', borderRadius: '4px' }}>
-            {previewEmails.length === 0 ? (
-              <div style={{ color: '#666' }}>No ConEd payment emails found in the last {config.days_back} days</div>
-            ) : (
-              previewEmails.map((email, idx) => (
-                <div key={idx} style={{ padding: '0.5rem', borderBottom: '1px solid #e0e0e0' }}>
-                  <div><strong>{email.amount || 'Unknown amount'}</strong> - Card: *{email.card_last_four || 'N/A'}</div>
-                  <div style={{ color: '#666' }}>{email.date} • {email.subject}</div>
-                </div>
-              ))
+          <div style={{ fontWeight: 600, marginBottom: '0.75rem', color: '#1565c0' }}>🔄 Auto-Assignment Frequency</div>
+          
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+              <input
+                type="radio"
+                name="auto_assign_mode"
+                checked={config.auto_assign_mode === 'manual'}
+                onChange={() => setConfig({ ...config, auto_assign_mode: 'manual' })}
+              />
+              <span><strong>Manual Only</strong> - Run email sync manually from this page</span>
+            </label>
+            
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+              <input
+                type="radio"
+                name="auto_assign_mode"
+                checked={config.auto_assign_mode === 'every_scrape'}
+                onChange={() => setConfig({ ...config, auto_assign_mode: 'every_scrape' })}
+              />
+              <span><strong>Every Scrape</strong> - Check emails after each ConEd scrape</span>
+            </label>
+            
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+              <input
+                type="radio"
+                name="auto_assign_mode"
+                checked={config.auto_assign_mode === 'custom'}
+                onChange={() => setConfig({ ...config, auto_assign_mode: 'custom' })}
+              />
+              <span><strong>Custom Interval</strong></span>
+            </label>
+            
+            {config.auto_assign_mode === 'custom' && (
+              <div style={{ marginLeft: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span>Check every</span>
+                <input
+                  type="number"
+                  value={config.custom_interval_minutes}
+                  onChange={(e) => setConfig({ ...config, custom_interval_minutes: parseInt(e.target.value) || 60 })}
+                  style={{
+                    width: '80px',
+                    padding: '0.25rem 0.5rem',
+                    borderRadius: '4px',
+                    border: '1px solid #ccc'
+                  }}
+                  min={5}
+                />
+                <span>minutes</span>
+              </div>
             )}
           </div>
         </div>
-      )}
+
+        {/* Action Buttons */}
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
+          <button
+            onClick={handleSave}
+            disabled={isLoading}
+            className="ha-button ha-button-primary"
+          >
+            {isLoading ? 'Saving...' : 'Save Configuration'}
+          </button>
+          <button
+            onClick={handleTest}
+            disabled={isLoading || !config.server}
+            className="ha-button"
+            style={{ backgroundColor: '#ff9800', color: 'white' }}
+          >
+            Test Connection
+          </button>
+          <button
+            onClick={handleSync}
+            disabled={isLoading || !config.enabled || !config.server}
+            className="ha-button"
+            style={{ backgroundColor: '#4caf50', color: 'white' }}
+          >
+            Sync Emails Now
+          </button>
+          <button
+            onClick={handlePreview}
+            disabled={isLoading || !config.server}
+            className="ha-button"
+            style={{ backgroundColor: '#9c27b0', color: 'white' }}
+          >
+            Preview Emails
+          </button>
+        </div>
+
+        {/* Last Sync */}
+        {lastSync && (
+          <div style={{ fontSize: '0.8rem', color: '#666', marginBottom: '1rem' }}>
+            Last sync: {formatTZ(lastSync)}
+          </div>
+        )}
+
+        {/* Message */}
+        {message && (
+          <div style={{
+            padding: '0.75rem',
+            borderRadius: '4px',
+            backgroundColor: message.type === 'error' ? '#ffebee' : '#e8f5e9',
+            color: message.type === 'error' ? '#c62828' : '#2e7d32',
+            fontSize: '0.85rem',
+            marginBottom: '1rem'
+          }}>
+            {message.text}
+          </div>
+        )}
+
+        {/* Email Preview */}
+        {showPreview && (
+          <div style={{ marginTop: '1rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+              <strong>Found {previewEmails.length} payment emails</strong>
+              <button onClick={() => setShowPreview(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>✕</button>
+            </div>
+            <div style={{ maxHeight: '200px', overflow: 'auto', fontSize: '0.8rem', backgroundColor: '#f5f5f5', padding: '0.5rem', borderRadius: '4px' }}>
+              {previewEmails.length === 0 ? (
+                <div style={{ color: '#666' }}>No ConEd payment emails found matching filters</div>
+              ) : (
+                previewEmails.map((email, idx) => (
+                  <div key={idx} style={{ padding: '0.5rem', borderBottom: '1px solid #e0e0e0' }}>
+                    <div><strong>{email.amount || 'Unknown amount'}</strong> - Card: *{email.card_last_four || 'N/A'}</div>
+                    <div style={{ color: '#666' }}>{email.date} • {email.subject}</div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

@@ -107,10 +107,17 @@ def init_database():
             payee_user_id INTEGER,
             card_last_four TEXT,
             verification_method TEXT,
+            bill_manually_set INTEGER DEFAULT 0,
             FOREIGN KEY (bill_id) REFERENCES bills(id) ON DELETE SET NULL,
             FOREIGN KEY (payee_user_id) REFERENCES payee_users(id) ON DELETE SET NULL
         )
     ''')
+    
+    # Add bill_manually_set column if it doesn't exist (migration)
+    try:
+        cursor.execute('ALTER TABLE payments ADD COLUMN bill_manually_set INTEGER DEFAULT 0')
+    except sqlite3.OperationalError:
+        pass
     
     # Account balance history
     cursor.execute('''
@@ -297,22 +304,26 @@ def upsert_payment(payment_data: Dict[str, Any], bill_id: Optional[int] = None, 
     return payment_id
 
 def get_all_payments(limit: int = 100, bill_id: Optional[int] = None) -> List[Dict[str, Any]]:
-    """Get all payments ordered by first_scraped_at (newest first)"""
+    """Get all payments ordered by payment_date (then first_scraped_at for same-day)"""
     conn = get_connection()
     cursor = conn.cursor()
     
     if bill_id:
         cursor.execute('''
-            SELECT p.*, u.name as payee_name FROM payments p
+            SELECT p.*, u.name as payee_name, b.month_range as bill_month, b.bill_cycle_date as bill_cycle
+            FROM payments p
             LEFT JOIN payee_users u ON p.payee_user_id = u.id
+            LEFT JOIN bills b ON p.bill_id = b.id
             WHERE p.bill_id = ?
             ORDER BY p.payment_date DESC, p.first_scraped_at ASC
             LIMIT ?
         ''', (bill_id, limit))
     else:
         cursor.execute('''
-            SELECT p.*, u.name as payee_name FROM payments p
+            SELECT p.*, u.name as payee_name, b.month_range as bill_month, b.bill_cycle_date as bill_cycle
+            FROM payments p
             LEFT JOIN payee_users u ON p.payee_user_id = u.id
+            LEFT JOIN bills b ON p.bill_id = b.id
             ORDER BY p.payment_date DESC, p.first_scraped_at ASC
             LIMIT ?
         ''', (limit,))
@@ -330,6 +341,64 @@ def get_latest_payment() -> Optional[Dict[str, Any]]:
 def get_payments_for_bill(bill_id: int) -> List[Dict[str, Any]]:
     """Get all payments for a specific bill"""
     return get_all_payments(limit=100, bill_id=bill_id)
+
+def get_payment_by_id(payment_id: int) -> Optional[Dict[str, Any]]:
+    """Get a single payment by ID"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        SELECT p.*, u.name as payee_name, b.month_range as bill_month, b.bill_cycle_date as bill_cycle
+        FROM payments p
+        LEFT JOIN payee_users u ON p.payee_user_id = u.id
+        LEFT JOIN bills b ON p.bill_id = b.id
+        WHERE p.id = ?
+    ''', (payment_id,))
+    
+    row = cursor.fetchone()
+    conn.close()
+    
+    return dict(row) if row else None
+
+def update_payment_bill(payment_id: int, bill_id: Optional[int], manual: bool = True) -> bool:
+    """Update which bill a payment belongs to. If manual=True, marks as manually set."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        UPDATE payments SET 
+            bill_id = ?,
+            bill_manually_set = ?
+        WHERE id = ?
+    ''', (bill_id, 1 if manual else 0, payment_id))
+    
+    updated = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return updated
+
+def wipe_bills_and_payments() -> Dict[str, int]:
+    """Delete all bills and payments from the database"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    # Get counts before deletion
+    cursor.execute('SELECT COUNT(*) FROM payments')
+    payment_count = cursor.fetchone()[0]
+    
+    cursor.execute('SELECT COUNT(*) FROM bills')
+    bill_count = cursor.fetchone()[0]
+    
+    # Delete all payments first (foreign key constraint)
+    cursor.execute('DELETE FROM payments')
+    
+    # Delete all bills
+    cursor.execute('DELETE FROM bills')
+    
+    conn.commit()
+    conn.close()
+    
+    return {'payments_deleted': payment_count, 'bills_deleted': bill_count}
 
 # ==========================================
 # ACCOUNT BALANCE FUNCTIONS
@@ -589,6 +658,52 @@ def get_unverified_payments(limit: int = 50) -> List[Dict[str, Any]]:
 # DATA SYNC FROM SCRAPE
 # ==========================================
 
+def parse_date_for_comparison(date_str: str) -> Optional[datetime]:
+    """Parse date string to datetime for comparison. Handles M/D/YYYY format."""
+    if not date_str:
+        return None
+    try:
+        # ConEd uses M/D/YYYY format
+        return datetime.strptime(date_str, '%m/%d/%Y')
+    except ValueError:
+        try:
+            # Try alternate format
+            return datetime.strptime(date_str, '%Y-%m-%d')
+        except ValueError:
+            return None
+
+def find_bill_for_payment(payment_date_str: str, bills: List[Dict[str, Any]]) -> Optional[int]:
+    """
+    Find the appropriate bill for a payment based on payment date.
+    A payment belongs to the bill whose cycle date is closest to but not after the payment date.
+    """
+    payment_date = parse_date_for_comparison(payment_date_str)
+    if not payment_date:
+        return None
+    
+    # Sort bills by cycle date descending (newest first)
+    sorted_bills = []
+    for bill in bills:
+        cycle_date = parse_date_for_comparison(bill['bill_cycle_date'])
+        if cycle_date:
+            sorted_bills.append({
+                'bill_id': bill['bill_id'],
+                'cycle_date': cycle_date
+            })
+    
+    sorted_bills.sort(key=lambda x: x['cycle_date'], reverse=True)
+    
+    # Find the first bill whose cycle date is <= payment date
+    for bill in sorted_bills:
+        if bill['cycle_date'] <= payment_date:
+            return bill['bill_id']
+    
+    # If payment is before all bills, assign to the oldest bill
+    if sorted_bills:
+        return sorted_bills[-1]['bill_id']
+    
+    return None
+
 def sync_from_scrape(scrape_data: Dict[str, Any]) -> Dict[str, Any]:
     """Sync scraped data to normalized tables, returns stats"""
     stats = {
@@ -607,38 +722,48 @@ def sync_from_scrape(scrape_data: Dict[str, Any]) -> Dict[str, Any]:
     bill_history = scrape_data.get('bill_history', {})
     ledger = bill_history.get('ledger', [])
     
-    # First pass: collect all bills and their positions
-    bills_in_order = []
-    for idx, item in enumerate(ledger):
+    # First pass: collect all bills
+    bills_info = []
+    for item in ledger:
         if item.get('type') == 'bill':
             bill_id = upsert_bill(item)
-            bills_in_order.append({
+            bills_info.append({
                 'bill_id': bill_id,
-                'bill_cycle_date': item.get('bill_cycle_date', ''),
-                'ledger_index': idx
+                'bill_cycle_date': item.get('bill_cycle_date', '')
             })
     
-    # Second pass: process all payments and assign to appropriate bill
+    # Second pass: process all payments
     payment_order = 0
-    for idx, item in enumerate(ledger):
+    for item in ledger:
         if item.get('type') == 'payment':
             payment_order += 1
-            payment_date = item.get('bill_cycle_date', '')
+            payment_date = item.get('bill_cycle_date', '')  # ConEd uses bill_cycle_date for payment date too
             
-            # Find the bill this payment belongs to
-            # Payments appear BEFORE their associated bill in ConEd's ledger
-            # So we find the first bill that comes AFTER this payment in the ledger
-            assigned_bill_id = None
-            for bill_info in bills_in_order:
-                if bill_info['ledger_index'] > idx:
-                    assigned_bill_id = bill_info['bill_id']
-                    break
+            # Check if this payment already exists and is manually set
+            description = item.get('description', 'Payment Received')
+            amount = item.get('amount', '')
+            payment_hash = generate_payment_hash(payment_date, amount, description, '')
             
-            # If no bill found after payment, assign to the most recent bill
-            if assigned_bill_id is None and bills_in_order:
-                assigned_bill_id = bills_in_order[0]['bill_id']
+            conn = get_connection()
+            cursor = conn.cursor()
+            cursor.execute('SELECT id, bill_manually_set FROM payments WHERE payment_hash = ?', (payment_hash,))
+            existing = cursor.fetchone()
+            conn.close()
             
-            upsert_payment(item, bill_id=assigned_bill_id, scrape_order=payment_order)
+            if existing and existing['bill_manually_set'] == 1:
+                # Payment has manually set bill, just update scrape timestamp
+                conn = get_connection()
+                cursor = conn.cursor()
+                cursor.execute('''
+                    UPDATE payments SET last_scraped_at = ?, scrape_count = scrape_count + 1
+                    WHERE id = ?
+                ''', (utc_now_iso(), existing['id']))
+                conn.commit()
+                conn.close()
+            else:
+                # Find appropriate bill based on payment date
+                assigned_bill_id = find_bill_for_payment(payment_date, bills_info)
+                upsert_payment(item, bill_id=assigned_bill_id, scrape_order=payment_order)
     
     return stats
 

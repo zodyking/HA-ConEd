@@ -28,7 +28,8 @@ from database import (
     get_ledger_data, get_all_bills, get_all_payments, get_latest_payment,
     get_payee_users, create_payee_user, update_payee_user, delete_payee_user,
     add_user_card, delete_user_card, get_user_by_card,
-    attribute_payment, get_unverified_payments, clear_payment_attribution
+    attribute_payment, get_unverified_payments, clear_payment_attribution,
+    wipe_bills_and_payments, update_payment_bill, get_payment_by_id
 )
 
 app = FastAPI(title="ConEd Scraper API")
@@ -1368,6 +1369,46 @@ async def clear_payment_attribution_endpoint(payment_id: int):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/payments/{payment_id}")
+async def get_payment_endpoint(payment_id: int):
+    """Get a single payment by ID"""
+    try:
+        payment = get_payment_by_id(payment_id)
+        if payment:
+            return {"payment": payment}
+        raise HTTPException(status_code=404, detail="Payment not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+class UpdatePaymentBillModel(BaseModel):
+    bill_id: Optional[int] = None
+
+@app.put("/api/payments/{payment_id}/bill")
+async def update_payment_bill_endpoint(payment_id: int, data: UpdatePaymentBillModel):
+    """Update which bill a payment belongs to (manual override)"""
+    try:
+        success = update_payment_bill(payment_id, data.bill_id, manual=True)
+        if success:
+            add_log("info", f"Manually assigned payment {payment_id} to bill {data.bill_id}")
+            return {"success": True}
+        raise HTTPException(status_code=404, detail="Payment not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/data/wipe")
+async def wipe_all_data():
+    """Wipe all bills and payments from database"""
+    try:
+        result = wipe_bills_and_payments()
+        add_log("warning", f"Database wiped: {result['bills_deleted']} bills, {result['payments_deleted']} payments deleted")
+        return {"success": True, **result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 # ==========================================
 # IMAP EMAIL CONFIGURATION
 # ==========================================
@@ -1379,7 +1420,10 @@ class IMAPConfigModel(BaseModel):
     email: str
     password: str
     use_ssl: bool = True
-    days_back: int = 30
+    gmail_label: str = "ConEd"
+    subject_filter: str = "Payment Confirmation"
+    auto_assign_mode: str = "manual"  # 'manual', 'every_scrape', 'custom'
+    custom_interval_minutes: int = 60
 
 class IMAPTestModel(BaseModel):
     server: str
@@ -1387,6 +1431,8 @@ class IMAPTestModel(BaseModel):
     email: str
     password: str
     use_ssl: bool = True
+    gmail_label: str = "ConEd"
+    subject_filter: str = "Payment Confirmation"
 
 @app.get("/api/imap-config")
 async def get_imap_config():
@@ -1417,7 +1463,10 @@ async def save_imap_config_endpoint(config: IMAPConfigModel):
         'email': config.email,
         'password': password,
         'use_ssl': config.use_ssl,
-        'days_back': config.days_back,
+        'gmail_label': config.gmail_label,
+        'subject_filter': config.subject_filter,
+        'auto_assign_mode': config.auto_assign_mode,
+        'custom_interval_minutes': config.custom_interval_minutes,
         'updated_at': utc_now_iso()
     }
     
