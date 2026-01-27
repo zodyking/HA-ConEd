@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
@@ -1318,16 +1318,17 @@ async def delete_user(user_id: int):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-class ResponsibilitiesModel(BaseModel):
-    responsibilities: dict  # {user_id: percent} - no type validation to avoid coercion issues
-
 @app.put("/api/payee-users/responsibilities")
-async def update_responsibilities(data: ResponsibilitiesModel):
+async def update_responsibilities(request: Request):
     """Update bill responsibility percentages for payees (must total 100%)"""
     try:
+        # Bypass Pydantic entirely - parse raw JSON
+        body = await request.json()
+        raw_responsibilities = body.get('responsibilities', {})
+        
         # Convert string keys to int, handle various value types
         responsibilities = {}
-        for k, v in data.responsibilities.items():
+        for k, v in raw_responsibilities.items():
             try:
                 user_id = int(k)
                 percent = float(v) if v is not None else 0.0
