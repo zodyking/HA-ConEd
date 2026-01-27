@@ -1071,6 +1071,40 @@ async def download_bill_pdf(request: PdfDownloadRequest):
         add_log("error", f"PDF download error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Download failed: {str(e)}")
 
+@app.post("/api/latest-bill-pdf/send-mqtt")
+async def send_pdf_url_mqtt():
+    """Manually send the PDF URL to Home Assistant via MQTT"""
+    import os
+    from mqtt_client import get_mqtt_client
+    
+    pdf_path = DATA_DIR / "latest_bill.pdf"
+    
+    if not os.path.exists(pdf_path):
+        raise HTTPException(status_code=404, detail="No PDF available to send")
+    
+    try:
+        app_settings = load_app_settings()
+        base_url = app_settings.get("app_base_url", "").rstrip("/")
+        
+        if not base_url:
+            raise HTTPException(status_code=400, detail="App Base URL not configured. Set it in Settings to send PDF URL via MQTT.")
+        
+        mqtt_client = get_mqtt_client()
+        if not mqtt_client:
+            raise HTTPException(status_code=400, detail="MQTT client not available")
+        
+        hosted_pdf_url = f"{base_url}/api/bill-document"
+        await mqtt_client.publish_bill_pdf_url(hosted_pdf_url, datetime.now().isoformat())
+        add_log("info", f"Manually sent PDF URL to MQTT: {hosted_pdf_url}")
+        
+        return {"success": True, "message": f"PDF URL sent to MQTT: {hosted_pdf_url}"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        add_log("error", f"Failed to send PDF URL via MQTT: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to send: {str(e)}")
+
 @app.delete("/api/latest-bill-pdf")
 async def delete_bill_pdf():
     """Delete the stored bill PDF"""

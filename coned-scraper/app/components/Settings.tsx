@@ -725,6 +725,25 @@ function AppSettingsTab() {
     }
   }
   
+  const handleSendMqtt = async () => {
+    setPdfLoading(true)
+    setPdfMessage(null)
+    
+    try {
+      const res = await fetch(`${API_BASE_URL}/latest-bill-pdf/send-mqtt`, { method: 'POST' })
+      const data = await res.json()
+      if (res.ok) {
+        setPdfMessage({ type: 'success', text: data.message || 'PDF URL sent to MQTT' })
+      } else {
+        setPdfMessage({ type: 'error', text: data.detail || 'Failed to send MQTT' })
+      }
+    } catch (e) {
+      setPdfMessage({ type: 'error', text: 'Failed to send PDF URL via MQTT' })
+    } finally {
+      setPdfLoading(false)
+    }
+  }
+  
   const handleSaveBaseUrl = async () => {
     setIsLoading(true)
     setMessage(null)
@@ -912,7 +931,7 @@ function AppSettingsTab() {
                 <span style={{ color: '#2e7d32', fontWeight: 500 }}>
                   ✅ PDF available ({pdfStatus.size_kb} KB)
                 </span>
-                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                   <a
                     href={`${API_BASE_URL}/bill-document`}
                     target="_blank"
@@ -926,8 +945,24 @@ function AppSettingsTab() {
                       fontSize: '0.8rem'
                     }}
                   >
-                    View PDF
+                    View
                   </a>
+                  <button
+                    type="button"
+                    onClick={handleSendMqtt}
+                    disabled={pdfLoading}
+                    style={{
+                      padding: '0.4rem 0.75rem',
+                      backgroundColor: '#9c27b0',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '4px',
+                      fontSize: '0.8rem',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Send MQTT
+                  </button>
                   <button
                     type="button"
                     onClick={handleDeletePdf}

@@ -432,94 +432,89 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
           <span className="ha-card-icon">💰</span>
           <span>Account Summary</span>
         </div>
-        <div className="ha-card-content" style={{ padding: '1.25rem' }}>
-          {/* Main Balance Display */}
+        <div className="ha-card-content" style={{ padding: '0.75rem' }}>
+          {/* Compact Balance Display */}
           <div style={{ 
             textAlign: 'center', 
-            marginBottom: '1.25rem',
-            padding: '1rem',
+            marginBottom: '0.5rem',
+            padding: '0.5rem',
             background: 'linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)',
-            borderRadius: '8px'
+            borderRadius: '6px'
           }}>
-            <div style={{ fontSize: '0.75rem', color: '#666', marginBottom: '0.25rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+            <div style={{ fontSize: '0.6rem', color: '#666', marginBottom: '0.1rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
               Account Balance
             </div>
             <div style={{ 
-              fontSize: '2.25rem', 
+              fontSize: '1.5rem', 
               fontWeight: 700, 
-              color: '#0072ce',
+              color: '#006699',
               fontFamily: 'system-ui, -apple-system, sans-serif'
             }}>
               {accountBalance}
             </div>
           </div>
           
-          {/* Date/Time Row */}
+          {/* Compact Date/Time Row */}
           <div style={{ 
             display: 'flex', 
             justifyContent: 'space-between',
-            padding: '0.75rem 0',
+            padding: '0.4rem 0',
             borderBottom: '1px solid #eee',
-            marginBottom: '1rem'
+            marginBottom: '0.5rem'
           }}>
             <div style={{ textAlign: 'left' }}>
-              <div style={{ fontSize: '0.65rem', color: '#999', textTransform: 'uppercase', marginBottom: '0.15rem' }}>Last Updated</div>
-              <div style={{ fontSize: '0.85rem', fontWeight: 500, color: '#333' }}>{formattedTimestamp.date}</div>
+              <div style={{ fontSize: '0.55rem', color: '#999', textTransform: 'uppercase', marginBottom: '0.1rem' }}>Last Updated</div>
+              <div style={{ fontSize: '0.7rem', fontWeight: 500, color: '#333' }}>{formattedTimestamp.date}</div>
             </div>
             <div style={{ textAlign: 'right' }}>
-              <div style={{ fontSize: '0.65rem', color: '#999', textTransform: 'uppercase', marginBottom: '0.15rem' }}>Time</div>
-              <div style={{ fontSize: '0.85rem', fontWeight: 500, color: '#333' }}>{formattedTimestamp.time}</div>
+              <div style={{ fontSize: '0.55rem', color: '#999', textTransform: 'uppercase', marginBottom: '0.1rem' }}>Time</div>
+              <div style={{ fontSize: '0.7rem', fontWeight: 500, color: '#333' }}>{formattedTimestamp.time}</div>
             </div>
           </div>
           
-          {/* Action Buttons - Always 50/50 */}
+          {/* Compact Action Buttons - No icons */}
           <div style={{ 
             display: 'grid', 
             gridTemplateColumns: '1fr 1fr',
-            gap: '0.75rem'
+            gap: '0.5rem'
           }}>
             <button
               onClick={() => screenshotPath ? setShowScreenshotModal(true) : null}
               disabled={!screenshotPath}
               style={{ 
-                padding: '0.75rem 0.5rem',
+                padding: '0.5rem',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                gap: '0.5rem',
                 border: 'none',
                 cursor: screenshotPath ? 'pointer' : 'not-allowed',
-                backgroundColor: screenshotPath ? '#0072ce' : '#ccc',
+                backgroundColor: screenshotPath ? '#006699' : '#ccc',
                 color: 'white',
-                borderRadius: '6px',
-                fontSize: '0.8rem',
-                fontWeight: 500,
-                transition: 'background-color 0.2s'
+                borderRadius: '4px',
+                fontSize: '0.7rem',
+                fontWeight: 500
               }}
             >
-              <img src="/images/Coned_snapshot.svg" alt="" style={{ width: '16px', height: '16px', filter: 'brightness(0) invert(1)' }} />
               Account
             </button>
             
             <button
               onClick={() => pdfExists ? setShowPdfModal(true) : onNavigate?.('settings')}
               style={{ 
-                padding: '0.75rem 0.5rem',
+                padding: '0.5rem',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                gap: '0.5rem',
                 border: 'none',
                 cursor: 'pointer',
                 backgroundColor: pdfExists ? '#4caf50' : '#ff9800',
                 color: 'white',
-                borderRadius: '6px',
-                fontSize: '0.8rem',
-                fontWeight: 500,
-                transition: 'background-color 0.2s'
+                borderRadius: '4px',
+                fontSize: '0.7rem',
+                fontWeight: 500
               }}
             >
-              📄 {pdfExists ? 'Latest Bill' : 'Add Bill'}
+              {pdfExists ? 'Latest Bill' : 'Add Bill'}
             </button>
           </div>
         </div>
