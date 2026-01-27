@@ -588,20 +588,38 @@ def sync_from_scrape(scrape_data: Dict[str, Any]) -> Dict[str, Any]:
     bill_history = scrape_data.get('bill_history', {})
     ledger = bill_history.get('ledger', [])
     
-    current_bill_id = None
-    payment_order = 0
-    
-    for item in ledger:
+    # First pass: collect all bills and their positions
+    bills_in_order = []
+    for idx, item in enumerate(ledger):
         if item.get('type') == 'bill':
-            # This is a bill
             bill_id = upsert_bill(item)
-            current_bill_id = bill_id
-            payment_order = 0  # Reset for this bill's payments
-            
-        elif item.get('type') == 'payment':
-            # This is a payment
+            bills_in_order.append({
+                'bill_id': bill_id,
+                'bill_cycle_date': item.get('bill_cycle_date', ''),
+                'ledger_index': idx
+            })
+    
+    # Second pass: process all payments and assign to appropriate bill
+    payment_order = 0
+    for idx, item in enumerate(ledger):
+        if item.get('type') == 'payment':
             payment_order += 1
-            upsert_payment(item, bill_id=current_bill_id, scrape_order=payment_order)
+            payment_date = item.get('bill_cycle_date', '')
+            
+            # Find the bill this payment belongs to
+            # Payments appear BEFORE their associated bill in ConEd's ledger
+            # So we find the first bill that comes AFTER this payment in the ledger
+            assigned_bill_id = None
+            for bill_info in bills_in_order:
+                if bill_info['ledger_index'] > idx:
+                    assigned_bill_id = bill_info['bill_id']
+                    break
+            
+            # If no bill found after payment, assign to the most recent bill
+            if assigned_bill_id is None and bills_in_order:
+                assigned_bill_id = bills_in_order[0]['bill_id']
+            
+            upsert_payment(item, bill_id=assigned_bill_id, scrape_order=payment_order)
     
     return stats
 
@@ -635,6 +653,15 @@ def get_ledger_data() -> Dict[str, Any]:
         ''', (bill['id'],))
         bill['payments'] = [dict(row) for row in cursor.fetchall()]
     
+    # Get orphan payments (no bill assigned) and add them to a special section
+    cursor.execute('''
+        SELECT p.*, u.name as payee_name FROM payments p
+        LEFT JOIN payee_users u ON p.payee_user_id = u.id
+        WHERE p.bill_id IS NULL
+        ORDER BY p.payment_date DESC, p.first_scraped_at ASC
+    ''')
+    orphan_payments = [dict(row) for row in cursor.fetchall()]
+    
     # Get latest payment overall
     latest_payment = get_latest_payment()
     
@@ -648,7 +675,8 @@ def get_ledger_data() -> Dict[str, Any]:
         'balance_updated_at': balance['scraped_at'] if balance else None,
         'latest_payment': latest_payment,
         'latest_bill': latest_bill,
-        'bills': bills
+        'bills': bills,
+        'orphan_payments': orphan_payments
     }
 
 # ==========================================

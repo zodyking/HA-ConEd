@@ -1961,6 +1961,321 @@ function PayeesTab() {
           </div>
         </div>
       )}
+
+      {/* IMAP Email Configuration */}
+      <div className="ha-card" style={{ marginTop: '1rem' }}>
+        <div className="ha-card-header">
+          <span className="ha-card-icon">📧</span>
+          <span>Email Integration (IMAP)</span>
+        </div>
+        <div className="ha-card-content">
+          <IMAPSettingsSection />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ==========================================
+// IMAP SETTINGS SECTION
+// ==========================================
+
+function IMAPSettingsSection() {
+  const [config, setConfig] = useState({
+    enabled: false,
+    server: '',
+    port: 993,
+    email: '',
+    password: '',
+    use_ssl: true,
+    days_back: 30
+  })
+  const [isLoading, setIsLoading] = useState(false)
+  const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
+  const [lastSync, setLastSync] = useState<string | null>(null)
+  const [previewEmails, setPreviewEmails] = useState<any[]>([])
+  const [showPreview, setShowPreview] = useState(false)
+
+  useEffect(() => {
+    loadConfig()
+  }, [])
+
+  const loadConfig = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/imap-config`)
+      if (res.ok) {
+        const data = await res.json()
+        setConfig({
+          enabled: data.enabled || false,
+          server: data.server || '',
+          port: data.port || 993,
+          email: data.email || '',
+          password: data.password || '',
+          use_ssl: data.use_ssl !== false,
+          days_back: data.days_back || 30
+        })
+        setLastSync(data.last_sync || null)
+      }
+    } catch (e) {
+      console.error('Failed to load IMAP config:', e)
+    }
+  }
+
+  const handleSave = async () => {
+    setIsLoading(true)
+    setMessage(null)
+    
+    try {
+      const res = await fetch(`${API_BASE_URL}/imap-config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config)
+      })
+      
+      if (res.ok) {
+        setMessage({ type: 'success', text: 'IMAP configuration saved!' })
+      } else {
+        const err = await res.json()
+        setMessage({ type: 'error', text: err.detail || 'Failed to save' })
+      }
+    } catch (e) {
+      setMessage({ type: 'error', text: 'Failed to connect' })
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleTest = async () => {
+    setIsLoading(true)
+    setMessage(null)
+    
+    try {
+      const res = await fetch(`${API_BASE_URL}/imap-config/test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config)
+      })
+      
+      const data = await res.json()
+      if (data.success) {
+        setMessage({ type: 'success', text: data.message })
+      } else {
+        setMessage({ type: 'error', text: data.message })
+      }
+    } catch (e) {
+      setMessage({ type: 'error', text: 'Connection test failed' })
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleSync = async () => {
+    setIsLoading(true)
+    setMessage(null)
+    
+    try {
+      const res = await fetch(`${API_BASE_URL}/imap-config/sync`, {
+        method: 'POST'
+      })
+      
+      const data = await res.json()
+      if (data.success) {
+        setMessage({ type: 'success', text: data.message })
+        await loadConfig()
+      } else {
+        setMessage({ type: 'error', text: data.message })
+      }
+    } catch (e) {
+      setMessage({ type: 'error', text: 'Sync failed' })
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handlePreview = async () => {
+    setIsLoading(true)
+    try {
+      const res = await fetch(`${API_BASE_URL}/imap-config/preview`)
+      if (res.ok) {
+        const data = await res.json()
+        setPreviewEmails(data.emails || [])
+        setShowPreview(true)
+      }
+    } catch (e) {
+      setMessage({ type: 'error', text: 'Failed to preview emails' })
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  return (
+    <div>
+      <div className="info-text" style={{ marginBottom: '1rem' }}>
+        Connect to your email to automatically identify who made each payment by matching card numbers in ConEd payment confirmation emails.
+      </div>
+
+      {/* Enable Toggle */}
+      <div style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+        <input
+          type="checkbox"
+          id="imap-enabled"
+          checked={config.enabled}
+          onChange={(e) => setConfig({ ...config, enabled: e.target.checked })}
+        />
+        <label htmlFor="imap-enabled" style={{ fontWeight: 500 }}>Enable Email Integration</label>
+      </div>
+
+      {/* IMAP Server */}
+      <div className="ha-form-group">
+        <label className="ha-form-label">IMAP Server</label>
+        <input
+          type="text"
+          className="ha-form-input"
+          value={config.server}
+          onChange={(e) => setConfig({ ...config, server: e.target.value })}
+          placeholder="imap.gmail.com"
+        />
+        <div className="info-text">
+          Gmail: imap.gmail.com | Outlook: outlook.office365.com | Yahoo: imap.mail.yahoo.com
+        </div>
+      </div>
+
+      {/* Port & SSL */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+        <div className="ha-form-group">
+          <label className="ha-form-label">Port</label>
+          <input
+            type="number"
+            className="ha-form-input"
+            value={config.port}
+            onChange={(e) => setConfig({ ...config, port: parseInt(e.target.value) || 993 })}
+          />
+        </div>
+        <div className="ha-form-group">
+          <label className="ha-form-label">Days to Search</label>
+          <input
+            type="number"
+            className="ha-form-input"
+            value={config.days_back}
+            onChange={(e) => setConfig({ ...config, days_back: parseInt(e.target.value) || 30 })}
+          />
+        </div>
+      </div>
+
+      {/* Email & Password */}
+      <div className="ha-form-group">
+        <label className="ha-form-label">Email Address</label>
+        <input
+          type="email"
+          className="ha-form-input"
+          value={config.email}
+          onChange={(e) => setConfig({ ...config, email: e.target.value })}
+          placeholder="your@email.com"
+        />
+      </div>
+
+      <div className="ha-form-group">
+        <label className="ha-form-label">Password / App Password</label>
+        <input
+          type="password"
+          className="ha-form-input"
+          value={config.password}
+          onChange={(e) => setConfig({ ...config, password: e.target.value })}
+          placeholder="••••••••"
+        />
+        <div className="info-text">
+          For Gmail, use an App Password (not your regular password). Enable 2FA first, then generate at: Google Account → Security → App passwords
+        </div>
+      </div>
+
+      {/* SSL Toggle */}
+      <div style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+        <input
+          type="checkbox"
+          id="imap-ssl"
+          checked={config.use_ssl}
+          onChange={(e) => setConfig({ ...config, use_ssl: e.target.checked })}
+        />
+        <label htmlFor="imap-ssl">Use SSL/TLS</label>
+      </div>
+
+      {/* Action Buttons */}
+      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
+        <button
+          onClick={handleSave}
+          disabled={isLoading}
+          className="ha-button ha-button-primary"
+        >
+          {isLoading ? 'Saving...' : 'Save Configuration'}
+        </button>
+        <button
+          onClick={handleTest}
+          disabled={isLoading || !config.server}
+          className="ha-button"
+          style={{ backgroundColor: '#ff9800', color: 'white' }}
+        >
+          Test Connection
+        </button>
+        <button
+          onClick={handleSync}
+          disabled={isLoading || !config.enabled || !config.server}
+          className="ha-button"
+          style={{ backgroundColor: '#4caf50', color: 'white' }}
+        >
+          Sync Emails Now
+        </button>
+        <button
+          onClick={handlePreview}
+          disabled={isLoading || !config.server}
+          className="ha-button"
+          style={{ backgroundColor: '#9c27b0', color: 'white' }}
+        >
+          Preview Emails
+        </button>
+      </div>
+
+      {/* Last Sync */}
+      {lastSync && (
+        <div style={{ fontSize: '0.8rem', color: '#666', marginBottom: '1rem' }}>
+          Last sync: {formatTZ(lastSync)}
+        </div>
+      )}
+
+      {/* Message */}
+      {message && (
+        <div style={{
+          padding: '0.75rem',
+          borderRadius: '4px',
+          backgroundColor: message.type === 'error' ? '#ffebee' : '#e8f5e9',
+          color: message.type === 'error' ? '#c62828' : '#2e7d32',
+          fontSize: '0.85rem',
+          marginBottom: '1rem'
+        }}>
+          {message.text}
+        </div>
+      )}
+
+      {/* Email Preview */}
+      {showPreview && (
+        <div style={{ marginTop: '1rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+            <strong>Found {previewEmails.length} payment emails</strong>
+            <button onClick={() => setShowPreview(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>✕</button>
+          </div>
+          <div style={{ maxHeight: '200px', overflow: 'auto', fontSize: '0.8rem', backgroundColor: '#f5f5f5', padding: '0.5rem', borderRadius: '4px' }}>
+            {previewEmails.length === 0 ? (
+              <div style={{ color: '#666' }}>No ConEd payment emails found in the last {config.days_back} days</div>
+            ) : (
+              previewEmails.map((email, idx) => (
+                <div key={idx} style={{ padding: '0.5rem', borderBottom: '1px solid #e0e0e0' }}>
+                  <div><strong>{email.amount || 'Unknown amount'}</strong> - Card: *{email.card_last_four || 'N/A'}</div>
+                  <div style={{ color: '#666' }}>{email.date} • {email.subject}</div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

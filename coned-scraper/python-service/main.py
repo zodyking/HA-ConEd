@@ -50,6 +50,7 @@ CREDENTIALS_FILE = DATA_DIR / "credentials.json"
 WEBHOOKS_FILE = DATA_DIR / "webhooks.json"
 MQTT_CONFIG_FILE = DATA_DIR / "mqtt_config.json"
 SETTINGS_FILE = DATA_DIR / "app_settings.json"
+IMAP_CONFIG_FILE = DATA_DIR / "imap_config.json"
 KEY_FILE = DATA_DIR / ".key"
 
 # Encryption key management
@@ -1350,6 +1351,133 @@ async def attribute_payment_to_user(attribution: PaymentAttributionModel):
         raise HTTPException(status_code=404, detail="Payment not found")
     except HTTPException:
         raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ==========================================
+# IMAP EMAIL CONFIGURATION
+# ==========================================
+
+class IMAPConfigModel(BaseModel):
+    enabled: bool = False
+    server: str
+    port: int = 993
+    email: str
+    password: str
+    use_ssl: bool = True
+    days_back: int = 30
+
+class IMAPTestModel(BaseModel):
+    server: str
+    port: int = 993
+    email: str
+    password: str
+    use_ssl: bool = True
+
+@app.get("/api/imap-config")
+async def get_imap_config():
+    """Get IMAP configuration (password masked)"""
+    from imap_client import load_imap_config
+    config = load_imap_config()
+    # Mask password
+    if config.get('password'):
+        config['password'] = '••••••••'
+    return config
+
+@app.post("/api/imap-config")
+async def save_imap_config_endpoint(config: IMAPConfigModel):
+    """Save IMAP configuration"""
+    from imap_client import save_imap_config, load_imap_config
+    
+    # If password is masked, keep existing password
+    existing = load_imap_config()
+    if config.password == '••••••••' and existing.get('password'):
+        password = existing['password']
+    else:
+        password = config.password
+    
+    new_config = {
+        'enabled': config.enabled,
+        'server': config.server,
+        'port': config.port,
+        'email': config.email,
+        'password': password,
+        'use_ssl': config.use_ssl,
+        'days_back': config.days_back,
+        'updated_at': utc_now_iso()
+    }
+    
+    save_imap_config(new_config)
+    add_log("info", f"IMAP configuration updated")
+    
+    return {"success": True, "message": "IMAP configuration saved"}
+
+@app.post("/api/imap-config/test")
+async def test_imap_config(config: IMAPTestModel):
+    """Test IMAP connection"""
+    from imap_client import test_imap_connection, load_imap_config
+    
+    # If password is masked, use existing password
+    password = config.password
+    if password == '••••••••':
+        existing = load_imap_config()
+        password = existing.get('password', '')
+    
+    result = test_imap_connection(
+        server=config.server,
+        port=config.port,
+        email_addr=config.email,
+        password=password,
+        use_ssl=config.use_ssl
+    )
+    
+    if result['success']:
+        add_log("success", "IMAP connection test successful")
+    else:
+        add_log("error", f"IMAP connection test failed: {result['message']}")
+    
+    return result
+
+@app.post("/api/imap-config/sync")
+async def sync_imap_emails():
+    """Run email sync to match payments"""
+    from imap_client import run_email_sync
+    
+    add_log("info", "Starting IMAP email sync...")
+    result = run_email_sync()
+    
+    if result['success']:
+        add_log("success", f"Email sync complete: {result['message']}")
+    else:
+        add_log("error", f"Email sync failed: {result['message']}")
+    
+    return result
+
+@app.get("/api/imap-config/preview")
+async def preview_imap_emails():
+    """Preview emails without matching (for debugging)"""
+    from imap_client import load_imap_config, fetch_coned_payment_emails
+    
+    config = load_imap_config()
+    
+    if not config.get('server'):
+        raise HTTPException(status_code=400, detail="IMAP not configured")
+    
+    try:
+        emails = fetch_coned_payment_emails(
+            server=config['server'],
+            port=config.get('port', 993),
+            email_addr=config['email'],
+            password=config['password'],
+            use_ssl=config.get('use_ssl', True),
+            days_back=config.get('days_back', 30)
+        )
+        
+        return {
+            "success": True,
+            "count": len(emails),
+            "emails": emails[:20]  # Limit to 20 for preview
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

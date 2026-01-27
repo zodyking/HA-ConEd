@@ -408,14 +408,20 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
                                       </span>
                                     )}
                                     {payment.payee_status === 'unverified' && (
-                                      <span style={{ 
-                                        fontSize: '0.6rem', 
-                                        backgroundColor: '#fff3e0', 
-                                        color: '#e65100',
-                                        padding: '0.1rem 0.3rem',
-                                        borderRadius: '3px'
-                                      }}>
-                                        ?
+                                      <span 
+                                        style={{ 
+                                          fontSize: '0.6rem', 
+                                          backgroundColor: '#fff3e0', 
+                                          color: '#e65100',
+                                          padding: '0.1rem 0.3rem',
+                                          borderRadius: '3px',
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: '0.2rem'
+                                        }}
+                                        title="Verifying payee..."
+                                      >
+                                        <span className="spinner-mini">⟳</span>
                                       </span>
                                     )}
                                   </div>
