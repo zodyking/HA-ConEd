@@ -34,7 +34,7 @@ export default function Settings() {
   const [timeRemaining, setTimeRemaining] = useState<number>(30)
   const [isLoading, setIsLoading] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
-  const [activeTab, setActiveTab] = useState<'console' | 'credentials' | 'automated' | 'webhooks' | 'mqtt' | 'app-settings'>('console')
+  const [activeTab, setActiveTab] = useState<'console' | 'credentials' | 'automated' | 'webhooks' | 'mqtt' | 'app-settings' | 'payees'>('console')
   
   // Password protection
   const [isUnlocked, setIsUnlocked] = useState(false)
@@ -319,6 +319,13 @@ export default function Settings() {
         >
           ⚙️ App Settings
         </button>
+        <button
+          type="button"
+          className={`ha-tab ${activeTab === 'payees' ? 'active' : ''}`}
+          onClick={() => setActiveTab('payees')}
+        >
+          👥 Payees
+        </button>
       </div>
 
       {activeTab === 'console' && (
@@ -443,6 +450,10 @@ export default function Settings() {
 
       {activeTab === 'app-settings' && (
         <AppSettingsTab />
+      )}
+
+      {activeTab === 'payees' && (
+        <PayeesTab />
       )}
     </div>
   )
@@ -1563,4 +1574,393 @@ function AutomatedScrapeTab() {
 
 function NextRunTime({ timestamp }: { timestamp: string }) {
   return <span>{formatTZ(timestamp)}</span>
+}
+
+// ==========================================
+// PAYEES TAB - User & Card Management
+// ==========================================
+
+interface PayeeUser {
+  id: number
+  name: string
+  is_default: boolean
+  cards: string[]
+  created_at: string
+}
+
+interface UnverifiedPayment {
+  id: number
+  payment_date: string
+  amount: string
+  description: string
+  bill_month?: string
+}
+
+function PayeesTab() {
+  const [users, setUsers] = useState<PayeeUser[]>([])
+  const [unverifiedPayments, setUnverifiedPayments] = useState<UnverifiedPayment[]>([])
+  const [newUserName, setNewUserName] = useState('')
+  const [newCardInput, setNewCardInput] = useState<{ [key: number]: string }>({})
+  const [isLoading, setIsLoading] = useState(false)
+  const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
+
+  useEffect(() => {
+    loadUsers()
+    loadUnverifiedPayments()
+  }, [])
+
+  const loadUsers = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/payee-users`)
+      if (res.ok) {
+        const data = await res.json()
+        setUsers(data.users || [])
+      }
+    } catch (e) {
+      console.error('Failed to load users:', e)
+    }
+  }
+
+  const loadUnverifiedPayments = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/payments/unverified`)
+      if (res.ok) {
+        const data = await res.json()
+        setUnverifiedPayments(data.payments || [])
+      }
+    } catch (e) {
+      console.error('Failed to load unverified payments:', e)
+    }
+  }
+
+  const handleAddUser = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!newUserName.trim()) return
+    
+    setIsLoading(true)
+    setMessage(null)
+    
+    try {
+      const res = await fetch(`${API_BASE_URL}/payee-users`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newUserName.trim(), is_default: users.length === 0 })
+      })
+      
+      if (res.ok) {
+        setNewUserName('')
+        await loadUsers()
+        setMessage({ type: 'success', text: `Added user: ${newUserName}` })
+      } else {
+        const err = await res.json()
+        setMessage({ type: 'error', text: err.detail || 'Failed to add user' })
+      }
+    } catch (e) {
+      setMessage({ type: 'error', text: 'Failed to connect' })
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleDeleteUser = async (userId: number, userName: string) => {
+    if (!confirm(`Delete user "${userName}"? This will unlink all their payments.`)) return
+    
+    try {
+      const res = await fetch(`${API_BASE_URL}/payee-users/${userId}`, { method: 'DELETE' })
+      if (res.ok) {
+        await loadUsers()
+        setMessage({ type: 'success', text: `Deleted user: ${userName}` })
+      }
+    } catch (e) {
+      setMessage({ type: 'error', text: 'Failed to delete user' })
+    }
+  }
+
+  const handleSetDefault = async (userId: number) => {
+    try {
+      await fetch(`${API_BASE_URL}/payee-users/${userId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_default: true })
+      })
+      await loadUsers()
+    } catch (e) {
+      setMessage({ type: 'error', text: 'Failed to set default' })
+    }
+  }
+
+  const handleAddCard = async (userId: number) => {
+    const cardNum = newCardInput[userId]?.trim()
+    if (!cardNum || cardNum.length < 4) {
+      setMessage({ type: 'error', text: 'Enter last 4 digits of card' })
+      return
+    }
+    
+    try {
+      const res = await fetch(`${API_BASE_URL}/user-cards`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: userId, card_last_four: cardNum.slice(-4) })
+      })
+      
+      if (res.ok) {
+        setNewCardInput({ ...newCardInput, [userId]: '' })
+        await loadUsers()
+        setMessage({ type: 'success', text: `Added card *${cardNum.slice(-4)}` })
+      } else {
+        const err = await res.json()
+        setMessage({ type: 'error', text: err.detail || 'Failed to add card' })
+      }
+    } catch (e) {
+      setMessage({ type: 'error', text: 'Failed to add card' })
+    }
+  }
+
+  const handleAttributePayment = async (paymentId: number, userId: number) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/payments/attribute`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ payment_id: paymentId, user_id: userId, method: 'manual' })
+      })
+      
+      if (res.ok) {
+        await loadUnverifiedPayments()
+        setMessage({ type: 'success', text: 'Payment attributed' })
+      }
+    } catch (e) {
+      setMessage({ type: 'error', text: 'Failed to attribute payment' })
+    }
+  }
+
+  return (
+    <div className="ha-settings-content">
+      <div className="ha-card">
+        <div className="ha-card-header">
+          <span className="ha-card-icon">👥</span>
+          <span>Payee Users & Cards</span>
+        </div>
+        <div className="ha-card-content">
+          <div className="info-text" style={{ marginBottom: '1rem' }}>
+            Add users who make payments. Link their card endings (last 4 digits) to automatically identify who made each payment from email confirmations.
+          </div>
+
+          {/* Add New User */}
+          <form onSubmit={handleAddUser} style={{ marginBottom: '1.5rem' }}>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <input
+                type="text"
+                className="ha-form-input"
+                value={newUserName}
+                onChange={(e) => setNewUserName(e.target.value)}
+                placeholder="Enter user name"
+                style={{ flex: 1 }}
+              />
+              <button
+                type="submit"
+                disabled={isLoading || !newUserName.trim()}
+                className="ha-button ha-button-primary"
+              >
+                Add User
+              </button>
+            </div>
+          </form>
+
+          {/* User List */}
+          {users.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '2rem', color: '#666' }}>
+              No users added yet. Add a user to start tracking payments.
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {users.map((user) => (
+                <div 
+                  key={user.id} 
+                  style={{ 
+                    padding: '1rem', 
+                    backgroundColor: user.is_default ? '#e3f2fd' : '#f5f5f5', 
+                    borderRadius: '8px',
+                    border: user.is_default ? '2px solid #03a9f4' : '1px solid #e0e0e0'
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <span style={{ fontWeight: 600, fontSize: '1rem' }}>{user.name}</span>
+                      {user.is_default && (
+                        <span style={{ 
+                          fontSize: '0.65rem', 
+                          backgroundColor: '#03a9f4', 
+                          color: 'white',
+                          padding: '0.15rem 0.4rem',
+                          borderRadius: '3px'
+                        }}>
+                          DEFAULT
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                      {!user.is_default && (
+                        <button
+                          onClick={() => handleSetDefault(user.id)}
+                          style={{
+                            padding: '0.3rem 0.6rem',
+                            fontSize: '0.7rem',
+                            backgroundColor: '#4caf50',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '4px',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          Set Default
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleDeleteUser(user.id, user.name)}
+                        style={{
+                          padding: '0.3rem 0.6rem',
+                          fontSize: '0.7rem',
+                          backgroundColor: '#f44336',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '4px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Cards */}
+                  <div style={{ marginBottom: '0.5rem' }}>
+                    <div style={{ fontSize: '0.75rem', color: '#666', marginBottom: '0.3rem' }}>Cards:</div>
+                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                      {user.cards.length > 0 ? (
+                        user.cards.map((card, idx) => (
+                          <span 
+                            key={idx}
+                            style={{
+                              padding: '0.2rem 0.5rem',
+                              backgroundColor: '#e0e0e0',
+                              borderRadius: '4px',
+                              fontSize: '0.8rem',
+                              fontFamily: 'monospace'
+                            }}
+                          >
+                            *{card}
+                          </span>
+                        ))
+                      ) : (
+                        <span style={{ fontSize: '0.75rem', color: '#999' }}>No cards linked</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Add Card */}
+                  <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
+                    <input
+                      type="text"
+                      className="ha-form-input"
+                      value={newCardInput[user.id] || ''}
+                      onChange={(e) => setNewCardInput({ ...newCardInput, [user.id]: e.target.value })}
+                      placeholder="Last 4 digits"
+                      maxLength={4}
+                      style={{ width: '100px', fontSize: '0.85rem' }}
+                    />
+                    <button
+                      onClick={() => handleAddCard(user.id)}
+                      style={{
+                        padding: '0.3rem 0.6rem',
+                        fontSize: '0.75rem',
+                        backgroundColor: '#03a9f4',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '4px',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      + Add Card
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {message && (
+            <div style={{
+              marginTop: '1rem',
+              padding: '0.75rem',
+              borderRadius: '4px',
+              backgroundColor: message.type === 'error' ? '#ffebee' : '#e8f5e9',
+              color: message.type === 'error' ? '#c62828' : '#2e7d32',
+              fontSize: '0.85rem'
+            }}>
+              {message.text}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Unverified Payments */}
+      {unverifiedPayments.length > 0 && users.length > 0 && (
+        <div className="ha-card" style={{ marginTop: '1rem' }}>
+          <div className="ha-card-header">
+            <span className="ha-card-icon">❓</span>
+            <span>Unverified Payments ({unverifiedPayments.length})</span>
+          </div>
+          <div className="ha-card-content">
+            <div className="info-text" style={{ marginBottom: '1rem' }}>
+              These payments couldn&apos;t be automatically attributed. Assign them to a user manually.
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              {unverifiedPayments.slice(0, 10).map((payment) => (
+                <div 
+                  key={payment.id}
+                  style={{
+                    padding: '0.75rem',
+                    backgroundColor: '#fff3e0',
+                    borderRadius: '6px',
+                    border: '1px solid #ffcc80',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: '0.5rem'
+                  }}
+                >
+                  <div>
+                    <div style={{ fontWeight: 500, fontSize: '0.9rem' }}>{payment.amount}</div>
+                    <div style={{ fontSize: '0.75rem', color: '#666' }}>
+                      {payment.payment_date} • {payment.description}
+                    </div>
+                  </div>
+                  <select
+                    onChange={(e) => {
+                      if (e.target.value) {
+                        handleAttributePayment(payment.id, parseInt(e.target.value))
+                      }
+                    }}
+                    defaultValue=""
+                    style={{
+                      padding: '0.4rem',
+                      borderRadius: '4px',
+                      border: '1px solid #ccc',
+                      fontSize: '0.8rem'
+                    }}
+                  >
+                    <option value="">Assign to...</option>
+                    {users.map((user) => (
+                      <option key={user.id} value={user.id}>{user.name}</option>
+                    ))}
+                  </select>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }

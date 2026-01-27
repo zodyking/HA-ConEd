@@ -21,7 +21,15 @@ def utc_now() -> datetime:
 def utc_now_iso() -> str:
     """Get current UTC time as ISO string"""
     return datetime.now(timezone.utc).isoformat()
-from database import get_logs, get_latest_scraped_data, get_all_scraped_data, add_log, clear_logs, add_scrape_history, get_scrape_history
+from database import (
+    get_logs, get_latest_scraped_data, get_all_scraped_data, add_log, clear_logs, 
+    add_scrape_history, get_scrape_history,
+    # New normalized data functions
+    get_ledger_data, get_all_bills, get_all_payments, get_latest_payment,
+    get_payee_users, create_payee_user, update_payee_user, delete_payee_user,
+    add_user_card, delete_user_card, get_user_by_card,
+    attribute_payment, get_unverified_payments
+)
 
 app = FastAPI(title="ConEd Scraper API")
 
@@ -1198,6 +1206,152 @@ async def save_automated_schedule(schedule: ScheduleModel):
         error_msg = f"Failed to save schedule: {str(e)}"
         add_log("error", error_msg)
         raise HTTPException(status_code=500, detail=error_msg)
+
+# ==========================================
+# LEDGER API ENDPOINTS (Database-driven)
+# ==========================================
+
+@app.get("/api/ledger")
+async def get_ledger():
+    """Get complete ledger data from normalized database tables"""
+    try:
+        data = get_ledger_data()
+        return data
+    except Exception as e:
+        add_log("error", f"Failed to get ledger: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/bills")
+async def get_bills(limit: int = 50):
+    """Get all bills from database"""
+    try:
+        bills = get_all_bills(limit)
+        return {"bills": bills}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/payments")
+async def get_payments(limit: int = 100, bill_id: Optional[int] = None):
+    """Get all payments from database"""
+    try:
+        payments = get_all_payments(limit, bill_id)
+        return {"payments": payments}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/payments/unverified")
+async def get_payments_unverified(limit: int = 50):
+    """Get payments that need payee verification"""
+    try:
+        payments = get_unverified_payments(limit)
+        return {"payments": payments}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ==========================================
+# PAYEE USER MANAGEMENT
+# ==========================================
+
+class PayeeUserModel(BaseModel):
+    name: str
+    is_default: bool = False
+
+class PayeeUserUpdateModel(BaseModel):
+    name: Optional[str] = None
+    is_default: Optional[bool] = None
+
+class UserCardModel(BaseModel):
+    user_id: int
+    card_last_four: str
+    label: Optional[str] = None
+
+class PaymentAttributionModel(BaseModel):
+    payment_id: int
+    user_id: int
+    method: str = "manual"
+
+@app.get("/api/payee-users")
+async def list_payee_users():
+    """Get all payee users with their cards"""
+    try:
+        users = get_payee_users()
+        return {"users": users}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/payee-users")
+async def create_user(user: PayeeUserModel):
+    """Create a new payee user"""
+    try:
+        user_id = create_payee_user(user.name, user.is_default)
+        add_log("info", f"Created payee user: {user.name}")
+        return {"id": user_id, "name": user.name, "is_default": user.is_default}
+    except Exception as e:
+        if "UNIQUE constraint" in str(e):
+            raise HTTPException(status_code=400, detail="User with this name already exists")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/api/payee-users/{user_id}")
+async def update_user(user_id: int, user: PayeeUserUpdateModel):
+    """Update a payee user"""
+    try:
+        update_payee_user(user_id, user.name, user.is_default)
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/payee-users/{user_id}")
+async def delete_user(user_id: int):
+    """Delete a payee user"""
+    try:
+        deleted = delete_payee_user(user_id)
+        if deleted:
+            add_log("info", f"Deleted payee user ID: {user_id}")
+            return {"success": True}
+        raise HTTPException(status_code=404, detail="User not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/user-cards")
+async def add_card(card: UserCardModel):
+    """Add a card to a user"""
+    try:
+        card_id = add_user_card(card.user_id, card.card_last_four, card.label)
+        add_log("info", f"Added card *{card.card_last_four} to user ID: {card.user_id}")
+        return {"id": card_id}
+    except Exception as e:
+        if "UNIQUE constraint" in str(e):
+            raise HTTPException(status_code=400, detail="This card ending is already registered")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/user-cards/{card_id}")
+async def remove_card(card_id: int):
+    """Remove a card"""
+    try:
+        deleted = delete_user_card(card_id)
+        if deleted:
+            return {"success": True}
+        raise HTTPException(status_code=404, detail="Card not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/payments/attribute")
+async def attribute_payment_to_user(attribution: PaymentAttributionModel):
+    """Attribute a payment to a user"""
+    try:
+        success = attribute_payment(attribution.payment_id, attribution.user_id, attribution.method)
+        if success:
+            add_log("info", f"Attributed payment {attribution.payment_id} to user {attribution.user_id}")
+            return {"success": True}
+        raise HTTPException(status_code=404, detail="Payment not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn
