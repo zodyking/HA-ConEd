@@ -226,7 +226,7 @@ def get_all_bills(limit: int = 100) -> List[Dict[str, Any]]:
     
     cursor.execute('''
         SELECT * FROM bills
-        ORDER BY first_scraped_at DESC
+        ORDER BY bill_cycle_date DESC, first_scraped_at DESC
         LIMIT ?
     ''', (limit,))
     
@@ -306,14 +306,14 @@ def get_all_payments(limit: int = 100, bill_id: Optional[int] = None) -> List[Di
             SELECT p.*, u.name as payee_name FROM payments p
             LEFT JOIN payee_users u ON p.payee_user_id = u.id
             WHERE p.bill_id = ?
-            ORDER BY p.first_scraped_at DESC
+            ORDER BY p.payment_date DESC, p.first_scraped_at ASC
             LIMIT ?
         ''', (bill_id, limit))
     else:
         cursor.execute('''
             SELECT p.*, u.name as payee_name FROM payments p
             LEFT JOIN payee_users u ON p.payee_user_id = u.id
-            ORDER BY p.first_scraped_at DESC
+            ORDER BY p.payment_date DESC, p.first_scraped_at ASC
             LIMIT ?
         ''', (limit,))
     
@@ -323,7 +323,7 @@ def get_all_payments(limit: int = 100, bill_id: Optional[int] = None) -> List[Di
     return [dict(row) for row in rows]
 
 def get_latest_payment() -> Optional[Dict[str, Any]]:
-    """Get the most recent payment by first_scraped_at"""
+    """Get the most recent payment by payment_date (then first_scraped_at for same-day)"""
     payments = get_all_payments(limit=1)
     return payments[0] if payments else None
 
@@ -557,7 +557,7 @@ def get_unverified_payments(limit: int = 50) -> List[Dict[str, Any]]:
         SELECT p.*, b.month_range as bill_month FROM payments p
         LEFT JOIN bills b ON p.bill_id = b.id
         WHERE p.payee_status = 'unverified'
-        ORDER BY p.first_scraped_at DESC
+        ORDER BY p.payment_date DESC, p.first_scraped_at ASC
         LIMIT ?
     ''', (limit,))
     
@@ -617,21 +617,21 @@ def get_ledger_data() -> Dict[str, Any]:
     # Get current balance
     balance = get_current_balance()
     
-    # Get all bills with their payments
+    # Get all bills with their payments (order by bill_cycle_date for proper chronological order)
     cursor.execute('''
         SELECT * FROM bills
-        ORDER BY first_scraped_at DESC
+        ORDER BY bill_cycle_date DESC, first_scraped_at DESC
         LIMIT 50
     ''')
     bills = [dict(row) for row in cursor.fetchall()]
     
-    # Get payments grouped by bill
+    # Get payments grouped by bill (order by payment_date, then first_scraped_at for same-day payments)
     for bill in bills:
         cursor.execute('''
             SELECT p.*, u.name as payee_name FROM payments p
             LEFT JOIN payee_users u ON p.payee_user_id = u.id
             WHERE p.bill_id = ?
-            ORDER BY p.first_scraped_at ASC
+            ORDER BY p.payment_date DESC, p.first_scraped_at ASC
         ''', (bill['id'],))
         bill['payments'] = [dict(row) for row in cursor.fetchall()]
     
