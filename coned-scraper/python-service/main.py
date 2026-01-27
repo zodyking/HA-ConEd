@@ -1319,14 +1319,22 @@ async def delete_user(user_id: int):
         raise HTTPException(status_code=500, detail=str(e))
 
 class ResponsibilitiesModel(BaseModel):
-    responsibilities: Dict[str, Any]  # {user_id: percent}
+    responsibilities: dict  # {user_id: percent} - no type validation to avoid coercion issues
 
 @app.put("/api/payee-users/responsibilities")
 async def update_responsibilities(data: ResponsibilitiesModel):
     """Update bill responsibility percentages for payees (must total 100%)"""
     try:
-        # Convert string keys to int
-        responsibilities = {int(k): float(v) for k, v in data.responsibilities.items()}
+        # Convert string keys to int, handle various value types
+        responsibilities = {}
+        for k, v in data.responsibilities.items():
+            try:
+                user_id = int(k)
+                percent = float(v) if v is not None else 0.0
+                responsibilities[user_id] = percent
+            except (ValueError, TypeError) as conv_err:
+                raise HTTPException(status_code=400, detail=f"Invalid data for user {k}: {v} - {conv_err}")
+        
         result = update_payee_responsibilities(responsibilities)
         if result['success']:
             add_log("info", f"Updated payee responsibilities: {result['total']}% total")
@@ -1335,6 +1343,7 @@ async def update_responsibilities(data: ResponsibilitiesModel):
     except HTTPException:
         raise
     except Exception as e:
+        add_log("error", f"Failed to update responsibilities: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/bills/{bill_id}/summary")
