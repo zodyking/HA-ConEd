@@ -1,8 +1,12 @@
 import sqlite3
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, List, Dict, Any
+
+def utc_now_iso() -> str:
+    """Get current UTC time as ISO string"""
+    return datetime.now(timezone.utc).isoformat()
 
 # Use /data for persistent storage (mounted volume in Home Assistant)
 DB_PATH = Path("./data") / "scraper.db"
@@ -63,7 +67,7 @@ def save_scraped_data(data: Dict[str, Any], status: str = "success", error_messa
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
-    timestamp = datetime.now().isoformat()
+    timestamp = utc_now_iso()
     
     # Insert new data
     cursor.execute('''
@@ -174,7 +178,7 @@ def add_log(level: str, message: str):
     cursor.execute('''
         INSERT INTO logs (timestamp, level, message)
         VALUES (?, ?, ?)
-    ''', (datetime.now().isoformat(), level, message))
+    ''', (utc_now_iso(), level, message))
     
     conn.commit()
     conn.close()
@@ -223,7 +227,7 @@ def add_scrape_history(success: bool, error_message: Optional[str] = None, failu
     cursor.execute('''
         INSERT INTO scrape_history (timestamp, success, error_message, failure_step, duration_seconds)
         VALUES (?, ?, ?, ?, ?)
-    ''', (datetime.now().isoformat(), 1 if success else 0, error_message, failure_step, duration_seconds))
+    ''', (utc_now_iso(), 1 if success else 0, error_message, failure_step, duration_seconds))
     
     # Keep only latest 100 entries
     cursor.execute('''

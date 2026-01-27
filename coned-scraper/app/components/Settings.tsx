@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { formatTimestamp as formatTZ, clearTimezoneCache } from '../lib/timezone'
+import { formatTimestamp as formatTZ } from '../lib/timezone'
 import Dashboard from './Dashboard'
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api'
@@ -638,7 +638,6 @@ function AppSettingsTab() {
   const [confirmPassword, setConfirmPassword] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
-  const [savedOffset, setSavedOffset] = useState(0)
   
   // PDF management
   const [pdfUrl, setPdfUrl] = useState('')
@@ -650,12 +649,10 @@ function AppSettingsTab() {
   const [appBaseUrl, setAppBaseUrl] = useState('')
 
   useEffect(() => {
-    // Load saved time offset and app base URL
+    // Load app base URL
     fetch(`${API_BASE_URL}/app-settings`)
       .then(res => res.json())
       .then(data => {
-        const offset = parseFloat(data.time_offset_hours || 0)
-        setSavedOffset(offset)
         setAppBaseUrl(data.app_base_url || '')
       })
       .catch(() => {})
@@ -775,50 +772,13 @@ function AppSettingsTab() {
   }
 
   useEffect(() => {
-    // Update current time display every second WITH saved offset
+    // Update current time display every second using browser's local time
     const interval = setInterval(() => {
       const now = new Date()
-      // Apply the saved offset in hours
-      now.setTime(now.getTime() + (savedOffset * 60 * 60 * 1000))
       setCurrentTime(now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }))
     }, 1000)
     return () => clearInterval(interval)
-  }, [savedOffset])
-
-  const handleCalibrateTime = async () => {
-    // Reset time offset to 0 - sync app time with system time
-    setIsLoading(true)
-    setMessage(null)
-    
-    try {
-      // Get current settings first to preserve password
-      const currentSettings = await fetch(`${API_BASE_URL}/app-settings`)
-      const currentData = await currentSettings.json()
-      
-      const response = await fetch(`${API_BASE_URL}/app-settings`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          time_offset_hours: 0,
-          settings_password: currentData.settings_password || '0000'
-        }),
-      })
-
-      if (response.ok) {
-        setMessage({ type: 'success', text: 'Time synchronized with system!' })
-        setSavedOffset(0)
-        clearTimezoneCache()
-        setTimeout(() => window.location.reload(), 1000)
-      } else {
-        const error = await response.json()
-        setMessage({ type: 'error', text: error.detail || 'Failed to calibrate time' })
-      }
-    } catch (error) {
-      setMessage({ type: 'error', text: 'Failed to connect to API.' })
-    } finally {
-      setIsLoading(false)
-    }
-  }
+  }, [])
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -880,8 +840,8 @@ function AppSettingsTab() {
       <div className="ha-card-content">
         <div style={{ marginBottom: '2rem' }}>
           <div className="ha-form-group">
-            <label className="ha-form-label">System Time</label>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1rem' }}>
+            <label className="ha-form-label">Your Local Time</label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
               <div style={{ 
                 padding: '0.75rem 1.25rem',
                 background: '#1a1a2e',
@@ -896,18 +856,12 @@ function AppSettingsTab() {
               }}>
                 {currentTime || '--:--:--'}
               </div>
+              <span style={{ fontSize: '0.8rem', color: '#666' }}>
+                {Intl.DateTimeFormat().resolvedOptions().timeZone}
+              </span>
             </div>
-            <button
-              type="button"
-              onClick={handleCalibrateTime}
-              disabled={isLoading}
-              className="ha-button ha-button-primary"
-              style={{ width: '100%', padding: '0.75rem' }}
-            >
-              {isLoading ? 'Calibrating...' : '🔄 Sync App Time to System Time'}
-            </button>
             <div className="info-text" style={{ marginTop: '0.5rem' }}>
-              Click to reset time offset and sync all timestamps with system time
+              All timestamps in the app use your browser&apos;s local timezone
             </div>
           </div>
         </div>
@@ -1358,19 +1312,16 @@ function AutomatedScrapeTab() {
 
   // Format timestamps when history changes
   useEffect(() => {
-    const formatAllTimestamps = async () => {
-      const newMap = new Map<number, string>()
-      for (const entry of scrapeHistory) {
-        try {
-          const formatted = await formatTZ(entry.timestamp)
-          newMap.set(entry.id, formatted)
-        } catch {
-          newMap.set(entry.id, entry.timestamp)
-        }
+    const newMap = new Map<number, string>()
+    for (const entry of scrapeHistory) {
+      try {
+        const formatted = formatTZ(entry.timestamp)
+        newMap.set(entry.id, formatted)
+      } catch {
+        newMap.set(entry.id, entry.timestamp)
       }
-      setFormattedTimestamps(newMap)
     }
-    formatAllTimestamps()
+    setFormattedTimestamps(newMap)
   }, [scrapeHistory])
 
   const loadSchedule = async () => {
@@ -1611,11 +1562,5 @@ function AutomatedScrapeTab() {
 }
 
 function NextRunTime({ timestamp }: { timestamp: string }) {
-  const [formatted, setFormatted] = useState(timestamp)
-  
-  useEffect(() => {
-    formatTZ(timestamp).then(setFormatted).catch(() => setFormatted(timestamp))
-  }, [timestamp])
-  
-  return <span>{formatted}</span>
+  return <span>{formatTZ(timestamp)}</span>
 }

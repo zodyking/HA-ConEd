@@ -6,7 +6,11 @@ import json
 import logging
 import re
 from typing import Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
+
+def utc_now_iso() -> str:
+    """Get current UTC time as ISO string"""
+    return datetime.now(timezone.utc).isoformat()
 try:
     import paho.mqtt.client as mqtt
     MQTT_AVAILABLE = True
@@ -206,11 +210,11 @@ class MQTTClient:
         numeric_value = self._extract_numeric(balance)
         json_payload = {
             "event_type": "account_balance",
-            "timestamp": timestamp or datetime.now().isoformat(),
+            "timestamp": timestamp or utc_now_iso(),
             "data": {
                 "account_balance": float(numeric_value),
                 "account_balance_raw": balance,
-                "timestamp": timestamp or datetime.now().isoformat()
+                "timestamp": timestamp or utc_now_iso()
             }
         }
         await self.publish("account_balance", numeric_value, json_payload)
@@ -220,13 +224,13 @@ class MQTTClient:
         numeric_value = self._extract_numeric(bill_data.get("bill_total", "0"))
         json_payload = {
             "event_type": "latest_bill",
-            "timestamp": timestamp or datetime.now().isoformat(),
+            "timestamp": timestamp or utc_now_iso(),
             "data": {
                 "bill_total": bill_data.get("bill_total"),
                 "bill_cycle_date": bill_data.get("bill_cycle_date"),
                 "month_range": bill_data.get("month_range"),
                 "bill_date": bill_data.get("bill_date"),
-                "timestamp": timestamp or datetime.now().isoformat()
+                "timestamp": timestamp or utc_now_iso()
             }
         }
         await self.publish("latest_bill", numeric_value, json_payload)
@@ -236,13 +240,13 @@ class MQTTClient:
         numeric_value = self._extract_numeric(bill_data.get("bill_total", "0"))
         json_payload = {
             "event_type": "previous_bill",
-            "timestamp": timestamp or datetime.now().isoformat(),
+            "timestamp": timestamp or utc_now_iso(),
             "data": {
                 "bill_total": bill_data.get("bill_total"),
                 "bill_cycle_date": bill_data.get("bill_cycle_date"),
                 "month_range": bill_data.get("month_range"),
                 "bill_date": bill_data.get("bill_date"),
-                "timestamp": timestamp or datetime.now().isoformat()
+                "timestamp": timestamp or utc_now_iso()
             }
         }
         await self.publish("previous_bill", numeric_value, json_payload)
@@ -252,13 +256,13 @@ class MQTTClient:
         numeric_value = self._extract_numeric(payment_data.get("amount", "0"))
         json_payload = {
             "event_type": "last_payment",
-            "timestamp": timestamp or datetime.now().isoformat(),
+            "timestamp": timestamp or utc_now_iso(),
             "data": {
                 "amount": payment_data.get("amount"),
                 "payment_date": payment_data.get("payment_date"),
                 "bill_cycle_date": payment_data.get("bill_cycle_date"),
                 "description": payment_data.get("description"),
-                "timestamp": timestamp or datetime.now().isoformat()
+                "timestamp": timestamp or utc_now_iso()
             }
         }
         await self.publish("last_payment", numeric_value, json_payload)
@@ -267,10 +271,10 @@ class MQTTClient:
         """Publish bill PDF URL for Home Assistant"""
         json_payload = {
             "event_type": "bill_pdf_url",
-            "timestamp": timestamp or datetime.now().isoformat(),
+            "timestamp": timestamp or utc_now_iso(),
             "data": {
                 "pdf_url": pdf_url,
-                "timestamp": timestamp or datetime.now().isoformat()
+                "timestamp": timestamp or utc_now_iso()
             }
         }
         await self.publish("bill_pdf_url", pdf_url, json_payload)

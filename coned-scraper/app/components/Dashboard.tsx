@@ -218,19 +218,16 @@ export default function Dashboard() {
 
   // Format timestamps when logs change
   useEffect(() => {
-    const formatAllTimestamps = async () => {
-      const newMap = new Map<number, string>()
-      for (const log of logs) {
-        try {
-          const formatted = await formatTimestamp(log.timestamp)
-          newMap.set(log.id, formatted)
-        } catch {
-          newMap.set(log.id, log.timestamp)
-        }
+    const newMap = new Map<number, string>()
+    for (const log of logs) {
+      try {
+        const formatted = formatTimestamp(log.timestamp)
+        newMap.set(log.id, formatted)
+      } catch {
+        newMap.set(log.id, log.timestamp)
       }
-      setFormattedTimestamps(newMap)
     }
-    formatAllTimestamps()
+    setFormattedTimestamps(newMap)
   }, [logs])
 
   const getLogLevelClass = (level: string) => {

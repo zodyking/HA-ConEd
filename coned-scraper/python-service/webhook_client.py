@@ -6,7 +6,11 @@ import json
 import logging
 import os
 from typing import Optional, Dict, Any, List
-from datetime import datetime
+from datetime import datetime, timezone
+
+def utc_now_iso() -> str:
+    """Get current UTC time as ISO string"""
+    return datetime.now(timezone.utc).isoformat()
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +53,7 @@ class WebhookClient:
             return
         
         if not timestamp:
-            timestamp = datetime.now().isoformat()
+            timestamp = utc_now_iso()
         
         payload = {
             "event_type": event_type,
@@ -86,7 +90,7 @@ class WebhookClient:
         data = {
             "account_balance": balance_value,
             "account_balance_raw": balance,
-            "timestamp": timestamp or datetime.now().isoformat()
+            "timestamp": timestamp or utc_now_iso()
         }
         
         await self.send_update("account_balance", data, timestamp)
@@ -98,7 +102,7 @@ class WebhookClient:
             "bill_cycle_date": bill_data.get("bill_cycle_date"),
             "month_range": bill_data.get("month_range"),
             "bill_date": bill_data.get("bill_date"),
-            "timestamp": timestamp or datetime.now().isoformat()
+            "timestamp": timestamp or utc_now_iso()
         }
         
         await self.send_update("latest_bill", data, timestamp)
@@ -110,7 +114,7 @@ class WebhookClient:
             "bill_cycle_date": bill_data.get("bill_cycle_date"),
             "month_range": bill_data.get("month_range"),
             "bill_date": bill_data.get("bill_date"),
-            "timestamp": timestamp or datetime.now().isoformat()
+            "timestamp": timestamp or utc_now_iso()
         }
         
         await self.send_update("previous_bill", data, timestamp)
@@ -122,7 +126,7 @@ class WebhookClient:
             "payment_date": payment_data.get("payment_date"),
             "bill_cycle_date": payment_data.get("bill_cycle_date"),
             "description": payment_data.get("description"),
-            "timestamp": timestamp or datetime.now().isoformat()
+            "timestamp": timestamp or utc_now_iso()
         }
         
         await self.send_update("last_payment", data, timestamp)

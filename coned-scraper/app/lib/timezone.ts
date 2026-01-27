@@ -1,66 +1,43 @@
 /**
- * Time offset utility for manual time adjustment across the app
+ * Timezone utility - converts UTC timestamps to browser's local time
+ * No server dependency - uses browser's system time directly
  */
-
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api'
-
-let cachedTimeOffset: number | null = null
-let timeOffsetPromise: Promise<number> | null = null
 
 /**
- * Get the configured time offset from the API (in hours)
+ * Get current time in browser's timezone (for live clocks)
  */
-export async function getTimeOffset(): Promise<number> {
-  // Return cached value if available
-  if (cachedTimeOffset !== null) {
-    return cachedTimeOffset
-  }
-
-  // Return existing promise if already fetching
-  if (timeOffsetPromise) {
-    return timeOffsetPromise
-  }
-
-  // Fetch time offset from API
-  timeOffsetPromise = fetch(`${API_BASE_URL}/app-settings`)
-    .then(response => response.json())
-    .then(data => {
-      const offset = parseFloat(data.time_offset_hours || 0)
-      cachedTimeOffset = offset
-      timeOffsetPromise = null
-      return offset as number
-    })
-    .catch(error => {
-      console.error('Failed to fetch time offset:', error)
-      const offset = 0
-      cachedTimeOffset = offset
-      timeOffsetPromise = null
-      return offset as number
-    })
-
-  return timeOffsetPromise
+export function getCurrentTime(): Date {
+  return new Date()
 }
 
 /**
- * Apply time offset to a date
+ * Format a UTC timestamp to browser's local time
+ * Assumes timestamps from server are in UTC
  */
-function applyTimeOffset(date: Date, offsetHours: number): Date {
-  const adjusted = new Date(date)
-  adjusted.setHours(adjusted.getHours() + offsetHours)
-  return adjusted
-}
-
-/**
- * Format a timestamp using the configured time offset
- */
-export async function formatTimestamp(
+export function formatTimestamp(
   timestamp: string | Date,
   options?: Intl.DateTimeFormatOptions
-): Promise<string> {
+): string {
   try {
-    const offsetHours = await getTimeOffset()
-    const date = typeof timestamp === 'string' ? new Date(timestamp) : timestamp
-    const adjustedDate = applyTimeOffset(date, offsetHours)
+    let date: Date
+    
+    if (typeof timestamp === 'string') {
+      // If timestamp doesn't have timezone info, assume it's UTC
+      const hasTimezone = timestamp.includes('Z') || timestamp.includes('+') || /T.*-\d{2}:\d{2}$/.test(timestamp)
+      if (!hasTimezone && timestamp.includes('T')) {
+        // Append Z to treat as UTC
+        date = new Date(timestamp + 'Z')
+      } else {
+        date = new Date(timestamp)
+      }
+    } else {
+      date = timestamp
+    }
+    
+    // Validate date
+    if (isNaN(date.getTime())) {
+      return String(timestamp)
+    }
     
     const defaultOptions: Intl.DateTimeFormatOptions = {
       year: 'numeric',
@@ -73,7 +50,8 @@ export async function formatTimestamp(
       ...options
     }
     
-    return adjustedDate.toLocaleString('en-US', defaultOptions)
+    // toLocaleString automatically converts to browser's local timezone
+    return date.toLocaleString('en-US', defaultOptions)
   } catch (error) {
     console.error('Failed to format timestamp:', error)
     return String(timestamp)
@@ -81,16 +59,29 @@ export async function formatTimestamp(
 }
 
 /**
- * Format a date (without time) using the configured time offset
+ * Format a UTC timestamp to local date only
  */
-export async function formatDate(
+export function formatDate(
   timestamp: string | Date,
   options?: Intl.DateTimeFormatOptions
-): Promise<string> {
+): string {
   try {
-    const offsetHours = await getTimeOffset()
-    const date = typeof timestamp === 'string' ? new Date(timestamp) : timestamp
-    const adjustedDate = applyTimeOffset(date, offsetHours)
+    let date: Date
+    
+    if (typeof timestamp === 'string') {
+      const hasTimezone = timestamp.includes('Z') || timestamp.includes('+') || /T.*-\d{2}:\d{2}$/.test(timestamp)
+      if (!hasTimezone && timestamp.includes('T')) {
+        date = new Date(timestamp + 'Z')
+      } else {
+        date = new Date(timestamp)
+      }
+    } else {
+      date = timestamp
+    }
+    
+    if (isNaN(date.getTime())) {
+      return String(timestamp)
+    }
     
     const defaultOptions: Intl.DateTimeFormatOptions = {
       year: 'numeric',
@@ -99,7 +90,7 @@ export async function formatDate(
       ...options
     }
     
-    return adjustedDate.toLocaleDateString('en-US', defaultOptions)
+    return date.toLocaleDateString('en-US', defaultOptions)
   } catch (error) {
     console.error('Failed to format date:', error)
     return String(timestamp)
@@ -107,16 +98,29 @@ export async function formatDate(
 }
 
 /**
- * Format a time (without date) using the configured time offset
+ * Format a UTC timestamp to local time only
  */
-export async function formatTime(
+export function formatTime(
   timestamp: string | Date,
   options?: Intl.DateTimeFormatOptions
-): Promise<string> {
+): string {
   try {
-    const offsetHours = await getTimeOffset()
-    const date = typeof timestamp === 'string' ? new Date(timestamp) : timestamp
-    const adjustedDate = applyTimeOffset(date, offsetHours)
+    let date: Date
+    
+    if (typeof timestamp === 'string') {
+      const hasTimezone = timestamp.includes('Z') || timestamp.includes('+') || /T.*-\d{2}:\d{2}$/.test(timestamp)
+      if (!hasTimezone && timestamp.includes('T')) {
+        date = new Date(timestamp + 'Z')
+      } else {
+        date = new Date(timestamp)
+      }
+    } else {
+      date = timestamp
+    }
+    
+    if (isNaN(date.getTime())) {
+      return String(timestamp)
+    }
     
     const defaultOptions: Intl.DateTimeFormatOptions = {
       hour: '2-digit',
@@ -126,7 +130,7 @@ export async function formatTime(
       ...options
     }
     
-    return adjustedDate.toLocaleTimeString('en-US', defaultOptions)
+    return date.toLocaleTimeString('en-US', defaultOptions)
   } catch (error) {
     console.error('Failed to format time:', error)
     return String(timestamp)
@@ -134,10 +138,27 @@ export async function formatTime(
 }
 
 /**
- * Clear the cached time offset (call after time offset settings change)
+ * Get current date formatted
  */
-export function clearTimezoneCache() {
-  cachedTimeOffset = null
-  timeOffsetPromise = null
+export function getCurrentDate(options?: Intl.DateTimeFormatOptions): string {
+  return formatDate(new Date(), options)
 }
 
+/**
+ * Get current time formatted
+ */
+export function getCurrentTimeFormatted(options?: Intl.DateTimeFormatOptions): string {
+  return formatTime(new Date(), options)
+}
+
+// Legacy exports for compatibility - these now just call the sync versions
+export async function getTimeOffset(): Promise<number> {
+  return 0 // No longer used - browser handles timezone
+}
+
+export function clearTimezoneCache() {
+  // No-op - no cache needed anymore
+}
+
+// Alias for backward compatibility with async calls
+export const formatTZ = formatTimestamp

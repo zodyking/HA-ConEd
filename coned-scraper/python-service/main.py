@@ -12,7 +12,15 @@ from cryptography.fernet import Fernet
 import base64
 import hashlib
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+
+def utc_now() -> datetime:
+    """Get current UTC time"""
+    return datetime.now(timezone.utc)
+
+def utc_now_iso() -> str:
+    """Get current UTC time as ISO string"""
+    return datetime.now(timezone.utc).isoformat()
 from database import get_logs, get_latest_scraped_data, get_all_scraped_data, add_log, clear_logs, add_scrape_history, get_scrape_history
 
 app = FastAPI(title="ConEd Scraper API")
@@ -77,7 +85,7 @@ def save_schedule(enabled: bool, frequency: int):
     schedule = {
         "enabled": enabled,
         "frequency": frequency,
-        "updated_at": datetime.now().isoformat()
+        "updated_at": utc_now_iso()
     }
     SCHEDULE_FILE.write_text(json.dumps(schedule))
     add_log("info", f"Schedule saved: enabled={enabled}, frequency={frequency}s")
@@ -338,7 +346,7 @@ def save_webhook_config(webhook_config: dict):
         "previous_bill": webhook_config.get("previous_bill", ""),
         "account_balance": webhook_config.get("account_balance", ""),
         "last_payment": webhook_config.get("last_payment", ""),
-        "updated_at": datetime.now().isoformat()
+        "updated_at": utc_now_iso()
     }
     WEBHOOKS_FILE.write_text(json.dumps(webhook_data))
 
@@ -368,7 +376,7 @@ def save_mqtt_config(mqtt_config: dict):
         "mqtt_base_topic": mqtt_config.get("mqtt_base_topic", "coned"),
         "mqtt_qos": mqtt_config.get("mqtt_qos", 1),
         "mqtt_retain": mqtt_config.get("mqtt_retain", True),
-        "updated_at": datetime.now().isoformat()
+        "updated_at": utc_now_iso()
     }
     MQTT_CONFIG_FILE.write_text(json.dumps(config_data))
 
@@ -397,7 +405,7 @@ def save_app_settings(settings: dict):
         "time_offset_hours": float(settings.get("time_offset_hours", 0.0)),
         "settings_password": encrypt_data(settings.get("settings_password", "0000")),
         "app_base_url": settings.get("app_base_url", ""),
-        "updated_at": datetime.now().isoformat()
+        "updated_at": utc_now_iso()
     }
     SETTINGS_FILE.write_text(json.dumps(settings_data))
 
@@ -1047,7 +1055,7 @@ async def download_bill_pdf(request: PdfDownloadRequest):
                         base_url = app_settings.get("app_base_url", "").rstrip("/")
                         if base_url:
                             hosted_pdf_url = f"{base_url}/api/latest-bill-pdf"
-                            await mqtt_client.publish_bill_pdf_url(hosted_pdf_url, datetime.now().isoformat())
+                            await mqtt_client.publish_bill_pdf_url(hosted_pdf_url, utc_now_iso())
                             add_log("info", f"Published PDF URL to MQTT: {hosted_pdf_url}")
                         else:
                             add_log("warning", "App Base URL not configured, skipping MQTT publish for PDF")
@@ -1094,7 +1102,7 @@ async def send_pdf_url_mqtt():
             raise HTTPException(status_code=400, detail="MQTT client not available")
         
         hosted_pdf_url = f"{base_url}/api/bill-document"
-        await mqtt_client.publish_bill_pdf_url(hosted_pdf_url, datetime.now().isoformat())
+        await mqtt_client.publish_bill_pdf_url(hosted_pdf_url, utc_now_iso())
         add_log("info", f"Manually sent PDF URL to MQTT: {hosted_pdf_url}")
         
         return {"success": True, "message": f"PDF URL sent to MQTT: {hosted_pdf_url}"}

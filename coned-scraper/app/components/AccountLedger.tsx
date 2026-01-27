@@ -9,19 +9,10 @@ const PdfViewer = dynamic(() => import('./PdfViewer'), { ssr: false })
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api'
 
-// Helper component to format dates asynchronously
+// Helper component to format dates
 function FormattedDate({ date, fallback }: { date: string | null | undefined, fallback?: string }) {
-  const [formatted, setFormatted] = useState(fallback || date || '')
-  
-  useEffect(() => {
-    if (date) {
-      formatDate(date, { year: 'numeric', month: 'short', day: 'numeric' })
-        .then(setFormatted)
-        .catch(() => setFormatted(fallback || date))
-    }
-  }, [date, fallback])
-  
-  return <>{formatted}</>
+  if (!date) return <>{fallback || ''}</>
+  return <>{formatDate(date, { year: 'numeric', month: 'short', day: 'numeric' })}</>
 }
 
 interface ScrapedData {
@@ -47,10 +38,10 @@ interface ScrapedData {
   screenshot_path?: string
 }
 
-async function formatTimestampWithTZ(timestamp: string): Promise<{ date: string, time: string }> {
+function formatTimestampWithTZ(timestamp: string): { date: string, time: string } {
   try {
-    const dateStr = await formatDate(timestamp)
-    const timeStr = await formatTime(timestamp)
+    const dateStr = formatDate(timestamp)
+    const timeStr = formatTime(timestamp)
     return { date: dateStr, time: timeStr }
   } catch {
     return { date: timestamp, time: '' }
@@ -106,7 +97,7 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
   // Format timestamp when data changes
   useEffect(() => {
     if (scrapedData.length > 0) {
-      formatTimestampWithTZ(scrapedData[0].timestamp).then(setFormattedTimestamp)
+      setFormattedTimestamp(formatTimestampWithTZ(scrapedData[0].timestamp))
     }
   }, [scrapedData])
 
