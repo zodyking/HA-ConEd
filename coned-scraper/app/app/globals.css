@@ -918,3 +918,13 @@ button.primary:disabled {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
+
+/* Clickable payment entries */
+.ha-payment-clickable {
+  transition: background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.ha-payment-clickable:hover {
+  background-color: #f0f7ff !important;
+  box-shadow: inset 0 0 0 2px rgba(3, 169, 244, 0.3);
+}

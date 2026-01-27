@@ -28,7 +28,7 @@ from database import (
     get_ledger_data, get_all_bills, get_all_payments, get_latest_payment,
     get_payee_users, create_payee_user, update_payee_user, delete_payee_user,
     add_user_card, delete_user_card, get_user_by_card,
-    attribute_payment, get_unverified_payments
+    attribute_payment, get_unverified_payments, clear_payment_attribution
 )
 
 app = FastAPI(title="ConEd Scraper API")
@@ -1347,6 +1347,20 @@ async def attribute_payment_to_user(attribution: PaymentAttributionModel):
         success = attribute_payment(attribution.payment_id, attribution.user_id, attribution.method)
         if success:
             add_log("info", f"Attributed payment {attribution.payment_id} to user {attribution.user_id}")
+            return {"success": True}
+        raise HTTPException(status_code=404, detail="Payment not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/payments/{payment_id}/attribution")
+async def clear_payment_attribution_endpoint(payment_id: int):
+    """Clear payment attribution (unassign from user)"""
+    try:
+        success = clear_payment_attribution(payment_id)
+        if success:
+            add_log("info", f"Cleared attribution for payment {payment_id}")
             return {"success": True}
         raise HTTPException(status_code=404, detail="Payment not found")
     except HTTPException:

@@ -548,6 +548,25 @@ def attribute_payment(payment_id: int, user_id: int, method: str = 'manual', car
     conn.close()
     return updated
 
+def clear_payment_attribution(payment_id: int) -> bool:
+    """Clear payment attribution (unassign from user)"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        UPDATE payments SET 
+            payee_user_id = NULL,
+            payee_status = 'unverified',
+            verification_method = NULL,
+            card_last_four = NULL
+        WHERE id = ?
+    ''', (payment_id,))
+    
+    updated = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return updated
+
 def get_unverified_payments(limit: int = 50) -> List[Dict[str, Any]]:
     """Get payments that need verification"""
     conn = get_connection()
