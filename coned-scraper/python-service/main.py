@@ -31,13 +31,13 @@ from database import (
     attribute_payment, get_unverified_payments, clear_payment_attribution,
     wipe_bills_and_payments, update_payment_bill, get_payment_by_id,
     update_payment_order, get_payments_by_user, get_all_bills_with_payments,
-    update_payee_responsibilities, get_bill_payee_summary
+    update_payee_responsibilities, get_bill_payee_summary, calculate_all_payee_balances
 )
 
 app = FastAPI(title="ConEd Scraper API")
 
 # Code version for deployment verification
-CODE_VERSION = "2026-01-28-v4"
+CODE_VERSION = "2026-01-28-v5"
 
 @app.get("/api/version")
 async def get_version():
@@ -1354,6 +1354,15 @@ async def delete_user(user_id: int):
         raise HTTPException(status_code=404, detail="User not found")
     except HTTPException:
         raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/bills/all-summaries")
+async def get_all_bill_summaries():
+    """Get payee summaries for ALL bills at once (efficient - single pass calculation)"""
+    try:
+        summaries = calculate_all_payee_balances()
+        return {"summaries": summaries}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

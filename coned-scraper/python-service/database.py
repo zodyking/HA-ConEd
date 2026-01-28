@@ -686,105 +686,127 @@ def update_payee_responsibilities(responsibilities: Dict[int, float]) -> Dict[st
     
     return {'success': True, 'total': total}
 
-def get_bill_payee_summary(bill_id: int) -> Dict[str, Any]:
+def calculate_all_payee_balances() -> Dict[int, Dict[str, Any]]:
     """
-    Calculate payee breakdown for a specific bill.
-    Shows how much each payee owes vs paid, with rollover from previous bills.
+    Calculate payee balances for ALL bills at once, in chronological order.
+    This is efficient (single pass) and ensures correct rollover calculation.
+    
+    Returns: {bill_id: {payee_summaries, bill_total, total_paid, etc}}
     """
     conn = get_connection()
     cursor = conn.cursor()
     
-    # Get the bill
-    cursor.execute('SELECT * FROM bills WHERE id = ?', (bill_id,))
-    bill = cursor.fetchone()
-    if not bill:
+    # Get all bills in chronological order (oldest first for correct rollover)
+    cursor.execute(f'''
+        SELECT * FROM bills 
+        ORDER BY {date_to_sortable_sql('bill_cycle_date')} ASC
+    ''')
+    bills = [dict(row) for row in cursor.fetchall()]
+    
+    if not bills:
         conn.close()
         return {}
     
-    bill = dict(bill)
-    bill_total = parse_amount(bill.get('bill_total', '$0'))
-    
-    # Get all payees with their responsibility
+    # Get all payees
     cursor.execute('SELECT * FROM payee_users ORDER BY name')
     payees = [dict(row) for row in cursor.fetchall()]
     
-    # Get payments for this bill grouped by payee
+    # Get ALL payments grouped by bill and payee (single query)
     cursor.execute('''
-        SELECT payee_user_id, SUM(amount_numeric) as total_paid
+        SELECT bill_id, payee_user_id, SUM(amount_numeric) as total_paid
         FROM payments
-        WHERE bill_id = ? AND payee_user_id IS NOT NULL
-        GROUP BY payee_user_id
-    ''', (bill_id,))
-    payments_by_payee = {row['payee_user_id']: row['total_paid'] or 0 for row in cursor.fetchall()}
+        WHERE bill_id IS NOT NULL AND payee_user_id IS NOT NULL
+        GROUP BY bill_id, payee_user_id
+    ''')
+    payments_map = {}
+    for row in cursor.fetchall():
+        bill_id = row['bill_id']
+        payee_id = row['payee_user_id']
+        if bill_id not in payments_map:
+            payments_map[bill_id] = {}
+        payments_map[bill_id][payee_id] = row['total_paid'] or 0
     
-    # Get previous bills to calculate rollover
+    # Get total payments per bill (for bill balance)
     cursor.execute('''
-        SELECT id FROM bills WHERE id < ? ORDER BY id DESC
-    ''', (bill_id,))
-    previous_bills = [row['id'] for row in cursor.fetchall()]
-    
-    # Calculate rollover for each payee (sum of unpaid amounts from previous bills)
-    payee_summaries = []
-    total_bill_paid = 0
-    
-    for payee in payees:
-        responsibility = payee.get('responsibility_percent', 0) or 0
-        amount_owed = bill_total * (responsibility / 100.0) if responsibility > 0 else 0
-        amount_paid = payments_by_payee.get(payee['id'], 0) or 0
-        total_bill_paid += amount_paid
-        
-        # Calculate rollover from previous periods
-        rollover = 0
-        for prev_bill_id in previous_bills[:12]:  # Look at last 12 bills max
-            cursor.execute('SELECT bill_total FROM bills WHERE id = ?', (prev_bill_id,))
-            prev_bill = cursor.fetchone()
-            if prev_bill:
-                prev_total = parse_amount(prev_bill['bill_total'] or '$0')
-                prev_owed = prev_total * (responsibility / 100.0) if responsibility > 0 else 0
-                
-                cursor.execute('''
-                    SELECT SUM(amount_numeric) as paid FROM payments
-                    WHERE bill_id = ? AND payee_user_id = ?
-                ''', (prev_bill_id, payee['id']))
-                prev_paid = cursor.fetchone()
-                prev_paid_amount = prev_paid['paid'] or 0 if prev_paid else 0
-                
-                rollover += (prev_owed - prev_paid_amount)
-        
-        balance = amount_owed - amount_paid + rollover
-        
-        payee_summaries.append({
-            'user_id': payee['id'],
-            'name': payee['name'],
-            'responsibility_percent': responsibility,
-            'amount_owed': round(amount_owed, 2),
-            'amount_paid': round(amount_paid, 2),
-            'rollover_from_previous': round(rollover, 2),
-            'current_balance': round(balance, 2),
-            'status': 'paid' if balance <= 0 else ('partial' if amount_paid > 0 else 'unpaid')
-        })
-    
-    # Calculate bill rollover (if total payments don't cover the bill)
-    unpaid_payments = sum(p.get('amount_numeric', 0) or 0 for p in payments_by_payee.values() if p)
-    
-    cursor.execute('''
-        SELECT SUM(amount_numeric) as total FROM payments WHERE bill_id = ?
-    ''', (bill_id,))
-    total_paid_result = cursor.fetchone()
-    total_paid = total_paid_result['total'] or 0 if total_paid_result else 0
-    
-    bill_balance = bill_total - total_paid
+        SELECT bill_id, SUM(amount_numeric) as total_paid
+        FROM payments
+        WHERE bill_id IS NOT NULL
+        GROUP BY bill_id
+    ''')
+    bill_totals_paid = {row['bill_id']: row['total_paid'] or 0 for row in cursor.fetchall()}
     
     conn.close()
     
-    return {
-        'bill_id': bill_id,
-        'bill_total': bill_total,
-        'total_paid': round(total_paid, 2),
-        'bill_balance': round(bill_balance, 2),
-        'bill_status': 'paid' if bill_balance <= 0.01 else 'partial' if total_paid > 0 else 'unpaid',
-        'payee_summaries': payee_summaries
-    }
+    # Initialize running rollover for each payee (starts at 0)
+    payee_rollover = {payee['id']: 0.0 for payee in payees}
+    
+    # Result storage
+    results = {}
+    
+    # Process bills in chronological order (oldest to newest)
+    for bill in bills:
+        bill_id = bill['id']
+        bill_total = parse_amount(bill.get('bill_total', '$0'))
+        payments_for_bill = payments_map.get(bill_id, {})
+        total_paid = bill_totals_paid.get(bill_id, 0)
+        
+        payee_summaries = []
+        
+        for payee in payees:
+            payee_id = payee['id']
+            responsibility = payee.get('responsibility_percent', 0) or 0
+            
+            # Their share of THIS bill
+            share = bill_total * (responsibility / 100.0) if responsibility > 0 else 0
+            
+            # What they paid toward THIS bill
+            paid = payments_for_bill.get(payee_id, 0)
+            
+            # Their rollover FROM previous bills (captured before we update it)
+            rollover_in = payee_rollover[payee_id]
+            
+            # This period's result: positive = overpaid, negative = underpaid
+            period_balance = paid - share
+            
+            # Total balance including rollover (positive = credit, negative = owes)
+            total_balance = rollover_in + period_balance
+            
+            payee_summaries.append({
+                'user_id': payee_id,
+                'name': payee['name'],
+                'responsibility_percent': responsibility,
+                'share_of_bill': round(share, 2),
+                'amount_paid': round(paid, 2),
+                'rollover_in': round(rollover_in, 2),
+                'period_balance': round(period_balance, 2),
+                'total_balance': round(total_balance, 2),
+                'status': 'credit' if total_balance > 0.01 else ('settled' if abs(total_balance) <= 0.01 else 'owes')
+            })
+            
+            # Update rollover for next bill
+            payee_rollover[payee_id] = total_balance
+        
+        bill_balance = bill_total - total_paid
+        
+        results[bill_id] = {
+            'bill_id': bill_id,
+            'bill_total': round(bill_total, 2),
+            'total_paid': round(total_paid, 2),
+            'bill_balance': round(bill_balance, 2),
+            'bill_status': 'paid' if bill_balance <= 0.01 else ('partial' if total_paid > 0 else 'unpaid'),
+            'payee_summaries': payee_summaries
+        }
+    
+    return results
+
+
+def get_bill_payee_summary(bill_id: int) -> Dict[str, Any]:
+    """
+    Get payee breakdown for a specific bill.
+    Uses the efficient all-at-once calculation.
+    """
+    all_summaries = calculate_all_payee_balances()
+    return all_summaries.get(bill_id, {})
 
 def get_all_bill_summaries() -> List[Dict[str, Any]]:
     """Get summaries for all bills"""

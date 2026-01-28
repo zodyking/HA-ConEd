@@ -86,143 +86,157 @@ function BillPayeeSummary({
   billSummaries: {[key: number]: BillSummaryData}
   loadBillSummary: (id: number) => void
 }) {
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, setExpanded] = useState(true) // Start expanded since data is pre-loaded
   const summary = billSummaries[billId]
-  
-  const handleToggle = () => {
-    if (!expanded && !summary) {
-      loadBillSummary(billId)
-    }
-    setExpanded(!expanded)
-  }
 
   // Check if there are any payee responsibilities configured
-  const hasResponsibilities = summary?.payee_summaries?.some(p => p.responsibility_percent > 0)
+  const hasResponsibilities = summary?.payee_summaries?.some((p: any) => p.responsibility_percent > 0)
 
-  if (!expanded) {
+  if (!summary) {
     return (
-      <button
-        onClick={handleToggle}
-        style={{
-          width: '100%',
-          padding: '0.4rem',
-          backgroundColor: '#f8f9fa',
-          border: '1px dashed #ddd',
-          borderRadius: '4px',
-          cursor: 'pointer',
-          fontSize: '0.7rem',
-          color: '#666',
-          marginTop: '0.5rem',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: '0.3rem'
-        }}
-      >
-        <span>▶</span> View Payee Breakdown
-      </button>
+      <div style={{ 
+        marginTop: '0.5rem', 
+        padding: '0.4rem', 
+        backgroundColor: '#f5f5f5', 
+        borderRadius: '4px',
+        fontSize: '0.7rem',
+        color: '#999',
+        textAlign: 'center'
+      }}>
+        Loading breakdown...
+      </div>
+    )
+  }
+
+  if (!hasResponsibilities) {
+    return (
+      <div style={{ 
+        marginTop: '0.5rem', 
+        padding: '0.4rem', 
+        backgroundColor: '#fff3e0', 
+        borderRadius: '4px',
+        fontSize: '0.7rem',
+        color: '#e65100',
+        textAlign: 'center'
+      }}>
+        Set payee responsibilities in Settings → Payees
+      </div>
     )
   }
 
   return (
     <div style={{ 
       marginTop: '0.5rem', 
-      padding: '0.6rem', 
-      backgroundColor: '#f5f5f5', 
+      backgroundColor: '#fafafa', 
       borderRadius: '6px',
-      border: '1px solid #e0e0e0'
+      border: '1px solid #e8e8e8',
+      overflow: 'hidden'
     }}>
+      {/* Header - Bill Status */}
       <div 
-        onClick={handleToggle}
+        onClick={() => setExpanded(!expanded)}
         style={{ 
           display: 'flex', 
           justifyContent: 'space-between', 
           alignItems: 'center',
+          padding: '0.5rem 0.6rem',
+          backgroundColor: summary.bill_status === 'paid' ? '#e8f5e9' : summary.bill_status === 'partial' ? '#fff8e1' : '#ffebee',
           cursor: 'pointer',
-          marginBottom: summary ? '0.5rem' : 0
+          fontSize: '0.7rem'
         }}
       >
-        <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#333' }}>
-          Payee Breakdown
+        <span style={{ fontWeight: 600 }}>
+          Bill: ${summary.bill_total?.toFixed(2)} | 
+          Paid: <span style={{ color: '#4caf50' }}>${summary.total_paid?.toFixed(2)}</span>
+          {summary.bill_balance > 0.01 && (
+            <> | Due: <span style={{ color: '#f44336' }}>${summary.bill_balance?.toFixed(2)}</span></>
+          )}
         </span>
-        <span style={{ fontSize: '0.7rem', color: '#999' }}>▼ collapse</span>
+        <span style={{ fontSize: '0.65rem', color: '#666' }}>{expanded ? '▼' : '▶'}</span>
       </div>
 
-      {!summary ? (
-        <div style={{ fontSize: '0.7rem', color: '#999', textAlign: 'center', padding: '0.5rem' }}>
-          Loading...
-        </div>
-      ) : !hasResponsibilities ? (
-        <div style={{ fontSize: '0.7rem', color: '#999', textAlign: 'center', padding: '0.5rem' }}>
-          No payee responsibilities configured. Set them in Settings → Payees.
-        </div>
-      ) : (
-        <div>
-          {/* Bill Status */}
-          <div style={{ 
-            display: 'flex', 
-            justifyContent: 'space-between', 
-            marginBottom: '0.5rem',
-            padding: '0.4rem',
-            backgroundColor: summary.bill_status === 'paid' ? '#e8f5e9' : summary.bill_status === 'partial' ? '#fff3e0' : '#ffebee',
-            borderRadius: '4px',
-            fontSize: '0.7rem'
-          }}>
-            <span>Bill Total: <strong>${summary.bill_total.toFixed(2)}</strong></span>
-            <span>Paid: <strong style={{ color: '#4caf50' }}>${summary.total_paid.toFixed(2)}</strong></span>
-            {summary.bill_balance > 0.01 && (
-              <span>Remaining: <strong style={{ color: '#f44336' }}>${summary.bill_balance.toFixed(2)}</strong></span>
-            )}
-          </div>
-
-          {/* Payee Breakdown */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
-            {summary.payee_summaries.filter(p => p.responsibility_percent > 0).map(payee => (
+      {/* Payee Rows */}
+      {expanded && (
+        <div style={{ padding: '0.4rem' }}>
+          {summary.payee_summaries?.filter((p: any) => p.responsibility_percent > 0).map((payee: any) => {
+            // Determine status color
+            const isCredit = payee.total_balance > 0.01
+            const isSettled = Math.abs(payee.total_balance) <= 0.01
+            const owes = payee.total_balance < -0.01
+            
+            const borderColor = isCredit ? '#4caf50' : isSettled ? '#9e9e9e' : '#f44336'
+            const bgColor = isCredit ? '#f1f8e9' : isSettled ? '#fafafa' : '#fff8f8'
+            
+            return (
               <div 
                 key={payee.user_id}
                 style={{
-                  padding: '0.4rem 0.5rem',
-                  backgroundColor: 'white',
+                  display: 'grid',
+                  gridTemplateColumns: '1fr auto',
+                  gap: '0.5rem',
+                  padding: '0.5rem',
+                  marginBottom: '0.3rem',
+                  backgroundColor: bgColor,
                   borderRadius: '4px',
-                  border: `1px solid ${payee.status === 'paid' ? '#4caf50' : payee.status === 'partial' ? '#ff9800' : '#f44336'}`,
+                  borderLeft: `3px solid ${borderColor}`,
                   fontSize: '0.7rem'
                 }}
               >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.2rem' }}>
-                  <span style={{ fontWeight: 600 }}>{payee.name}</span>
-                  <span style={{ 
-                    padding: '0.1rem 0.3rem', 
-                    borderRadius: '3px',
-                    backgroundColor: payee.status === 'paid' ? '#e8f5e9' : payee.status === 'partial' ? '#fff3e0' : '#ffebee',
-                    color: payee.status === 'paid' ? '#2e7d32' : payee.status === 'partial' ? '#e65100' : '#c62828',
-                    fontSize: '0.6rem',
-                    fontWeight: 600
-                  }}>
-                    {payee.responsibility_percent}% share
-                  </span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#666', fontSize: '0.65rem' }}>
-                  <span>Owes: ${payee.amount_owed.toFixed(2)}</span>
-                  <span>Paid: ${payee.amount_paid.toFixed(2)}</span>
-                  {payee.rollover_from_previous !== 0 && (
-                    <span style={{ color: payee.rollover_from_previous > 0 ? '#f44336' : '#4caf50' }}>
-                      Rollover: {payee.rollover_from_previous > 0 ? '+' : ''}${payee.rollover_from_previous.toFixed(2)}
+                {/* Left side - Name and details */}
+                <div>
+                  <div style={{ fontWeight: 600, marginBottom: '0.2rem' }}>
+                    {payee.name}
+                    <span style={{ 
+                      marginLeft: '0.4rem',
+                      fontSize: '0.6rem', 
+                      color: '#666',
+                      fontWeight: 400
+                    }}>
+                      ({payee.responsibility_percent}%)
                     </span>
-                  )}
-                </div>
-                {payee.current_balance !== 0 && (
-                  <div style={{ 
-                    marginTop: '0.2rem', 
-                    fontWeight: 600, 
-                    color: payee.current_balance > 0 ? '#f44336' : '#4caf50',
-                    fontSize: '0.7rem'
-                  }}>
-                    {payee.current_balance > 0 ? `Owes: $${payee.current_balance.toFixed(2)}` : `Credit: $${Math.abs(payee.current_balance).toFixed(2)}`}
                   </div>
-                )}
+                  <div style={{ 
+                    display: 'flex', 
+                    gap: '0.8rem', 
+                    color: '#666', 
+                    fontSize: '0.65rem' 
+                  }}>
+                    <span>Share: ${payee.share_of_bill?.toFixed(2) || '0.00'}</span>
+                    <span>Paid: <span style={{ color: payee.amount_paid > 0 ? '#4caf50' : '#999' }}>${payee.amount_paid?.toFixed(2) || '0.00'}</span></span>
+                    {payee.rollover_in !== 0 && (
+                      <span style={{ color: payee.rollover_in > 0 ? '#4caf50' : '#f44336' }}>
+                        Rollover: {payee.rollover_in > 0 ? '+' : ''}${payee.rollover_in?.toFixed(2)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                
+                {/* Right side - Balance */}
+                <div style={{ 
+                  textAlign: 'right',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'center'
+                }}>
+                  <div style={{ 
+                    fontWeight: 700, 
+                    fontSize: '0.8rem',
+                    color: isCredit ? '#2e7d32' : isSettled ? '#666' : '#c62828'
+                  }}>
+                    {isCredit 
+                      ? `+$${payee.total_balance?.toFixed(2)}` 
+                      : isSettled 
+                        ? '$0.00' 
+                        : `-$${Math.abs(payee.total_balance)?.toFixed(2)}`
+                    }
+                  </div>
+                  <div style={{ fontSize: '0.55rem', color: '#999', textTransform: 'uppercase' }}>
+                    {isCredit ? 'credit' : isSettled ? 'settled' : 'owes'}
+                  </div>
+                </div>
               </div>
-            ))}
-          </div>
+            )
+          })}
         </div>
       )}
     </div>
@@ -300,26 +314,40 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
     }
   }, [])
 
-  const loadBillSummary = useCallback(async (billId: number) => {
-    if (billSummaries[billId]) return // Already loaded
+  // Load ALL bill summaries at once (efficient - calculated in single pass on backend)
+  const loadAllBillSummaries = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/bills/${billId}/summary`)
+      const res = await fetch(`${API_BASE_URL}/bills/all-summaries`)
       if (res.ok) {
         const data = await res.json()
-        setBillSummaries(prev => ({ ...prev, [billId]: data }))
+        // Convert string keys to numbers and set state
+        const summaries: {[key: number]: any} = {}
+        for (const [key, value] of Object.entries(data.summaries || {})) {
+          summaries[parseInt(key)] = value
+        }
+        setBillSummaries(summaries)
       }
     } catch {
       // Silently fail
     }
-  }, [billSummaries])
+  }, [])
+
+  // Kept for backwards compatibility but now just returns cached data
+  const loadBillSummary = useCallback(async (billId: number) => {
+    // All summaries loaded at once, no individual loading needed
+  }, [])
 
   useEffect(() => {
     loadLedgerData()
     checkPdfExists()
+    loadAllBillSummaries() // Load all payee summaries at once
     // Refresh every 30 seconds
-    const interval = setInterval(loadLedgerData, 30000)
+    const interval = setInterval(() => {
+      loadLedgerData()
+      loadAllBillSummaries()
+    }, 30000)
     return () => clearInterval(interval)
-  }, [loadLedgerData, checkPdfExists])
+  }, [loadLedgerData, checkPdfExists, loadAllBillSummaries])
 
   if (isLoading) {
     return (
