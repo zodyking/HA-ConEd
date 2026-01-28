@@ -37,7 +37,7 @@ from database import (
 app = FastAPI(title="ConEd Scraper API")
 
 # Code version for deployment verification
-CODE_VERSION = "2026-01-28-v5"
+CODE_VERSION = "2026-01-28-v6"
 
 @app.get("/api/version")
 async def get_version():
@@ -1361,9 +1361,12 @@ async def delete_user(user_id: int):
 async def get_all_bill_summaries():
     """Get payee summaries for ALL bills at once (efficient - single pass calculation)"""
     try:
+        add_log("info", "Calculating all bill summaries...")
         summaries = calculate_all_payee_balances()
+        add_log("info", f"Calculated summaries for {len(summaries)} bills")
         return {"summaries": summaries}
     except Exception as e:
+        add_log("error", f"Failed to calculate summaries: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/bills/{bill_id}/summary")

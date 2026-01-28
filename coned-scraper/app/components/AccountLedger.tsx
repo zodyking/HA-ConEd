@@ -318,17 +318,22 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
   const loadAllBillSummaries = useCallback(async () => {
     try {
       const res = await fetch(`${API_BASE_URL}/bills/all-summaries`)
+      console.log('All summaries response status:', res.status)
       if (res.ok) {
         const data = await res.json()
+        console.log('All summaries data:', data)
         // Convert string keys to numbers and set state
         const summaries: {[key: number]: any} = {}
         for (const [key, value] of Object.entries(data.summaries || {})) {
           summaries[parseInt(key)] = value
         }
+        console.log('Parsed summaries:', summaries)
         setBillSummaries(summaries)
+      } else {
+        console.error('Failed to load summaries:', res.status, await res.text())
       }
-    } catch {
-      // Silently fail
+    } catch (e) {
+      console.error('Error loading summaries:', e)
     }
   }, [])
 
