@@ -312,11 +312,15 @@ def fetch_coned_payment_emails(
         processed = 0
         skipped_sender = 0
         skipped_subject = 0
+        no_card_found = 0
         
-        for email_id in email_ids:
+        logger.info(f"=== STARTING EMAIL SCAN: Processing {len(email_ids)} emails ===")
+        
+        for idx, email_id in enumerate(email_ids):
             try:
                 status, data = mail.fetch(email_id, '(RFC822)')
                 if status != 'OK':
+                    logger.warning(f"Failed to fetch email {email_id}")
                     continue
                 
                 raw_email = data[0][1]
@@ -325,20 +329,31 @@ def fetch_coned_payment_emails(
                 # Get sender
                 from_addr = msg.get('From', '')
                 
-                # STRICT: Only accept emails from DoNotReply@billmatrix.com
-                if CONED_PAYMENT_SENDER.lower() not in from_addr.lower():
-                    skipped_sender += 1
-                    continue
-                
-                # Get subject
+                # Get subject for logging
                 subject_raw = msg.get('Subject', '')
                 subject, encoding = decode_header(subject_raw)[0]
                 if isinstance(subject, bytes):
                     subject = subject.decode(encoding or 'utf-8', errors='replace')
                 
+                # Get date for logging
+                email_date_str = msg.get('Date', '')
+                
+                # Log every email if in debug mode
+                if idx < 10 or CONED_PAYMENT_SENDER.lower() in from_addr.lower():
+                    logger.debug(f"Email {idx+1}/{len(email_ids)}: From={from_addr[:50]}, Subject={subject[:50]}, Date={email_date_str[:30]}")
+                
+                # STRICT: Only accept emails from DoNotReply@billmatrix.com
+                if CONED_PAYMENT_SENDER.lower() not in from_addr.lower():
+                    skipped_sender += 1
+                    continue
+                
+                # Log all BillMatrix emails
+                logger.info(f"BillMatrix email found: Subject='{subject}', Date={email_date_str}")
+                
                 # STRICT: Subject must contain the filter text
                 if subject_filter and subject_filter.lower() not in subject.lower():
                     skipped_subject += 1
+                    logger.info(f"  -> Skipped (subject filter '{subject_filter}' not found)")
                     continue
                 
                 processed += 1
@@ -371,20 +386,22 @@ def fetch_coned_payment_emails(
                         'subject': subject,
                         'email_id': email_id.decode() if isinstance(email_id, bytes) else str(email_id)
                     })
-                    logger.info(f"Extracted payment: {amount} on {payment_date}, card *{card_last_four}")
+                    logger.info(f"  -> EXTRACTED: {amount} on {payment_date}, card *{card_last_four}")
                 else:
-                    logger.warning(f"Could not extract card number from email: {subject}")
+                    no_card_found += 1
+                    logger.warning(f"  -> NO CARD FOUND in email body (first 200 chars): {body[:200]}")
                     
             except Exception as e:
                 logger.warning(f"Failed to process email {email_id}: {e}")
         
         logger.info(f"=== EMAIL SCAN RESULTS ===")
         logger.info(f"Folder: {folder_selected}")
-        logger.info(f"Total emails scanned: {len(email_ids)}")
-        logger.info(f"From BillMatrix (DoNotReply@billmatrix.com): {processed}")
-        logger.info(f"Skipped - wrong sender: {skipped_sender}")
-        logger.info(f"Skipped - wrong subject: {skipped_subject}")
-        logger.info(f"Payment emails with card numbers extracted: {len(results)}")
+        logger.info(f"Total emails in folder: {len(email_ids)}")
+        logger.info(f"BillMatrix emails matching subject filter: {processed}")
+        logger.info(f"Skipped - not from BillMatrix: {skipped_sender}")
+        logger.info(f"Skipped - subject doesn't match: {skipped_subject}")
+        logger.info(f"Card extracted successfully: {len(results)}")
+        logger.info(f"Card NOT found (body parsing failed): {no_card_found}")
         mail.logout()
         
     except imaplib.IMAP4.error as e:
