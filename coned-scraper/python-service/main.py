@@ -36,6 +36,14 @@ from database import (
 
 app = FastAPI(title="ConEd Scraper API")
 
+# Code version for deployment verification
+CODE_VERSION = "2026-01-28-v2"
+
+@app.get("/api/version")
+async def get_version():
+    """Simple endpoint to verify code deployment"""
+    return {"version": CODE_VERSION, "responsibilities_fix": "raw_request"}
+
 # CORS configuration
 app.add_middleware(
     CORSMiddleware,
