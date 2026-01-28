@@ -696,16 +696,16 @@ def calculate_all_payee_balances() -> Dict[int, Dict[str, Any]]:
     conn = get_connection()
     cursor = conn.cursor()
     
-    # Get all bills in chronological order (oldest first for correct rollover)
-    cursor.execute(f'''
-        SELECT * FROM bills 
-        ORDER BY {date_to_sortable_sql('bill_cycle_date')} ASC
-    ''')
+    # Get all bills
+    cursor.execute('SELECT * FROM bills')
     bills = [dict(row) for row in cursor.fetchall()]
     
     if not bills:
         conn.close()
         return {}
+    
+    # Sort bills by date in chronological order (oldest first for correct rollover)
+    bills = sort_bills_by_date(bills, desc=False)  # desc=False means oldest first
     
     # Get all payees
     cursor.execute('SELECT * FROM payee_users ORDER BY name')
