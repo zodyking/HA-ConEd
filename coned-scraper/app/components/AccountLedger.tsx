@@ -159,80 +159,85 @@ function BillPayeeSummary({
       {expanded && (
         <div style={{ padding: '0.4rem' }}>
           {summary.payee_summaries?.filter((p: any) => p.responsibility_percent > 0).map((payee: any) => {
-            // Determine status color
-            const isCredit = payee.total_balance > 0.01
-            const isSettled = Math.abs(payee.total_balance) <= 0.01
-            const owes = payee.total_balance < -0.01
+            const share = payee.share_of_bill || 0
+            const paid = payee.amount_paid || 0
+            const rollover = payee.rollover_in || 0
+            const balance = payee.total_balance || 0
             
-            const borderColor = isCredit ? '#4caf50' : isSettled ? '#9e9e9e' : '#f44336'
-            const bgColor = isCredit ? '#f1f8e9' : isSettled ? '#fafafa' : '#fff8f8'
+            // Determine status color based on balance
+            const isCredit = balance > 0.01
+            const isSettled = Math.abs(balance) <= 0.01
             
             return (
               <div 
                 key={payee.user_id}
                 style={{
-                  display: 'grid',
-                  gridTemplateColumns: '1fr auto',
-                  gap: '0.5rem',
-                  padding: '0.5rem',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  padding: '0.5rem 0.6rem',
                   marginBottom: '0.3rem',
-                  backgroundColor: bgColor,
+                  backgroundColor: '#fff',
                   borderRadius: '4px',
-                  borderLeft: `3px solid ${borderColor}`,
-                  fontSize: '0.7rem'
+                  border: '1px solid #e0e0e0',
+                  fontSize: '0.75rem'
                 }}
               >
-                {/* Left side - Name and details */}
-                <div>
-                  <div style={{ fontWeight: 600, marginBottom: '0.2rem' }}>
-                    {payee.name}
-                    <span style={{ 
-                      marginLeft: '0.4rem',
-                      fontSize: '0.6rem', 
-                      color: '#666',
-                      fontWeight: 400
-                    }}>
-                      ({payee.responsibility_percent}%)
-                    </span>
-                  </div>
-                  <div style={{ 
-                    display: 'flex', 
-                    gap: '0.8rem', 
-                    color: '#666', 
-                    fontSize: '0.65rem' 
-                  }}>
-                    <span>Share: ${payee.share_of_bill?.toFixed(2) || '0.00'}</span>
-                    <span>Paid: <span style={{ color: payee.amount_paid > 0 ? '#4caf50' : '#999' }}>${payee.amount_paid?.toFixed(2) || '0.00'}</span></span>
-                    {payee.rollover_in !== 0 && (
-                      <span style={{ color: payee.rollover_in > 0 ? '#4caf50' : '#f44336' }}>
-                        Rollover: {payee.rollover_in > 0 ? '+' : ''}${payee.rollover_in?.toFixed(2)}
-                      </span>
-                    )}
-                  </div>
+                {/* Name */}
+                <div style={{ fontWeight: 600, minWidth: '80px' }}>
+                  {payee.name}
+                  <span style={{ fontSize: '0.6rem', color: '#999', fontWeight: 400, marginLeft: '0.3rem' }}>
+                    {payee.responsibility_percent}%
+                  </span>
                 </div>
                 
-                {/* Right side - Balance */}
+                {/* Fraction: Paid / Share */}
                 <div style={{ 
-                  textAlign: 'right',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  justifyContent: 'center'
+                  display: 'flex', 
+                  flexDirection: 'column', 
+                  alignItems: 'center',
+                  lineHeight: 1.1
                 }}>
-                  <div style={{ 
-                    fontWeight: 700, 
-                    fontSize: '0.8rem',
-                    color: isCredit ? '#2e7d32' : isSettled ? '#666' : '#c62828'
+                  <span style={{ color: '#4caf50', fontWeight: 600 }}>
+                    ${paid.toFixed(2)}
+                  </span>
+                  <span style={{ 
+                    borderTop: '1px solid #999', 
+                    color: '#f44336', 
+                    fontWeight: 500,
+                    paddingTop: '1px',
+                    fontSize: '0.7rem'
                   }}>
-                    {isCredit 
-                      ? `+$${payee.total_balance?.toFixed(2)}` 
-                      : isSettled 
-                        ? '$0.00' 
-                        : `-$${Math.abs(payee.total_balance)?.toFixed(2)}`
-                    }
+                    ${share.toFixed(2)}
+                  </span>
+                </div>
+
+                {/* Rollover (if any) */}
+                {rollover !== 0 && (
+                  <div style={{ 
+                    fontSize: '0.65rem',
+                    color: rollover > 0 ? '#4caf50' : '#f44336',
+                    textAlign: 'center'
+                  }}>
+                    <div style={{ fontSize: '0.55rem', color: '#999' }}>rollover</div>
+                    {rollover > 0 ? '+' : ''}{rollover.toFixed(2)}
                   </div>
-                  <div style={{ fontSize: '0.55rem', color: '#999', textTransform: 'uppercase' }}>
-                    {isCredit ? 'credit' : isSettled ? 'settled' : 'owes'}
-                  </div>
+                )}
+                
+                {/* Balance */}
+                <div style={{ 
+                  fontWeight: 700, 
+                  fontSize: '0.85rem',
+                  color: isCredit ? '#4caf50' : isSettled ? '#666' : '#f44336',
+                  textAlign: 'right',
+                  minWidth: '70px'
+                }}>
+                  {isCredit 
+                    ? `+$${balance.toFixed(2)}` 
+                    : isSettled 
+                      ? '$0.00' 
+                      : `-$${Math.abs(balance).toFixed(2)}`
+                  }
                 </div>
               </div>
             )
