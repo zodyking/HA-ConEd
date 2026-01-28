@@ -37,7 +37,7 @@ from database import (
 app = FastAPI(title="ConEd Scraper API")
 
 # Code version for deployment verification
-CODE_VERSION = "2026-01-28-v2"
+CODE_VERSION = "2026-01-28-v3"
 
 @app.get("/api/version")
 async def get_version():
@@ -1303,29 +1303,7 @@ async def create_user(user: PayeeUserModel):
             raise HTTPException(status_code=400, detail="User with this name already exists")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.put("/api/payee-users/{user_id}")
-async def update_user(user_id: int, user: PayeeUserUpdateModel):
-    """Update a payee user"""
-    try:
-        update_payee_user(user_id, user.name, user.is_default)
-        return {"success": True}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.delete("/api/payee-users/{user_id}")
-async def delete_user(user_id: int):
-    """Delete a payee user"""
-    try:
-        deleted = delete_payee_user(user_id)
-        if deleted:
-            add_log("info", f"Deleted payee user ID: {user_id}")
-            return {"success": True}
-        raise HTTPException(status_code=404, detail="User not found")
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
+# NOTE: Specific routes must come BEFORE parameterized routes to avoid route conflicts
 @app.put("/api/payee-users/responsibilities")
 async def update_responsibilities(request: Request):
     """Update bill responsibility percentages for payees (must total 100%)"""
@@ -1354,6 +1332,29 @@ async def update_responsibilities(request: Request):
         raise
     except Exception as e:
         add_log("error", f"Failed to update responsibilities: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/api/payee-users/{user_id}")
+async def update_user(user_id: int, user: PayeeUserUpdateModel):
+    """Update a payee user"""
+    try:
+        update_payee_user(user_id, user.name, user.is_default)
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/payee-users/{user_id}")
+async def delete_user(user_id: int):
+    """Delete a payee user"""
+    try:
+        deleted = delete_payee_user(user_id)
+        if deleted:
+            add_log("info", f"Deleted payee user ID: {user_id}")
+            return {"success": True}
+        raise HTTPException(status_code=404, detail="User not found")
+    except HTTPException:
+        raise
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/bills/{bill_id}/summary")
