@@ -161,12 +161,12 @@ function BillPayeeSummary({
           {summary.payee_summaries?.filter((p: any) => p.responsibility_percent > 0).map((payee: any) => {
             const share = payee.share_of_bill || 0
             const paid = payee.amount_paid || 0
-            const rollover = payee.rollover_in || 0
-            const balance = payee.total_balance || 0
             
-            // Determine status color based on balance
-            const isCredit = balance > 0.01
-            const isSettled = Math.abs(balance) <= 0.01
+            // Compare paid vs share for this cycle
+            const diff = paid - share
+            const isPaid = Math.abs(diff) < 0.01
+            const isOverPaid = diff > 0.01
+            const isUnderPaid = diff < -0.01
             
             return (
               <div 
@@ -211,33 +211,27 @@ function BillPayeeSummary({
                     ${share.toFixed(2)}
                   </span>
                 </div>
-
-                {/* Rollover (if any) */}
-                {rollover !== 0 && (
-                  <div style={{ 
-                    fontSize: '0.65rem',
-                    color: rollover > 0 ? '#4caf50' : '#f44336',
-                    textAlign: 'center'
-                  }}>
-                    <div style={{ fontSize: '0.55rem', color: '#999' }}>rollover</div>
-                    {rollover > 0 ? '+' : ''}{rollover.toFixed(2)}
-                  </div>
-                )}
                 
-                {/* Balance */}
+                {/* Status: Paid / Over Paid / Under Paid */}
                 <div style={{ 
-                  fontWeight: 700, 
-                  fontSize: '0.85rem',
-                  color: isCredit ? '#4caf50' : isSettled ? '#666' : '#f44336',
+                  fontWeight: 600, 
+                  fontSize: '0.75rem',
                   textAlign: 'right',
-                  minWidth: '70px'
+                  minWidth: '100px'
                 }}>
-                  {isCredit 
-                    ? `+$${balance.toFixed(2)}` 
-                    : isSettled 
-                      ? '$0.00' 
-                      : `-$${Math.abs(balance).toFixed(2)}`
-                  }
+                  {isPaid ? (
+                    <span style={{ color: '#4caf50' }}>Paid ✓</span>
+                  ) : isOverPaid ? (
+                    <span style={{ color: '#4caf50' }}>
+                      Over Paid<br/>
+                      <span style={{ fontSize: '0.7rem' }}>by ${diff.toFixed(2)}</span>
+                    </span>
+                  ) : (
+                    <span style={{ color: '#f44336' }}>
+                      Under Paid<br/>
+                      <span style={{ fontSize: '0.7rem' }}>by ${Math.abs(diff).toFixed(2)}</span>
+                    </span>
+                  )}
                 </div>
               </div>
             )
