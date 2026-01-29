@@ -37,7 +37,7 @@ from database import (
 app = FastAPI(title="ConEd Scraper API")
 
 # Code version for deployment verification
-CODE_VERSION = "2026-01-28-v9"
+CODE_VERSION = "2026-01-29-v1"
 
 @app.get("/api/version")
 async def get_version():
@@ -160,6 +160,29 @@ async def run_scheduled_scrape():
                         await mqtt_client.publish_previous_bill(bills[1], timestamp)
                     if len(payments) > 0:
                         await mqtt_client.publish_last_payment(payments[0], timestamp)
+                
+                # Publish payee summary for the most recent bill (scheduled scrape)
+                try:
+                    from database import calculate_all_payee_balances, get_all_bills
+                    all_summaries = calculate_all_payee_balances()
+                    all_bills = get_all_bills()
+                    if all_bills and len(all_bills) > 0:
+                        most_recent_bill = all_bills[0]
+                        bill_id = most_recent_bill.get('id')
+                        if bill_id and bill_id in all_summaries:
+                            summary = all_summaries[bill_id]
+                            bill_info = {
+                                'bill_cycle_date': most_recent_bill.get('bill_cycle_date', ''),
+                                'bill_total': summary.get('bill_total', 0),
+                                'total_paid': summary.get('total_paid', 0),
+                                'bill_balance': summary.get('bill_balance', 0),
+                                'bill_status': summary.get('bill_status', 'unknown')
+                            }
+                            payee_summaries = summary.get('payee_summaries', [])
+                            await mqtt_client.publish_payee_summary(payee_summaries, bill_info, timestamp)
+                            add_log("info", "Published payee summary to MQTT")
+                except Exception as e:
+                    add_log("warning", f"Failed to publish payee summary: {e}")
             
             # Webhooks: Only send for changed values
             if webhook_client:
@@ -738,6 +761,29 @@ async def start_scraper():
                         await mqtt_client.publish_previous_bill(bills[1], timestamp)
                     if len(payments) > 0:
                         await mqtt_client.publish_last_payment(payments[0], timestamp)
+                
+                # Publish payee summary for the most recent bill (manual scrape)
+                try:
+                    from database import calculate_all_payee_balances, get_all_bills
+                    all_summaries = calculate_all_payee_balances()
+                    all_bills = get_all_bills()
+                    if all_bills and len(all_bills) > 0:
+                        most_recent_bill = all_bills[0]
+                        bill_id = most_recent_bill.get('id')
+                        if bill_id and bill_id in all_summaries:
+                            summary = all_summaries[bill_id]
+                            bill_info = {
+                                'bill_cycle_date': most_recent_bill.get('bill_cycle_date', ''),
+                                'bill_total': summary.get('bill_total', 0),
+                                'total_paid': summary.get('total_paid', 0),
+                                'bill_balance': summary.get('bill_balance', 0),
+                                'bill_status': summary.get('bill_status', 'unknown')
+                            }
+                            payee_summaries = summary.get('payee_summaries', [])
+                            await mqtt_client.publish_payee_summary(payee_summaries, bill_info, timestamp)
+                            add_log("info", "Published payee summary to MQTT")
+                except Exception as e:
+                    add_log("warning", f"Failed to publish payee summary: {e}")
             
             # Webhooks: Only send for changed values
             if webhook_client:

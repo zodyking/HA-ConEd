@@ -34,7 +34,7 @@ export default function Settings() {
   const [timeRemaining, setTimeRemaining] = useState<number>(30)
   const [isLoading, setIsLoading] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
-  const [activeTab, setActiveTab] = useState<'console' | 'credentials' | 'automated' | 'webhooks' | 'mqtt' | 'app-settings' | 'payees' | 'payments' | 'imap'>('console')
+  const [currentPage, setCurrentPage] = useState<'menu' | 'console' | 'credentials' | 'automated' | 'webhooks' | 'mqtt' | 'app-settings' | 'payees' | 'payments' | 'imap'>('menu')
   
   // Password protection
   const [isUnlocked, setIsUnlocked] = useState(false)
@@ -202,7 +202,7 @@ export default function Settings() {
 
   // Password protection modal
   if (!isUnlocked) {
-    return (
+  return (
       <div style={{
         position: 'fixed',
         top: 0,
@@ -246,8 +246,8 @@ export default function Settings() {
                 </div>
               </div>
               <div style={{ display: 'flex', gap: '0.5rem' }}>
-                <button
-                  type="button"
+        <button
+          type="button"
                   className="ha-button"
                   onClick={() => {
                     if (typeof window !== 'undefined') {
@@ -262,7 +262,7 @@ export default function Settings() {
                   }}
                 >
                   Cancel
-                </button>
+        </button>
                 <button type="submit" className="ha-button ha-button-primary" style={{ flex: 1 }}>
                   Unlock Settings
                 </button>
@@ -274,79 +274,96 @@ export default function Settings() {
     )
   }
 
+  // Settings menu items
+  const menuItems = [
+    { id: 'console', icon: '📊', label: 'Console', description: 'View logs and system status' },
+    { id: 'credentials', icon: '🔐', label: 'Credentials', description: 'Con Edison login credentials' },
+    { id: 'automated', icon: '⏰', label: 'Automated Scrape', description: 'Schedule automatic data scraping' },
+    { id: 'webhooks', icon: '🔗', label: 'Webhooks', description: 'Configure webhook notifications' },
+    { id: 'mqtt', icon: '📡', label: 'MQTT', description: 'Home Assistant MQTT integration' },
+    { id: 'payees', icon: '👥', label: 'Payees', description: 'Manage users and responsibility %' },
+    { id: 'payments', icon: '💳', label: 'Payments', description: 'Audit and manage payments' },
+    { id: 'imap', icon: '📧', label: 'Email / IMAP', description: 'Email parsing for auto-payment detection' },
+    { id: 'app-settings', icon: '⚙️', label: 'App Settings', description: 'Password and app configuration' },
+  ]
+
+  // Back button component
+  const BackButton = () => (
+        <button
+          type="button"
+      onClick={() => setCurrentPage('menu')}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '0.5rem',
+        background: 'none',
+        border: 'none',
+        color: '#03a9f4',
+        cursor: 'pointer',
+        padding: '0.5rem 0',
+        fontSize: '0.9rem',
+        marginBottom: '1rem'
+      }}
+    >
+      ← Back to Settings
+        </button>
+  )
+
   return (
     <div className="ha-settings">
-      <div className="ha-tabs" style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+      {/* Main Menu */}
+      {currentPage === 'menu' && (
+        <div style={{ padding: '0.5rem' }}>
+          <h2 style={{ margin: '0 0 1rem 0', fontSize: '1.3rem', fontWeight: 600 }}>⚙️ Settings</h2>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            {menuItems.map((item) => (
         <button
+                key={item.id}
           type="button"
-          className={`ha-tab ${activeTab === 'console' ? 'active' : ''}`}
-          onClick={() => setActiveTab('console')}
-        >
-          📊 Console
+                onClick={() => setCurrentPage(item.id as typeof currentPage)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '1rem',
+                  padding: '1rem',
+                  background: '#fff',
+                  border: '1px solid #e0e0e0',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  transition: 'all 0.15s ease'
+                }}
+                onMouseOver={(e) => {
+                  e.currentTarget.style.backgroundColor = '#f5f5f5'
+                  e.currentTarget.style.borderColor = '#03a9f4'
+                }}
+                onMouseOut={(e) => {
+                  e.currentTarget.style.backgroundColor = '#fff'
+                  e.currentTarget.style.borderColor = '#e0e0e0'
+                }}
+              >
+                <span style={{ fontSize: '1.5rem' }}>{item.icon}</span>
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: '1rem' }}>{item.label}</div>
+                  <div style={{ fontSize: '0.8rem', color: '#666' }}>{item.description}</div>
+                </div>
+                <span style={{ marginLeft: 'auto', color: '#999' }}>›</span>
         </button>
-        <button
-          type="button"
-          className={`ha-tab ${activeTab === 'credentials' ? 'active' : ''}`}
-          onClick={() => setActiveTab('credentials')}
-        >
-          🔐 Credentials
-        </button>
-        <button
-          type="button"
-          className={`ha-tab ${activeTab === 'automated' ? 'active' : ''}`}
-          onClick={() => setActiveTab('automated')}
-        >
-          ⏰ Automated Scrape
-        </button>
-        <button
-          type="button"
-          className={`ha-tab ${activeTab === 'webhooks' ? 'active' : ''}`}
-          onClick={() => setActiveTab('webhooks')}
-        >
-          🔗 Webhooks
-        </button>
-        <button
-          type="button"
-          className={`ha-tab ${activeTab === 'mqtt' ? 'active' : ''}`}
-          onClick={() => setActiveTab('mqtt')}
-        >
-          📡 MQTT
-        </button>
-        <button
-          type="button"
-          className={`ha-tab ${activeTab === 'app-settings' ? 'active' : ''}`}
-          onClick={() => setActiveTab('app-settings')}
-        >
-          ⚙️ App Settings
-        </button>
-        <button
-          type="button"
-          className={`ha-tab ${activeTab === 'payees' ? 'active' : ''}`}
-          onClick={() => setActiveTab('payees')}
-        >
-          👥 Payees
-        </button>
-        <button
-          type="button"
-          className={`ha-tab ${activeTab === 'payments' ? 'active' : ''}`}
-          onClick={() => setActiveTab('payments')}
-        >
-          💳 Payments
-        </button>
-        <button
-          type="button"
-          className={`ha-tab ${activeTab === 'imap' ? 'active' : ''}`}
-          onClick={() => setActiveTab('imap')}
-        >
-          📧 Email
-        </button>
+            ))}
       </div>
-
-      {activeTab === 'console' && (
-        <Dashboard />
+        </div>
       )}
 
-      {activeTab === 'credentials' && (
+      {currentPage === 'console' && (
+        <>
+          <BackButton />
+          <Dashboard />
+        </>
+      )}
+
+      {currentPage === 'credentials' && (
+        <>
+        <BackButton />
         <div className="ha-card">
           <div className="ha-card-header">
             <span className="ha-card-icon">🔐</span>
@@ -450,32 +467,53 @@ export default function Settings() {
         </div>
       )}
 
-      {activeTab === 'automated' && (
-        <AutomatedScrapeTab />
+      {currentPage === 'automated' && (
+        <>
+          <BackButton />
+          <AutomatedScrapeTab />
+        </>
       )}
 
-      {activeTab === 'webhooks' && (
-        <WebhooksTab />
+      {currentPage === 'webhooks' && (
+        <>
+          <BackButton />
+          <WebhooksTab />
+        </>
       )}
 
-      {activeTab === 'mqtt' && (
-        <MQTTTab />
+      {currentPage === 'mqtt' && (
+        <>
+          <BackButton />
+          <MQTTTab />
+        </>
       )}
 
-      {activeTab === 'app-settings' && (
-        <AppSettingsTab />
+      {currentPage === 'app-settings' && (
+        <>
+          <BackButton />
+          <AppSettingsTab />
+        </>
       )}
 
-      {activeTab === 'payees' && (
-        <PayeesTab />
+      {currentPage === 'payees' && (
+        <>
+          <BackButton />
+          <PayeesTab />
+        </>
       )}
 
-      {activeTab === 'payments' && (
-        <PaymentsTab />
+      {currentPage === 'payments' && (
+        <>
+          <BackButton />
+          <PaymentsTab />
+        </>
       )}
 
-      {activeTab === 'imap' && (
-        <IMAPTab />
+      {currentPage === 'imap' && (
+        <>
+          <BackButton />
+          <IMAPTab />
+        </>
       )}
     </div>
   )

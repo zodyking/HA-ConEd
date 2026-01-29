@@ -279,6 +279,55 @@ class MQTTClient:
         }
         await self.publish("bill_pdf_url", pdf_url, json_payload)
 
+    async def publish_payee_summary(self, payee_data: list, bill_info: Dict[str, Any], timestamp: Optional[str] = None):
+        """
+        Publish payee summary for the most recent billing period
+        
+        Args:
+            payee_data: List of payee summaries with name, amount_paid, share_of_bill
+            bill_info: Bill metadata (bill_total, bill_cycle_date, etc.)
+            timestamp: Optional timestamp override
+        """
+        # Build payee summary for MQTT
+        payees = []
+        for p in payee_data:
+            paid = p.get('amount_paid', 0) or 0
+            share = p.get('share_of_bill', 0) or 0
+            diff = paid - share
+            
+            if abs(diff) < 0.01:
+                status = "paid"
+            elif diff > 0:
+                status = "overpaid"
+            else:
+                status = "underpaid"
+            
+            payees.append({
+                "name": p.get('name', 'Unknown'),
+                "responsibility_percent": p.get('responsibility_percent', 0),
+                "amount_paid": round(paid, 2),
+                "amount_due": round(share, 2),
+                "difference": round(diff, 2),
+                "status": status
+            })
+        
+        json_payload = {
+            "event_type": "payee_summary",
+            "timestamp": timestamp or utc_now_iso(),
+            "data": {
+                "bill_cycle_date": bill_info.get('bill_cycle_date', ''),
+                "bill_total": bill_info.get('bill_total', 0),
+                "total_paid": bill_info.get('total_paid', 0),
+                "bill_balance": bill_info.get('bill_balance', 0),
+                "bill_status": bill_info.get('bill_status', 'unknown'),
+                "payees": payees,
+                "timestamp": timestamp or utc_now_iso()
+            }
+        }
+        
+        # Publish as JSON only (no simple numeric value makes sense here)
+        await self.publish("payee_summary", json.dumps(json_payload), json_payload)
+
 
 # Global MQTT client instance
 _mqtt_client: Optional[MQTTClient] = None
