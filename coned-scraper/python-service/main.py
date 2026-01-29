@@ -37,7 +37,7 @@ from database import (
 app = FastAPI(title="ConEd Scraper API")
 
 # Code version for deployment verification
-CODE_VERSION = "2026-01-29-v3"
+CODE_VERSION = "2026-01-29-v4"
 
 @app.get("/api/version")
 async def get_version():
@@ -451,13 +451,13 @@ def load_mqtt_config() -> dict:
 def load_last_payment_state() -> dict:
     """Load the last known payment state for MQTT change detection"""
     if not LAST_PAYMENT_STATE_FILE.exists():
-        return {"bill_id": None, "payment_count": 0, "last_payment_id": None, "last_payment_amount": None, "last_payee_id": None}
+        return {"bill_id": None, "payment_count": 0, "last_payment_id": None, "last_payment_amount": None}
     
     try:
         return json.loads(LAST_PAYMENT_STATE_FILE.read_text())
     except Exception as e:
         add_log("warning", f"Failed to load last payment state: {str(e)}")
-        return {"bill_id": None, "payment_count": 0, "last_payment_id": None, "last_payment_amount": None, "last_payee_id": None}
+        return {"bill_id": None, "payment_count": 0, "last_payment_id": None, "last_payment_amount": None}
 
 def save_last_payment_state(state: dict):
     """Save the last known payment state for MQTT change detection"""
@@ -473,7 +473,12 @@ def should_publish_last_payment() -> tuple:
     
     Only publish when:
     1. Payment count for most recent bill increased (new payment added)
-    2. Manual audit changed the last payment's payee or amount
+    2. Manual audit changed WHICH payment is the "last" one (different payment ID)
+    3. New billing cycle started
+    
+    Does NOT publish when:
+    - Just payee attribution changed (payee doesn't affect last_payment MQTT)
+    - Order changed but same payment is still "last"
     """
     from database import get_most_recent_bill_payment_count
     
@@ -488,7 +493,6 @@ def should_publish_last_payment() -> tuple:
     previous_count = previous_state.get("payment_count", 0)
     previous_last_payment_id = previous_state.get("last_payment_id")
     previous_last_amount = previous_state.get("last_payment_amount")
-    previous_payee_id = previous_state.get("last_payee_id")
     
     should_publish = False
     reason = ""
@@ -498,7 +502,6 @@ def should_publish_last_payment() -> tuple:
     
     current_last_id = last_payment.get("id")
     current_last_amount = last_payment.get("amount")
-    current_payee_id = last_payment.get("payee_user_id")
     
     # Case 1: New billing cycle
     if current_bill_id != previous_bill_id:
@@ -510,28 +513,24 @@ def should_publish_last_payment() -> tuple:
         should_publish = True
         reason = f"Payment count increased from {previous_count} to {current_count}"
     
-    # Case 3: Last payment changed (different payment is now first due to manual audit)
+    # Case 3: Different payment is now the "last" one (manual audit reordered)
     elif current_last_id != previous_last_payment_id:
         should_publish = True
-        reason = "Last payment changed (manual audit)"
+        reason = "Last payment changed (different payment is now first)"
     
-    # Case 4: Same payment but payee changed (manual audit attribution)
-    elif current_payee_id != previous_payee_id:
-        should_publish = True
-        reason = "Last payment payee changed"
-    
-    # Case 5: Same payment but amount changed (shouldn't happen normally)
+    # Case 4: Same payment but amount changed (shouldn't happen normally)
     elif current_last_amount != previous_last_amount:
         should_publish = True
         reason = "Last payment amount changed"
+    
+    # NOTE: Payee changes do NOT trigger MQTT - last_payment only cares about amount/date
     
     # Update stored state
     new_state = {
         "bill_id": current_bill_id,
         "payment_count": current_count,
         "last_payment_id": current_last_id,
-        "last_payment_amount": current_last_amount,
-        "last_payee_id": current_payee_id
+        "last_payment_amount": current_last_amount
     }
     save_last_payment_state(new_state)
     
