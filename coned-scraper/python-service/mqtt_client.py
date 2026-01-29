@@ -288,9 +288,24 @@ class MQTTClient:
             bill_info: Bill metadata (bill_total, bill_cycle_date, etc.)
             timestamp: Optional timestamp override
         """
-        # Build payee summary for MQTT
-        payees = []
+        # Build flattened payee data with name-prefixed fields for easy Home Assistant use
+        data = {
+            "bill_cycle_date": bill_info.get('bill_cycle_date', ''),
+            "bill_total": bill_info.get('bill_total', 0),
+            "total_paid": bill_info.get('total_paid', 0),
+            "bill_balance": bill_info.get('bill_balance', 0),
+            "bill_status": bill_info.get('bill_status', 'unknown'),
+            "timestamp": timestamp or utc_now_iso()
+        }
+        
+        # Add each payee's data with their name as prefix (lowercase, spaces to underscores)
         for p in payee_data:
+            name = p.get('name', 'Unknown')
+            # Create safe prefix: lowercase, replace spaces with underscores, remove special chars
+            prefix = re.sub(r'[^a-z0-9_]', '', name.lower().replace(' ', '_'))
+            if not prefix:
+                prefix = 'unknown'
+            
             paid = p.get('amount_paid', 0) or 0
             share = p.get('share_of_bill', 0) or 0
             diff = paid - share
@@ -302,27 +317,17 @@ class MQTTClient:
             else:
                 status = "underpaid"
             
-            payees.append({
-                "name": p.get('name', 'Unknown'),
-                "responsibility_percent": p.get('responsibility_percent', 0),
-                "amount_paid": round(paid, 2),
-                "amount_due": round(share, 2),
-                "difference": round(diff, 2),
-                "status": status
-            })
+            # Add prefixed fields for this payee
+            data[f"{prefix}_responsibility_percent"] = p.get('responsibility_percent', 0)
+            data[f"{prefix}_amount_paid"] = round(paid, 2)
+            data[f"{prefix}_amount_due"] = round(share, 2)
+            data[f"{prefix}_difference"] = round(diff, 2)
+            data[f"{prefix}_status"] = status
         
         json_payload = {
             "event_type": "payee_summary",
             "timestamp": timestamp or utc_now_iso(),
-            "data": {
-                "bill_cycle_date": bill_info.get('bill_cycle_date', ''),
-                "bill_total": bill_info.get('bill_total', 0),
-                "total_paid": bill_info.get('total_paid', 0),
-                "bill_balance": bill_info.get('bill_balance', 0),
-                "bill_status": bill_info.get('bill_status', 'unknown'),
-                "payees": payees,
-                "timestamp": timestamp or utc_now_iso()
-            }
+            "data": data
         }
         
         # Publish as JSON only (no simple numeric value makes sense here)
