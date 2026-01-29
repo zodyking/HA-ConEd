@@ -699,6 +699,115 @@ function MQTTTab() {
             </div>
           </div>
         )}
+
+        {/* Home Assistant Sensors Documentation */}
+        <div style={{ marginTop: '2rem', borderTop: '1px solid #e0e0e0', paddingTop: '1.5rem' }}>
+          <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            📋 Home Assistant Sensors
+          </h3>
+          <p style={{ fontSize: '0.8rem', color: '#666', marginBottom: '1rem' }}>
+            Add these MQTT sensors to your Home Assistant <code>configuration.yaml</code>:
+          </p>
+          
+          <div style={{ backgroundColor: '#1e1e1e', borderRadius: '8px', padding: '1rem', overflow: 'auto', fontSize: '0.75rem', fontFamily: 'monospace', color: '#d4d4d4' }}>
+            <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{`mqtt:
+  sensor:
+    # Account Balance (numeric)
+    - name: "Con Edison Balance"
+      state_topic: "${mqttBaseTopic || 'coned'}/account_balance"
+      unit_of_measurement: "$"
+      device_class: monetary
+      value_template: "{{ value | float }}"
+      
+    # Latest Bill Total (numeric)
+    - name: "Con Edison Latest Bill"
+      state_topic: "${mqttBaseTopic || 'coned'}/latest_bill"
+      unit_of_measurement: "$"
+      device_class: monetary
+      value_template: "{{ value | float }}"
+      json_attributes_topic: "${mqttBaseTopic || 'coned'}/latest_bill_json"
+      json_attributes_template: "{{ value_json.data | tojson }}"
+      
+    # Previous Bill Total (numeric)
+    - name: "Con Edison Previous Bill"
+      state_topic: "${mqttBaseTopic || 'coned'}/previous_bill"
+      unit_of_measurement: "$"
+      device_class: monetary
+      value_template: "{{ value | float }}"
+      json_attributes_topic: "${mqttBaseTopic || 'coned'}/previous_bill_json"
+      json_attributes_template: "{{ value_json.data | tojson }}"
+      
+    # Last Payment (numeric)
+    - name: "Con Edison Last Payment"
+      state_topic: "${mqttBaseTopic || 'coned'}/last_payment"
+      unit_of_measurement: "$"
+      device_class: monetary
+      value_template: "{{ value | float }}"
+      json_attributes_topic: "${mqttBaseTopic || 'coned'}/last_payment_json"
+      json_attributes_template: "{{ value_json.data | tojson }}"
+      
+    # Payee Summary (JSON only - for current billing cycle)
+    - name: "Con Edison Payee Summary"
+      state_topic: "${mqttBaseTopic || 'coned'}/payee_summary"
+      value_template: "{{ value_json.data.bill_status }}"
+      json_attributes_topic: "${mqttBaseTopic || 'coned'}/payee_summary_json"
+      json_attributes_template: "{{ value_json.data | tojson }}"`}</pre>
+          </div>
+
+          <div style={{ marginTop: '1.5rem' }}>
+            <h4 style={{ fontSize: '0.9rem', fontWeight: 600, marginBottom: '0.75rem' }}>📊 Topic Reference</h4>
+            <table style={{ width: '100%', fontSize: '0.75rem', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ backgroundColor: '#f5f5f5' }}>
+                  <th style={{ textAlign: 'left', padding: '0.5rem', borderBottom: '1px solid #ddd' }}>Topic</th>
+                  <th style={{ textAlign: 'left', padding: '0.5rem', borderBottom: '1px solid #ddd' }}>Data</th>
+                  <th style={{ textAlign: 'left', padding: '0.5rem', borderBottom: '1px solid #ddd' }}>Updates</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}><code>{mqttBaseTopic || 'coned'}/account_balance</code></td>
+                  <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>Numeric balance (e.g., 150.25)</td>
+                  <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>Every scrape</td>
+                </tr>
+                <tr>
+                  <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}><code>{mqttBaseTopic || 'coned'}/latest_bill</code></td>
+                  <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>Bill total | <code>_json</code>: cycle date, month range</td>
+                  <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>Every scrape</td>
+                </tr>
+                <tr>
+                  <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}><code>{mqttBaseTopic || 'coned'}/last_payment</code></td>
+                  <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>Payment amount | <code>_json</code>: date, description</td>
+                  <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>When new payment added</td>
+                </tr>
+                <tr>
+                  <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}><code>{mqttBaseTopic || 'coned'}/payee_summary</code></td>
+                  <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>Bill status | <code>_json</code>: per-payee breakdown</td>
+                  <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>Every scrape</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div style={{ marginTop: '1.5rem' }}>
+            <h4 style={{ fontSize: '0.9rem', fontWeight: 600, marginBottom: '0.75rem' }}>👥 Payee Summary Fields</h4>
+            <p style={{ fontSize: '0.75rem', color: '#666', marginBottom: '0.5rem' }}>
+              The payee_summary topic includes per-payee data with name-prefixed fields:
+            </p>
+            <div style={{ backgroundColor: '#f8f9fa', borderRadius: '6px', padding: '0.75rem', fontSize: '0.7rem', fontFamily: 'monospace' }}>
+              <div><code>bill_cycle_date</code> - Billing cycle end date</div>
+              <div><code>bill_total</code> - Total bill amount</div>
+              <div><code>bill_balance</code> - Remaining balance</div>
+              <div><code>bill_status</code> - paid | partial | unpaid</div>
+              <div style={{ marginTop: '0.5rem', color: '#1565c0' }}>Per payee (e.g., "john"):</div>
+              <div><code>john_responsibility_percent</code> - Share percentage</div>
+              <div><code>john_amount_paid</code> - Amount paid this cycle</div>
+              <div><code>john_amount_due</code> - Amount owed this cycle</div>
+              <div><code>john_difference</code> - Over/under payment</div>
+              <div><code>john_status</code> - paid | overpaid | underpaid</div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   )

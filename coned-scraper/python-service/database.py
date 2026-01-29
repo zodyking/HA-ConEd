@@ -374,7 +374,50 @@ def get_all_payments(limit: int = 100, bill_id: Optional[int] = None) -> List[Di
     return [dict(row) for row in rows]
 
 def get_latest_payment() -> Optional[Dict[str, Any]]:
-    """Get the most recent payment by payment_date (then first_scraped_at for same-day)"""
+    """
+    Get the most recent payment from the most recent billing cycle.
+    Respects manual_order if set, otherwise uses payment_date + first_scraped_at.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    # Get all bills to find the most recent one
+    cursor.execute('SELECT * FROM bills')
+    bills = [dict(row) for row in cursor.fetchall()]
+    
+    if not bills:
+        # No bills, fall back to any payment
+        conn.close()
+        payments = get_all_payments(limit=1)
+        return payments[0] if payments else None
+    
+    # Sort bills by date (most recent first)
+    bills = sort_bills_by_date(bills, desc=True)
+    most_recent_bill = bills[0]
+    bill_id = most_recent_bill['id']
+    
+    # Get the "first" payment for this bill (respecting manual_order)
+    cursor.execute('''
+        SELECT p.*, u.name as payee_name, b.month_range as bill_month, b.bill_cycle_date as bill_cycle
+        FROM payments p
+        LEFT JOIN payee_users u ON p.payee_user_id = u.id
+        LEFT JOIN bills b ON p.bill_id = b.id
+        WHERE p.bill_id = ?
+        ORDER BY 
+            CASE WHEN p.manual_order IS NOT NULL THEN 0 ELSE 1 END,
+            p.manual_order ASC,
+            p.payment_date DESC,
+            p.first_scraped_at ASC
+        LIMIT 1
+    ''', (bill_id,))
+    
+    row = cursor.fetchone()
+    conn.close()
+    
+    if row:
+        return dict(row)
+    
+    # No payments for this bill, try to get any payment
     payments = get_all_payments(limit=1)
     return payments[0] if payments else None
 

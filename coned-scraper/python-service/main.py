@@ -37,7 +37,7 @@ from database import (
 app = FastAPI(title="ConEd Scraper API")
 
 # Code version for deployment verification
-CODE_VERSION = "2026-01-29-v4"
+CODE_VERSION = "2026-01-29-v5"
 
 @app.get("/api/version")
 async def get_version():
