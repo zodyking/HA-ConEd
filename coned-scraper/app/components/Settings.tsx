@@ -1,4 +1,5 @@
 'use client'
+// Build: 2026-01-29-v5
 
 import { useState, useEffect } from 'react'
 import { formatTimestamp as formatTZ } from '../lib/timezone'
