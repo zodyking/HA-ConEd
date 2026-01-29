@@ -2454,19 +2454,31 @@ function PaymentsTab() {
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <span style={{ color: '#999', cursor: 'grab' }}>⋮⋮</span>
-          {payment.manual_order && (
-            <span 
-              title="Click to release manual audit" 
+          {(payment.manual_order !== null || payment.bill_manually_set) && (
+            <button
+              type="button"
+              title="Click to release manual lock" 
               onClick={(e) => {
                 e.stopPropagation()
-                if (confirm('Release manual audit? Auto-logic will manage this payment\'s order.')) {
+                e.preventDefault()
+                if (window.confirm('Release manual lock? Auto-logic will manage this payment.')) {
                   handleClearManualAudit(payment.id)
                 }
               }}
-              style={{ cursor: 'pointer' }}
+              style={{ 
+                cursor: 'pointer',
+                background: 'none',
+                border: 'none',
+                padding: '0.2rem',
+                fontSize: '1rem',
+                opacity: 0.8,
+                transition: 'opacity 0.15s'
+              }}
+              onMouseOver={(e) => (e.currentTarget.style.opacity = '1')}
+              onMouseOut={(e) => (e.currentTarget.style.opacity = '0.8')}
             >
               🔒
-            </span>
+            </button>
           )}
           <span style={{ 
             backgroundColor: '#4caf50', 
