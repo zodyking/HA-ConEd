@@ -37,7 +37,7 @@ from database import (
 app = FastAPI(title="ConEd Scraper API")
 
 # Code version for deployment verification
-CODE_VERSION = "2026-01-29-v2"
+CODE_VERSION = "2026-01-29-v3"
 
 @app.get("/api/version")
 async def get_version():
@@ -62,6 +62,7 @@ WEBHOOKS_FILE = DATA_DIR / "webhooks.json"
 MQTT_CONFIG_FILE = DATA_DIR / "mqtt_config.json"
 SETTINGS_FILE = DATA_DIR / "app_settings.json"
 IMAP_CONFIG_FILE = DATA_DIR / "imap_config.json"
+LAST_PAYMENT_STATE_FILE = DATA_DIR / "last_payment_state.json"
 KEY_FILE = DATA_DIR / ".key"
 
 # Encryption key management
@@ -152,14 +153,19 @@ async def run_scheduled_scrape():
                     bill_history = scraped_data["bill_history"]
                     ledger = bill_history.get("ledger", [])
                     bills = [item for item in ledger if item.get("type") == "bill"]
-                    payments = [item for item in ledger if item.get("type") == "payment"]
                     
                     if len(bills) > 0:
                         await mqtt_client.publish_latest_bill(bills[0], timestamp)
                     if len(bills) >= 2:
                         await mqtt_client.publish_previous_bill(bills[1], timestamp)
-                    if len(payments) > 0:
-                        await mqtt_client.publish_last_payment(payments[0], timestamp)
+                    
+                    # Smart last payment detection: only publish when payment count increased
+                    should_pub, last_payment, reason = should_publish_last_payment()
+                    if should_pub and last_payment:
+                        add_log("info", f"Publishing last_payment to MQTT: {reason}")
+                        await mqtt_client.publish_last_payment(last_payment, timestamp)
+                    else:
+                        add_log("debug", f"Skipping last_payment MQTT: {reason if reason else 'no change'}")
                 
                 # Publish payee summary for the most recent bill (scheduled scrape)
                 try:
@@ -441,6 +447,95 @@ def load_mqtt_config() -> dict:
     except Exception as e:
         add_log("warning", f"Failed to load MQTT config: {str(e)}")
         return {}
+
+def load_last_payment_state() -> dict:
+    """Load the last known payment state for MQTT change detection"""
+    if not LAST_PAYMENT_STATE_FILE.exists():
+        return {"bill_id": None, "payment_count": 0, "last_payment_id": None, "last_payment_amount": None, "last_payee_id": None}
+    
+    try:
+        return json.loads(LAST_PAYMENT_STATE_FILE.read_text())
+    except Exception as e:
+        add_log("warning", f"Failed to load last payment state: {str(e)}")
+        return {"bill_id": None, "payment_count": 0, "last_payment_id": None, "last_payment_amount": None, "last_payee_id": None}
+
+def save_last_payment_state(state: dict):
+    """Save the last known payment state for MQTT change detection"""
+    try:
+        LAST_PAYMENT_STATE_FILE.write_text(json.dumps(state))
+    except Exception as e:
+        add_log("warning", f"Failed to save last payment state: {str(e)}")
+
+def should_publish_last_payment() -> tuple:
+    """
+    Check if we should publish last_payment to MQTT.
+    Returns (should_publish: bool, last_payment_data: dict, reason: str)
+    
+    Only publish when:
+    1. Payment count for most recent bill increased (new payment added)
+    2. Manual audit changed the last payment's payee or amount
+    """
+    from database import get_most_recent_bill_payment_count
+    
+    current_state = get_most_recent_bill_payment_count()
+    previous_state = load_last_payment_state()
+    
+    current_bill_id = current_state.get("bill_id")
+    current_count = current_state.get("payment_count", 0)
+    last_payment = current_state.get("last_payment")
+    
+    previous_bill_id = previous_state.get("bill_id")
+    previous_count = previous_state.get("payment_count", 0)
+    previous_last_payment_id = previous_state.get("last_payment_id")
+    previous_last_amount = previous_state.get("last_payment_amount")
+    previous_payee_id = previous_state.get("last_payee_id")
+    
+    should_publish = False
+    reason = ""
+    
+    if not last_payment:
+        return False, None, "No payments found"
+    
+    current_last_id = last_payment.get("id")
+    current_last_amount = last_payment.get("amount")
+    current_payee_id = last_payment.get("payee_user_id")
+    
+    # Case 1: New billing cycle
+    if current_bill_id != previous_bill_id:
+        should_publish = True
+        reason = "New billing cycle detected"
+    
+    # Case 2: Payment count increased (new payment added)
+    elif current_count > previous_count:
+        should_publish = True
+        reason = f"Payment count increased from {previous_count} to {current_count}"
+    
+    # Case 3: Last payment changed (different payment is now first due to manual audit)
+    elif current_last_id != previous_last_payment_id:
+        should_publish = True
+        reason = "Last payment changed (manual audit)"
+    
+    # Case 4: Same payment but payee changed (manual audit attribution)
+    elif current_payee_id != previous_payee_id:
+        should_publish = True
+        reason = "Last payment payee changed"
+    
+    # Case 5: Same payment but amount changed (shouldn't happen normally)
+    elif current_last_amount != previous_last_amount:
+        should_publish = True
+        reason = "Last payment amount changed"
+    
+    # Update stored state
+    new_state = {
+        "bill_id": current_bill_id,
+        "payment_count": current_count,
+        "last_payment_id": current_last_id,
+        "last_payment_amount": current_last_amount,
+        "last_payee_id": current_payee_id
+    }
+    save_last_payment_state(new_state)
+    
+    return should_publish, last_payment, reason
 
 def save_app_settings(settings: dict):
     """Save app settings (time offset, password, base URL) to file"""
@@ -753,14 +848,19 @@ async def start_scraper():
                     bill_history = scraped_data["bill_history"]
                     ledger = bill_history.get("ledger", [])
                     bills = [item for item in ledger if item.get("type") == "bill"]
-                    payments = [item for item in ledger if item.get("type") == "payment"]
                     
                     if len(bills) > 0:
                         await mqtt_client.publish_latest_bill(bills[0], timestamp)
                     if len(bills) >= 2:
                         await mqtt_client.publish_previous_bill(bills[1], timestamp)
-                    if len(payments) > 0:
-                        await mqtt_client.publish_last_payment(payments[0], timestamp)
+                    
+                    # Smart last payment detection: only publish when payment count increased
+                    should_pub, last_payment, reason = should_publish_last_payment()
+                    if should_pub and last_payment:
+                        add_log("info", f"Publishing last_payment to MQTT: {reason}")
+                        await mqtt_client.publish_last_payment(last_payment, timestamp)
+                    else:
+                        add_log("debug", f"Skipping last_payment MQTT: {reason if reason else 'no change'}")
                 
                 # Publish payee summary for the most recent bill (manual scrape)
                 try:
@@ -1528,10 +1628,48 @@ async def update_payment_order_endpoint(payment_id: int, data: UpdatePaymentOrde
         success = update_payment_order(payment_id, data.bill_id, data.order)
         if success:
             add_log("info", f"Manually set payment {payment_id} to bill {data.bill_id} at position {data.order}")
+            
+            # Check if this manual audit changed the last payment and publish to MQTT
+            try:
+                from mqtt_client import get_mqtt_client
+                mqtt_client = get_mqtt_client()
+                if mqtt_client:
+                    should_pub, last_payment, reason = should_publish_last_payment()
+                    if should_pub and last_payment:
+                        add_log("info", f"Manual audit triggered MQTT publish: {reason}")
+                        await mqtt_client.publish_last_payment(last_payment, utc_now_iso())
+            except Exception as mqtt_e:
+                add_log("warning", f"Failed to publish MQTT after manual audit: {mqtt_e}")
+            
             return {"success": True}
         raise HTTPException(status_code=404, detail="Payment not found")
     except HTTPException:
         raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/payments/{payment_id}/manual-audit")
+async def clear_payment_manual_audit_endpoint(payment_id: int):
+    """Clear/release the manual audit on a payment, allowing auto-logic to take over again"""
+    try:
+        from database import clear_payment_manual_audit
+        success = clear_payment_manual_audit(payment_id)
+        if success:
+            add_log("info", f"Cleared manual audit for payment {payment_id}")
+            return {"success": True}
+        raise HTTPException(status_code=404, detail="Payment not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/payments/recent-bill-stats")
+async def get_recent_bill_payment_stats():
+    """Get payment count and last payment for the most recent billing cycle"""
+    try:
+        from database import get_most_recent_bill_payment_count
+        stats = get_most_recent_bill_payment_count()
+        return stats
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

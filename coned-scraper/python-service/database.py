@@ -435,6 +435,73 @@ def update_payment_order(payment_id: int, bill_id: Optional[int], order: int) ->
     conn.close()
     return updated
 
+def clear_payment_manual_audit(payment_id: int) -> bool:
+    """Clear/release the manual audit on a payment, allowing auto-logic to take over again"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        UPDATE payments SET 
+            bill_manually_set = 0,
+            manual_order = NULL
+        WHERE id = ?
+    ''', (payment_id,))
+    
+    updated = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return updated
+
+def get_most_recent_bill_payment_count() -> Dict[str, Any]:
+    """Get payment count for the most recent billing cycle"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    # Get all bills
+    cursor.execute('SELECT * FROM bills')
+    bills = [dict(row) for row in cursor.fetchall()]
+    
+    if not bills:
+        conn.close()
+        return {"bill_id": None, "payment_count": 0, "last_payment": None}
+    
+    # Sort bills by date (most recent first)
+    bills = sort_bills_by_date(bills, desc=True)
+    most_recent_bill = bills[0]
+    bill_id = most_recent_bill['id']
+    
+    # Count payments for this bill
+    cursor.execute('''
+        SELECT COUNT(*) as count FROM payments WHERE bill_id = ?
+    ''', (bill_id,))
+    count = cursor.fetchone()['count']
+    
+    # Get the "last" payment (first in order - most recent payment)
+    cursor.execute('''
+        SELECT p.*, u.name as payee_name
+        FROM payments p
+        LEFT JOIN payee_users u ON p.payee_user_id = u.id
+        WHERE p.bill_id = ?
+        ORDER BY 
+            CASE WHEN p.manual_order IS NOT NULL THEN 0 ELSE 1 END,
+            p.manual_order ASC,
+            p.payment_date DESC,
+            p.first_scraped_at ASC
+        LIMIT 1
+    ''', (bill_id,))
+    
+    last_payment_row = cursor.fetchone()
+    last_payment = dict(last_payment_row) if last_payment_row else None
+    
+    conn.close()
+    
+    return {
+        "bill_id": bill_id,
+        "bill_cycle_date": most_recent_bill.get('bill_cycle_date', ''),
+        "payment_count": count,
+        "last_payment": last_payment
+    }
+
 def get_payments_by_user(user_id: int) -> List[Dict[str, Any]]:
     """Get all payments assigned to a specific user"""
     conn = get_connection()

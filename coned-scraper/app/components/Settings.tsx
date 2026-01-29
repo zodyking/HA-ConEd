@@ -2382,6 +2382,23 @@ function PaymentsTab() {
     }
   }
 
+  const handleClearManualAudit = async (paymentId: number) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/payments/${paymentId}/manual-audit`, {
+        method: 'DELETE'
+      })
+      
+      if (res.ok) {
+        await loadData()
+        setMessage({ type: 'success', text: 'Manual audit cleared - auto logic will now manage this payment' })
+      } else {
+        setMessage({ type: 'error', text: 'Failed to clear manual audit' })
+      }
+    } catch (e) {
+      setMessage({ type: 'error', text: 'Failed to connect' })
+    }
+  }
+
   const handleAssignPayee = async (paymentId: number, userId: number | null) => {
     try {
       if (userId) {
@@ -2437,7 +2454,20 @@ function PaymentsTab() {
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <span style={{ color: '#999', cursor: 'grab' }}>⋮⋮</span>
-          {payment.manual_order && <span title="Position manually set">🔒</span>}
+          {payment.manual_order && (
+            <span 
+              title="Click to release manual audit" 
+              onClick={(e) => {
+                e.stopPropagation()
+                if (confirm('Release manual audit? Auto-logic will manage this payment\'s order.')) {
+                  handleClearManualAudit(payment.id)
+                }
+              }}
+              style={{ cursor: 'pointer' }}
+            >
+              🔒
+            </span>
+          )}
           <span style={{ 
             backgroundColor: '#4caf50', 
             color: 'white', 
