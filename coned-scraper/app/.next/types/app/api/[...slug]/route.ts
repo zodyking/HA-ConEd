@@ -1,4 +1,4 @@
-// File: C:\Users\zodyk\OneDrive\Desktop\coned-scraper\coned-scraper\app\app\api\[...slug]\route.ts
+// File: /Users/zodyking/Documents/conedison/coned-scraper/app/app/api/[...slug]/route.ts
 import * as entry from '../../../../../app/api/[...slug]/route.js'
 import type { NextRequest } from 'next/server.js'
 

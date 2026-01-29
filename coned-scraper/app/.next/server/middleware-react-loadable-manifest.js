@@ -1,1 +1,1 @@
-self.__REACT_LOADABLE_MANIFEST='{"node_modules\\\\next\\\\dist\\\\client\\\\index.js -> ../pages/_app":{"id":5139,"files":["static/chunks/139.88d07abe9278aed6.js"]},"node_modules\\\\next\\\\dist\\\\client\\\\index.js -> ../pages/_error":{"id":1646,"files":["static/chunks/646.325a78a6f637ce9e.js"]}}';
+self.__REACT_LOADABLE_MANIFEST='{"components/AccountLedger.tsx -> ./PdfViewer":{"id":7978,"files":["static/chunks/9b0008ae.94bb9e8bdf3fc58d.js","static/chunks/597.4e87a8dbdbdffc54.js","static/chunks/696.95a7d19f19f2c88a.js"]}}';

@@ -465,19 +465,20 @@ export default function Settings() {
             )}
           </div>
         </div>
+        </>
       )}
 
       {currentPage === 'automated' && (
         <>
           <BackButton />
-          <AutomatedScrapeTab />
+        <AutomatedScrapeTab />
         </>
       )}
 
       {currentPage === 'webhooks' && (
         <>
           <BackButton />
-          <WebhooksTab />
+        <WebhooksTab />
         </>
       )}
 
