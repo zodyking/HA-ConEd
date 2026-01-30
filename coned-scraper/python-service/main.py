@@ -37,7 +37,7 @@ from database import (
 app = FastAPI(title="ConEd Scraper API")
 
 # Code version for deployment verification
-CODE_VERSION = "2026-01-30-v2"
+CODE_VERSION = "2026-01-30-v3"
 
 @app.get("/api/version")
 async def get_version():
@@ -81,6 +81,7 @@ cipher = Fernet(ENCRYPTION_KEY)
 # Automated scraping schedule
 SCHEDULE_FILE = DATA_DIR / "schedule.json"
 _scheduler_task = None
+_scrape_running = False  # Track if a scrape is currently in progress
 
 class ScheduleModel(BaseModel):
     enabled: bool
@@ -131,9 +132,11 @@ def update_last_scrape_time():
 
 async def run_scheduled_scrape():
     """Run a scheduled scrape"""
+    global _scrape_running
     import time as time_module
     start_time = time_module.time()
     
+    _scrape_running = True
     try:
         credentials = load_credentials()
         if not credentials:
@@ -273,6 +276,8 @@ async def run_scheduled_scrape():
         add_scrape_history(False, error_msg, "unknown", duration)
         add_log("error", error_msg)
         logging.error(error_msg)
+    finally:
+        _scrape_running = False
 
 async def scheduler_loop():
     """Background scheduler loop - runs scrapes based on last_scrape_end + frequency"""
@@ -1376,7 +1381,18 @@ async def get_live_preview():
 @app.get("/api/automated-schedule")
 async def get_automated_schedule():
     """Get automated scraping schedule"""
+    global _scrape_running
     schedule = load_schedule()
+    
+    # Check if a scrape is currently running
+    if _scrape_running:
+        return {
+            "enabled": schedule["enabled"],
+            "frequency": schedule["frequency"],
+            "nextRun": None,
+            "isRunning": True,
+            "lastScrapeEnd": schedule.get("last_scrape_end")
+        }
     
     # Use the stored next_run time (calculated from last_scrape_end + frequency)
     next_run = schedule.get("next_run")
@@ -1386,13 +1402,12 @@ async def get_automated_schedule():
     if schedule["enabled"] and not next_run:
         next_run = (now + timedelta(seconds=schedule["frequency"])).isoformat()
     
-    # If next_run is in the past, it means the scheduler will run soon - show "Running soon..." 
-    # or recalculate based on now
+    # If next_run is in the past, it means the scheduler will run soon
     if schedule["enabled"] and next_run:
         try:
             next_run_dt = datetime.fromisoformat(next_run.replace('Z', '+00:00'))
             if next_run_dt < now:
-                # Scheduler should run imminently, show a near-future time
+                # Scheduler should run imminently
                 next_run = (now + timedelta(seconds=5)).isoformat()
         except:
             pass
@@ -1401,6 +1416,7 @@ async def get_automated_schedule():
         "enabled": schedule["enabled"],
         "frequency": schedule["frequency"],
         "nextRun": next_run,
+        "isRunning": False,
         "lastScrapeEnd": schedule.get("last_scrape_end")
     }
 

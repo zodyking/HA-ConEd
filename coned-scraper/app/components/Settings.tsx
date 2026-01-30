@@ -1481,7 +1481,7 @@ function AutomatedScrapeTab() {
   const [seconds, setSeconds] = useState('0')
   const [isLoading, setIsLoading] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
-  const [status, setStatus] = useState<{ enabled: boolean, frequency: number, nextRun?: string } | null>(null)
+  const [status, setStatus] = useState<{ enabled: boolean, frequency: number, nextRun?: string, isRunning?: boolean } | null>(null)
   const [scrapeHistory, setScrapeHistory] = useState<ScrapeHistoryEntry[]>([])
   const [formattedTimestamps, setFormattedTimestamps] = useState<Map<number, string>>(new Map())
 
@@ -1668,10 +1668,21 @@ function AutomatedScrapeTab() {
           </div>
         )}
 
-        {status && status.enabled && status.nextRun && (
+        {status && status.enabled && (
           <div className="ha-card ha-card-status" style={{ marginTop: '1rem' }}>
             <div className="ha-card-content">
-                <strong>Next scheduled run:</strong> <NextRunTime timestamp={status.nextRun} />
+                {status.isRunning ? (
+                  <span style={{ color: '#4caf50', fontWeight: 600 }}>
+                    <span className="spinner-mini" style={{ marginRight: '0.5rem' }}>⟳</span>
+                    Scrape currently running...
+                  </span>
+                ) : status.nextRun ? (
+                  <>
+                    <strong>Next scheduled run:</strong> <NextRunTime timestamp={status.nextRun} />
+                  </>
+                ) : (
+                  <span style={{ color: '#999' }}>Calculating next run...</span>
+                )}
               </div>
             </div>
           )}
