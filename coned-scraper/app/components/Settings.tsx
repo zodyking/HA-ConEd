@@ -2111,57 +2111,72 @@ function PayeesTab() {
                     <span style={{ fontSize: '0.75rem', color: '#666' }}>%</span>
                   </div>
 
-                  {/* Cards */}
-                  <div style={{ marginBottom: '0.5rem' }}>
-                    <div style={{ fontSize: '0.75rem', color: '#666', marginBottom: '0.3rem' }}>Cards:</div>
-                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
-                      {user.cards.length > 0 ? (
-                        user.cards.map((card, idx) => (
-                          <span 
-                            key={idx}
-                            style={{
-                              padding: '0.2rem 0.5rem',
-                              backgroundColor: '#e0e0e0',
-                              borderRadius: '4px',
-                              fontSize: '0.8rem',
-                              fontFamily: 'monospace'
-                            }}
-                          >
-                            *{card}
-                          </span>
-                        ))
-                      ) : (
-                        <span style={{ fontSize: '0.75rem', color: '#999' }}>No cards linked</span>
-                      )}
-                    </div>
-                  </div>
+                  {/* Cards - Not shown for default payee (fallback) */}
+                  {!user.is_default ? (
+                    <>
+                      <div style={{ marginBottom: '0.5rem' }}>
+                        <div style={{ fontSize: '0.75rem', color: '#666', marginBottom: '0.3rem' }}>Cards:</div>
+                        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                          {user.cards.length > 0 ? (
+                            user.cards.map((card, idx) => (
+                              <span 
+                                key={idx}
+                                style={{
+                                  padding: '0.2rem 0.5rem',
+                                  backgroundColor: '#e0e0e0',
+                                  borderRadius: '4px',
+                                  fontSize: '0.8rem',
+                                  fontFamily: 'monospace'
+                                }}
+                              >
+                                *{card}
+                              </span>
+                            ))
+                          ) : (
+                            <span style={{ fontSize: '0.75rem', color: '#999' }}>No cards linked</span>
+                          )}
+                        </div>
+                      </div>
 
-                  {/* Add Card */}
-                  <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
-                    <input
-                      type="text"
-                      className="ha-form-input"
-                      value={newCardInput[user.id] || ''}
-                      onChange={(e) => setNewCardInput({ ...newCardInput, [user.id]: e.target.value })}
-                      placeholder="Last 4 digits"
-                      maxLength={4}
-                      style={{ width: '100px', fontSize: '0.85rem' }}
-                    />
-                    <button
-                      onClick={() => handleAddCard(user.id)}
-                      style={{
-                        padding: '0.3rem 0.6rem',
-                        fontSize: '0.75rem',
-                        backgroundColor: '#03a9f4',
-                        color: 'white',
-                        border: 'none',
-                        borderRadius: '4px',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      + Add Card
-                    </button>
-                  </div>
+                      {/* Add Card */}
+                      <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
+                        <input
+                          type="text"
+                          className="ha-form-input"
+                          value={newCardInput[user.id] || ''}
+                          onChange={(e) => setNewCardInput({ ...newCardInput, [user.id]: e.target.value })}
+                          placeholder="Last 4 digits"
+                          maxLength={4}
+                          style={{ width: '100px', fontSize: '0.85rem' }}
+                        />
+                        <button
+                          onClick={() => handleAddCard(user.id)}
+                          style={{
+                            padding: '0.3rem 0.6rem',
+                            fontSize: '0.75rem',
+                            backgroundColor: '#03a9f4',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '4px',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          + Add Card
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <div style={{ 
+                      fontSize: '0.75rem', 
+                      color: '#666', 
+                      fontStyle: 'italic',
+                      backgroundColor: '#f0f4f8',
+                      padding: '0.5rem',
+                      borderRadius: '4px'
+                    }}>
+                      Default payee receives unmatched payments (no card linking needed)
+                    </div>
+                  )}
 
                   {/* User's Payments */}
                   <div style={{ marginTop: '0.75rem', borderTop: '1px solid #e0e0e0', paddingTop: '0.75rem' }}>

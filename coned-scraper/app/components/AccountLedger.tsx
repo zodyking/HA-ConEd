@@ -21,7 +21,7 @@ interface Payment {
   last_scraped_at: string
   scrape_count: number
   scrape_order: number | null
-  payee_status: 'confirmed' | 'pending' | 'unverified'
+  payee_status: 'confirmed' | 'pending' | 'unverified' | 'auto_timeout'
   payee_user_id: number | null
   payee_name: string | null
   card_last_four: string | null
@@ -634,6 +634,24 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
                                         {payment.payee_name}
                                       </span>
                                     )}
+                                    {payment.payee_status === 'pending' && (
+                                      <span 
+                                        style={{ 
+                                          fontSize: '0.6rem', 
+                                          backgroundColor: '#e8f5e9', 
+                                          color: '#2e7d32',
+                                          padding: '0.1rem 0.3rem',
+                                          borderRadius: '3px',
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: '0.3rem'
+                                        }}
+                                        title="Searching for payee info..."
+                                      >
+                                        <span className="spinner-mini" style={{ animation: 'spin 1s linear infinite' }}>⟳</span>
+                                        Loading payee...
+                                      </span>
+                                    )}
                                     {payment.payee_status === 'unverified' && (
                                       <span 
                                         style={{ 
@@ -648,7 +666,7 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
                                         }}
                                         title="Unassigned - edit in Settings → Payments"
                                       >
-                                        <span className="spinner-mini">⟳</span>
+                                        Unassigned
                                       </span>
                                     )}
                                   </div>
@@ -704,6 +722,24 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
                                     {payment.payee_name}
                                   </span>
                                 )}
+                                {payment.payee_status === 'pending' && (
+                                  <span 
+                                    style={{ 
+                                      fontSize: '0.6rem', 
+                                      backgroundColor: '#e8f5e9', 
+                                      color: '#2e7d32',
+                                      padding: '0.1rem 0.3rem',
+                                      borderRadius: '3px',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '0.3rem'
+                                    }}
+                                    title="Searching for payee info..."
+                                  >
+                                    <span className="spinner-mini" style={{ animation: 'spin 1s linear infinite' }}>⟳</span>
+                                    Loading payee...
+                                  </span>
+                                )}
                                 {payment.payee_status === 'unverified' && (
                                   <span 
                                     style={{ 
@@ -718,7 +754,7 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
                                     }}
                                     title="Unassigned - edit in Settings → Payments"
                                   >
-                                    <span className="spinner-mini">⟳</span>
+                                    Unassigned
                                   </span>
                                 )}
                               </div>

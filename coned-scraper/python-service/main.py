@@ -37,7 +37,7 @@ from database import (
 app = FastAPI(title="ConEd Scraper API")
 
 # Code version for deployment verification
-CODE_VERSION = "2026-01-29-v5"
+CODE_VERSION = "2026-01-30-v1"
 
 @app.get("/api/version")
 async def get_version():
@@ -89,27 +89,45 @@ class ScheduleModel(BaseModel):
 def load_schedule() -> dict:
     """Load automated scraping schedule"""
     if not SCHEDULE_FILE.exists():
-        return {"enabled": False, "frequency": 3600}  # Default: disabled, 1 hour
+        return {"enabled": False, "frequency": 3600, "last_scrape_end": None, "next_run": None}
     
     try:
         data = json.loads(SCHEDULE_FILE.read_text())
         return {
             "enabled": data.get("enabled", False),
-            "frequency": data.get("frequency", 3600)
+            "frequency": data.get("frequency", 3600),
+            "last_scrape_end": data.get("last_scrape_end"),
+            "next_run": data.get("next_run")
         }
     except Exception as e:
         add_log("error", f"Failed to load schedule: {str(e)}")
-        return {"enabled": False, "frequency": 3600}
+        return {"enabled": False, "frequency": 3600, "last_scrape_end": None, "next_run": None}
 
-def save_schedule(enabled: bool, frequency: int):
+def save_schedule(enabled: bool, frequency: int, last_scrape_end: str = None, next_run: str = None):
     """Save automated scraping schedule"""
+    # Load existing to preserve last_scrape_end if not provided
+    existing = load_schedule()
+    
     schedule = {
         "enabled": enabled,
         "frequency": frequency,
+        "last_scrape_end": last_scrape_end or existing.get("last_scrape_end"),
+        "next_run": next_run or existing.get("next_run"),
         "updated_at": utc_now_iso()
     }
     SCHEDULE_FILE.write_text(json.dumps(schedule))
     add_log("info", f"Schedule saved: enabled={enabled}, frequency={frequency}s")
+
+def update_last_scrape_time():
+    """Update last_scrape_end and calculate next_run after a successful scrape"""
+    schedule = load_schedule()
+    now = datetime.now(timezone.utc)
+    next_run = now + timedelta(seconds=schedule["frequency"])
+    
+    schedule["last_scrape_end"] = now.isoformat()
+    schedule["next_run"] = next_run.isoformat()
+    schedule["updated_at"] = utc_now_iso()
+    SCHEDULE_FILE.write_text(json.dumps(schedule))
 
 async def run_scheduled_scrape():
     """Run a scheduled scrape"""
@@ -226,6 +244,26 @@ async def run_scheduled_scrape():
                     if changes.get("last_payment") and len(payments) > 0:
                         await webhook_client.send_last_payment(payments[0], timestamp)
         
+        # Check IMAP for payment attribution if configured
+        if success:
+            try:
+                from imap_client import load_imap_config, run_imap_auto_attribution
+                imap_config = load_imap_config()
+                if imap_config.get('auto_assign_mode') == 'every_scrape' and imap_config.get('server'):
+                    add_log("info", "Running IMAP payment attribution after scrape...")
+                    await run_imap_auto_attribution()
+            except Exception as imap_e:
+                add_log("warning", f"IMAP auto-attribution failed: {imap_e}")
+            
+            # Auto-assign expired pending payments to default payee
+            try:
+                from database import auto_assign_expired_pending_payments
+                result = auto_assign_expired_pending_payments()
+                if result.get('assigned', 0) > 0:
+                    add_log("info", result.get('message', 'Auto-assigned expired pending payments'))
+            except Exception as auto_e:
+                add_log("warning", f"Auto-assign expired payments failed: {auto_e}")
+        
         duration = time_module.time() - start_time
         add_scrape_history(success, None if success else "Scrape failed", None, duration)
         add_log("success", f"Scheduled scrape completed: {success}")
@@ -237,20 +275,38 @@ async def run_scheduled_scrape():
         logging.error(error_msg)
 
 async def scheduler_loop():
-    """Background scheduler loop"""
+    """Background scheduler loop - runs scrapes based on last_scrape_end + frequency"""
     while True:
         try:
             schedule = load_schedule()
             
             if schedule["enabled"]:
                 frequency = schedule["frequency"]
-                add_log("info", f"Scheduler: Waiting {frequency} seconds until next scrape...")
-                await asyncio.sleep(frequency)
+                next_run_str = schedule.get("next_run")
                 
-                # Check if still enabled before running
+                # Calculate seconds until next run
+                if next_run_str:
+                    try:
+                        next_run = datetime.fromisoformat(next_run_str.replace('Z', '+00:00'))
+                        now = datetime.now(timezone.utc)
+                        seconds_until_run = (next_run - now).total_seconds()
+                    except:
+                        seconds_until_run = 0
+                else:
+                    # No next_run set, run immediately then set it
+                    seconds_until_run = 0
+                
+                if seconds_until_run > 0:
+                    add_log("info", f"Scheduler: Next scrape in {int(seconds_until_run)} seconds")
+                    await asyncio.sleep(min(seconds_until_run, 60))  # Check at least every 60s
+                    continue  # Re-check if it's time
+                
+                # Time to run!
                 current_schedule = load_schedule()
                 if current_schedule["enabled"]:
                     await run_scheduled_scrape()
+                    # Update next run time after scrape completes
+                    update_last_scrape_time()
             else:
                 # If disabled, check every 60 seconds
                 await asyncio.sleep(60)
@@ -1322,16 +1378,18 @@ async def get_automated_schedule():
     """Get automated scraping schedule"""
     schedule = load_schedule()
     
-    # Calculate next run time if enabled
-    next_run = None
-    if schedule["enabled"]:
-        # Try to get last run time from logs or use now
-        next_run = (datetime.now() + timedelta(seconds=schedule["frequency"])).isoformat()
+    # Use the stored next_run time (calculated from last_scrape_end + frequency)
+    next_run = schedule.get("next_run")
+    
+    # If no next_run is set but enabled, calculate from now (first run)
+    if schedule["enabled"] and not next_run:
+        next_run = (datetime.now(timezone.utc) + timedelta(seconds=schedule["frequency"])).isoformat()
     
     return {
         "enabled": schedule["enabled"],
         "frequency": schedule["frequency"],
-        "nextRun": next_run
+        "nextRun": next_run,
+        "lastScrapeEnd": schedule.get("last_scrape_end")
     }
 
 @app.post("/api/automated-schedule")
@@ -1341,20 +1399,33 @@ async def save_automated_schedule(schedule: ScheduleModel):
         if schedule.frequency <= 0:
             raise HTTPException(status_code=400, detail="Frequency must be greater than 0")
         
-        save_schedule(schedule.enabled, schedule.frequency)
+        # Load existing schedule to get last_scrape_end
+        existing = load_schedule()
+        last_scrape_end = existing.get("last_scrape_end")
+        
+        # Calculate next_run based on last_scrape_end + new frequency
+        next_run = None
+        if schedule.enabled:
+            if last_scrape_end:
+                try:
+                    last_end = datetime.fromisoformat(last_scrape_end.replace('Z', '+00:00'))
+                    next_run = (last_end + timedelta(seconds=schedule.frequency)).isoformat()
+                except:
+                    next_run = (datetime.now(timezone.utc) + timedelta(seconds=schedule.frequency)).isoformat()
+            else:
+                # No previous scrape, run based on now
+                next_run = (datetime.now(timezone.utc) + timedelta(seconds=schedule.frequency)).isoformat()
+        
+        save_schedule(schedule.enabled, schedule.frequency, last_scrape_end, next_run)
         
         # Restart scheduler with new settings
         await restart_scheduler()
-        
-        # Calculate next run time
-        next_run = None
-        if schedule.enabled:
-            next_run = (datetime.now() + timedelta(seconds=schedule.frequency)).isoformat()
         
         return {
             "enabled": schedule.enabled,
             "frequency": schedule.frequency,
             "nextRun": next_run,
+            "lastScrapeEnd": last_scrape_end,
             "message": "Schedule saved successfully"
         }
     except HTTPException:

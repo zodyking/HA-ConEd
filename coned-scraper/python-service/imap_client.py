@@ -560,6 +560,16 @@ def run_email_sync() -> Dict[str, Any]:
             'message': str(e)
         }
 
+async def run_imap_auto_attribution():
+    """
+    Async wrapper for run_email_sync to be called after scrape.
+    Runs the IMAP email check and payment attribution.
+    """
+    import asyncio
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(None, run_email_sync)
+    return result
+
 def preview_email_search(
     server: str,
     port: int,

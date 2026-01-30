@@ -1,6 +1,7 @@
 import sqlite3
 import json
-from datetime import datetime, timezone
+import logging
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 import hashlib
@@ -123,6 +124,12 @@ def init_database():
     # Add manual_order column if it doesn't exist (migration)
     try:
         cursor.execute('ALTER TABLE payments ADD COLUMN manual_order INTEGER')
+    except sqlite3.OperationalError:
+        pass
+    
+    # Add payee_pending_until column (2hr window for auto-assignment)
+    try:
+        cursor.execute('ALTER TABLE payments ADD COLUMN payee_pending_until TEXT')
     except sqlite3.OperationalError:
         pass
     
@@ -331,12 +338,14 @@ def upsert_payment(payment_data: Dict[str, Any], bill_id: Optional[int] = None, 
         ''', (now, existing['id']))
         payment_id = existing['id']
     else:
-        # Insert new payment
+        # Insert new payment with 2-hour pending window for payee auto-assignment
+        pending_until = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
         cursor.execute('''
             INSERT INTO payments (bill_id, payment_date, description, amount, amount_numeric, 
-                                  first_scraped_at, last_scraped_at, scrape_order, payment_hash)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (bill_id, payment_date, description, amount, amount_numeric, now, now, scrape_order, payment_hash))
+                                  first_scraped_at, last_scraped_at, scrape_order, payment_hash,
+                                  payee_status, payee_pending_until)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+        ''', (bill_id, payment_date, description, amount, amount_numeric, now, now, scrape_order, payment_hash, pending_until))
         payment_id = cursor.lastrowid
     
     conn.commit()
@@ -396,7 +405,8 @@ def get_latest_payment() -> Optional[Dict[str, Any]]:
     most_recent_bill = bills[0]
     bill_id = most_recent_bill['id']
     
-    # Get the "first" payment for this bill (respecting manual_order)
+    # Get the "first" payment for this bill
+    # New unlocked payments first, then locked payments in their manual order
     cursor.execute('''
         SELECT p.*, u.name as payee_name, b.month_range as bill_month, b.bill_cycle_date as bill_cycle
         FROM payments p
@@ -404,10 +414,10 @@ def get_latest_payment() -> Optional[Dict[str, Any]]:
         LEFT JOIN bills b ON p.bill_id = b.id
         WHERE p.bill_id = ?
         ORDER BY 
-            CASE WHEN p.manual_order IS NOT NULL THEN 0 ELSE 1 END,
-            p.manual_order ASC,
+            CASE WHEN p.manual_order IS NOT NULL THEN 1 ELSE 0 END,
             p.payment_date DESC,
-            p.first_scraped_at ASC
+            p.first_scraped_at DESC,
+            p.manual_order ASC
         LIMIT 1
     ''', (bill_id,))
     
@@ -526,10 +536,10 @@ def get_most_recent_bill_payment_count() -> Dict[str, Any]:
         LEFT JOIN payee_users u ON p.payee_user_id = u.id
         WHERE p.bill_id = ?
         ORDER BY 
-            CASE WHEN p.manual_order IS NOT NULL THEN 0 ELSE 1 END,
-            p.manual_order ASC,
+            CASE WHEN p.manual_order IS NOT NULL THEN 1 ELSE 0 END,
             p.payment_date DESC,
-            p.first_scraped_at ASC
+            p.first_scraped_at DESC,
+            p.manual_order ASC
         LIMIT 1
     ''', (bill_id,))
     
@@ -579,10 +589,10 @@ def get_all_bills_with_payments() -> List[Dict[str, Any]]:
             LEFT JOIN payee_users u ON p.payee_user_id = u.id
             WHERE p.bill_id = ?
             ORDER BY 
-                CASE WHEN p.manual_order IS NOT NULL THEN 0 ELSE 1 END,
-                p.manual_order ASC,
+                CASE WHEN p.manual_order IS NOT NULL THEN 1 ELSE 0 END,
                 p.payment_date DESC, 
-                p.first_scraped_at ASC
+                p.first_scraped_at DESC,
+                p.manual_order ASC
         ''', (bill['id'],))
         bill['payments'] = [dict(row) for row in cursor.fetchall()]
     
@@ -601,6 +611,56 @@ def get_all_bills_with_payments() -> List[Dict[str, Any]]:
     sorted_bills = sort_bills_by_date(bills, desc=True)
     
     return {'bills': sorted_bills, 'orphan_payments': orphan_payments}
+
+def auto_assign_expired_pending_payments() -> Dict[str, Any]:
+    """
+    Find payments that are past their 2-hour pending window and still unassigned.
+    Auto-assign them to the default payee.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Find payments that are pending and past their window
+    cursor.execute('''
+        SELECT id, amount, payment_date FROM payments 
+        WHERE payee_status = 'pending' 
+        AND payee_user_id IS NULL
+        AND payee_pending_until IS NOT NULL
+        AND payee_pending_until < ?
+    ''', (now,))
+    
+    expired = cursor.fetchall()
+    conn.close()
+    
+    if not expired:
+        return {'assigned': 0, 'message': 'No expired pending payments'}
+    
+    # Get default payee
+    default_payee = get_default_payee()
+    if not default_payee:
+        return {'assigned': 0, 'message': 'No default payee configured'}
+    
+    # Assign expired payments to default payee
+    assigned = 0
+    for payment in expired:
+        try:
+            attribute_payment(
+                payment['id'],
+                default_payee['id'],
+                method='auto_timeout',
+                card_last_four=None
+            )
+            assigned += 1
+        except Exception as e:
+            logging.warning(f"Failed to auto-assign payment {payment['id']}: {e}")
+    
+    return {
+        'assigned': assigned,
+        'default_payee': default_payee['name'],
+        'message': f'Assigned {assigned} expired pending payments to {default_payee["name"]}'
+    }
 
 def wipe_bills_and_payments() -> Dict[str, int]:
     """Delete all bills and payments from the database"""
@@ -1197,10 +1257,10 @@ def get_ledger_data() -> Dict[str, Any]:
             LEFT JOIN payee_users u ON p.payee_user_id = u.id
             WHERE p.bill_id = ?
             ORDER BY 
-                CASE WHEN p.manual_order IS NOT NULL THEN 0 ELSE 1 END,
-                p.manual_order ASC,
+                CASE WHEN p.manual_order IS NOT NULL THEN 1 ELSE 0 END,
                 p.payment_date DESC, 
-                p.first_scraped_at ASC
+                p.first_scraped_at DESC,
+                p.manual_order ASC
         ''', (bill['id'],))
         bill['payments'] = [dict(row) for row in cursor.fetchall()]
     
