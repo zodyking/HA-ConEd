@@ -37,7 +37,7 @@ from database import (
 app = FastAPI(title="ConEd Scraper API")
 
 # Code version for deployment verification
-CODE_VERSION = "2026-01-30-v1"
+CODE_VERSION = "2026-01-30-v2"
 
 @app.get("/api/version")
 async def get_version():
@@ -1380,10 +1380,22 @@ async def get_automated_schedule():
     
     # Use the stored next_run time (calculated from last_scrape_end + frequency)
     next_run = schedule.get("next_run")
+    now = datetime.now(timezone.utc)
     
     # If no next_run is set but enabled, calculate from now (first run)
     if schedule["enabled"] and not next_run:
-        next_run = (datetime.now(timezone.utc) + timedelta(seconds=schedule["frequency"])).isoformat()
+        next_run = (now + timedelta(seconds=schedule["frequency"])).isoformat()
+    
+    # If next_run is in the past, it means the scheduler will run soon - show "Running soon..." 
+    # or recalculate based on now
+    if schedule["enabled"] and next_run:
+        try:
+            next_run_dt = datetime.fromisoformat(next_run.replace('Z', '+00:00'))
+            if next_run_dt < now:
+                # Scheduler should run imminently, show a near-future time
+                next_run = (now + timedelta(seconds=5)).isoformat()
+        except:
+            pass
     
     return {
         "enabled": schedule["enabled"],
