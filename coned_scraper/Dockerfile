@@ -1,27 +1,20 @@
 # Build arg must be declared before first FROM for multi-stage compatibility
 ARG BUILD_FROM=ghcr.io/hassio-addons/debian-base:9.2.0
 
-# Stage 1: Build Next.js with addon API URL (same-container backend)
-FROM node:20-bookworm-slim AS nextjs-builder
-WORKDIR /app
+# Stage 1: Build Vue frontend
+FROM node:20-bookworm-slim AS vue-builder
+WORKDIR /app/frontend
 
-COPY app/package*.json ./
+COPY frontend/package*.json ./
 RUN npm ci
 
-COPY app/ ./
-RUN chmod -R +x node_modules/.bin 2>/dev/null || true
-
-ENV DOCKER_BUILD=true
-ENV API_BASE_URL=http://127.0.0.1:8000
-ENV NEXT_PUBLIC_API_URL=api
+COPY frontend/ ./
 RUN npm run build
 
-# Stage 2: Addon image with Node + Python + both apps (Debian base for Playwright/glibc)
+# Stage 2: Addon image with Python only (Vue SPA served by FastAPI)
 FROM ${BUILD_FROM}
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    nodejs \
-    npm \
     python3 \
     python3-pip \
     python3-venv \
@@ -39,17 +32,13 @@ RUN python3 -m playwright install chromium && python3 -m playwright install-deps
 # Copy full Python service
 COPY python-service/ /app/python-service/
 
-# Copy Next.js standalone output
-COPY --from=nextjs-builder /app/.next/standalone ./web/
-COPY --from=nextjs-builder /app/.next/static ./web/.next/static
-COPY --from=nextjs-builder /app/public ./web/public
-COPY app/inject-ingress.js ./web/
+# Copy Vue SPA build output into python-service for FastAPI to serve
+COPY --from=vue-builder /app/frontend/dist /app/python-service/frontend/dist
 
-# Copy root filesystem (S6 overlay)
+# Copy root filesystem (S6 overlay) - only api service (no web)
 COPY rootfs /
 RUN chmod +x /etc/s6-overlay/s6-rc.d/init-coned/run \
-    /etc/s6-overlay/s6-rc.d/api/run /etc/s6-overlay/s6-rc.d/api/finish \
-    /etc/s6-overlay/s6-rc.d/web/run /etc/s6-overlay/s6-rc.d/web/finish
+    /etc/s6-overlay/s6-rc.d/api/run /etc/s6-overlay/s6-rc.d/api/finish
 
 # Build arguments
 ARG BUILD_ARCH

@@ -1,5 +1,7 @@
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
 import pyotp
@@ -634,9 +636,11 @@ def verify_settings_password(password: str) -> bool:
     settings = load_app_settings()
     return settings.get("settings_password") == password
 
-@app.get("/")
-async def root():
-    return {"message": "ConEd Scraper API", "status": "running"}
+# Frontend SPA - path to Vue build output (set by Dockerfile or dev)
+_SCRIPT_DIR = Path(__file__).resolve().parent
+FRONTEND_DIST = _SCRIPT_DIR.parent / "frontend" / "dist"
+if not FRONTEND_DIST.exists():
+    FRONTEND_DIST = _SCRIPT_DIR / "frontend" / "dist"
 
 @app.get("/api/totp")
 async def get_totp():
@@ -1960,6 +1964,34 @@ async def preview_imap_emails():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ========== SPA Static Files & Fallback ==========
+# Mount /assets for Vue build output (CSS, JS, images)
+# Serve index.html for non-API paths (SPA routing)
+if FRONTEND_DIST.exists():
+    assets_dir = FRONTEND_DIST / "assets"
+    if assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=str(assets_dir), html=False), name="assets")
+    images_dir = FRONTEND_DIST / "images"
+    if images_dir.exists():
+        app.mount("/images", StaticFiles(directory=str(images_dir), html=False), name="images")
+
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        """Serve index.html for SPA fallback (non-API, non-asset paths)"""
+        # Don't serve SPA for API routes (handled by other routes)
+        if full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not found")
+        index_path = FRONTEND_DIST / "index.html"
+        if index_path.exists():
+            return FileResponse(str(index_path))
+        raise HTTPException(status_code=404, detail="Frontend not built")
+else:
+    @app.get("/")
+    async def root():
+        return {"message": "ConEd Scraper API", "status": "running"}
+
 
 if __name__ == "__main__":
     import uvicorn

@@ -1,1 +1,0 @@
-self.__REACT_LOADABLE_MANIFEST='{"components/AccountLedger.tsx -> ./PdfViewer":{"id":7978,"files":["static/chunks/9b0008ae.94bb9e8bdf3fc58d.js","static/chunks/597.4e87a8dbdbdffc54.js","static/chunks/696.95a7d19f19f2c88a.js"]}}';

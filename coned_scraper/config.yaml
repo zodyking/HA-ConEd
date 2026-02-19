@@ -5,7 +5,7 @@ slug: coned_scraper
 description: Automated ConEd billing data scraper with webhooks and web UI
 url: https://github.com/zodyking/HA-ConEd
 ingress: true
-ingress_port: 3000
+ingress_port: 8000
 panel_icon: mdi:flash
 init: false
 homeassistant: 2023.3.0
