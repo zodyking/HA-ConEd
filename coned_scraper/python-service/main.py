@@ -65,7 +65,24 @@ MQTT_CONFIG_FILE = DATA_DIR / "mqtt_config.json"
 SETTINGS_FILE = DATA_DIR / "app_settings.json"
 IMAP_CONFIG_FILE = DATA_DIR / "imap_config.json"
 LAST_PAYMENT_STATE_FILE = DATA_DIR / "last_payment_state.json"
+TTS_CONFIG_FILE = DATA_DIR / "tts_config.json"
 KEY_FILE = DATA_DIR / ".key"
+
+# Default TTS settings (like Home-Energy)
+DEFAULT_TTS_PREFIX = "Message from Con Edison."
+DEFAULT_TTS_CONFIG = {
+    "enabled": False,
+    "media_player": "",
+    "volume": 0.7,
+    "language": "en",
+    "prefix": DEFAULT_TTS_PREFIX,
+    "wait_for_idle": True,
+    "tts_service": "tts.google_translate_say",
+    "messages": {
+        "new_bill": "Your new Con Edison bill for {month_range} is now available.",
+        "payment_received": "Good news — your payment of {amount} has been received. Your account balance is now {balance}.",
+    },
+}
 
 # Encryption key management
 def get_or_create_key():
@@ -1777,6 +1794,113 @@ async def preview_imap_emails():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ========== TTS Configuration ==========
+def load_tts_config() -> dict:
+    """Load TTS configuration"""
+    if not TTS_CONFIG_FILE.exists():
+        save_tts_config(DEFAULT_TTS_CONFIG.copy())
+        return DEFAULT_TTS_CONFIG.copy()
+    try:
+        data = json.loads(TTS_CONFIG_FILE.read_text())
+        merged = DEFAULT_TTS_CONFIG.copy()
+        merged.update(data)
+        merged.setdefault("tts_service", "tts.google_translate_say")
+        if "messages" not in data or not data["messages"]:
+            merged["messages"] = DEFAULT_TTS_CONFIG["messages"].copy()
+        else:
+            for k, v in DEFAULT_TTS_CONFIG["messages"].items():
+                merged["messages"].setdefault(k, v)
+            merged["messages"].pop("scrape_complete", None)
+            merged["messages"].pop("balance_alert", None)
+        return merged
+    except Exception as e:
+        add_log("warning", f"Failed to load TTS config: {str(e)}")
+        return DEFAULT_TTS_CONFIG.copy()
+
+
+def save_tts_config(config: dict):
+    """Save TTS configuration"""
+    TTS_CONFIG_FILE.write_text(json.dumps(config))
+
+
+class TTSConfigModel(BaseModel):
+    enabled: Optional[bool] = None
+    media_player: Optional[str] = None
+    volume: Optional[float] = None
+    language: Optional[str] = None
+    prefix: Optional[str] = None
+    wait_for_idle: Optional[bool] = None
+    tts_service: Optional[str] = None
+    messages: Optional[dict] = None
+
+
+@app.get("/api/tts-config")
+async def get_tts_config():
+    """Get TTS configuration"""
+    return load_tts_config()
+
+
+@app.post("/api/tts-config")
+async def save_tts_config_endpoint(config: TTSConfigModel):
+    """Save TTS configuration"""
+    current = load_tts_config()
+    updates = config.model_dump(exclude_none=True)
+    for k, v in updates.items():
+        current[k] = v
+    save_tts_config(current)
+    return {"success": True}
+
+
+def build_tts_message(config: dict, key: str, **kwargs) -> str:
+    """Build TTS message: (prefix), (message)"""
+    prefix = config.get("prefix", DEFAULT_TTS_PREFIX)
+    template = config.get("messages", {}).get(key, "")
+    if not template:
+        return ""
+    try:
+        msg = template.format(**kwargs)
+    except KeyError:
+        msg = template
+    return f"{prefix}, {msg}".strip()
+
+
+@app.post("/api/tts/test")
+async def test_tts():
+    """Send test TTS: direct HA API when addon, else MQTT fallback"""
+    config = load_tts_config()
+    if not config.get("enabled"):
+        raise HTTPException(status_code=400, detail="TTS is not enabled")
+    media_player = (config.get("media_player") or "").strip()
+    if not media_player:
+        raise HTTPException(status_code=400, detail="Media player not configured")
+    full_msg = f"{config.get('prefix', DEFAULT_TTS_PREFIX)}, Con Edison test message."
+    volume = config.get("volume", 0.7)
+    wait_for_idle = config.get("wait_for_idle", True)
+    tts_service = config.get("tts_service", "tts.google_translate_say")
+
+    if os.environ.get("SUPERVISOR_TOKEN"):
+        from ha_tts import send_tts
+        success, err = await send_tts(
+            message=full_msg,
+            media_player=media_player,
+            volume=volume,
+            wait_for_idle=wait_for_idle,
+            tts_service=tts_service,
+        )
+        if success:
+            return {"success": True, "message": "TTS sent via Home Assistant."}
+        raise HTTPException(status_code=500, detail=err or "TTS failed")
+
+    from mqtt_client import get_mqtt_client
+    mqtt_client = get_mqtt_client()
+    if mqtt_client and mqtt_client.enabled:
+        await mqtt_client.publish_tts_request(
+            message=full_msg, media_player=media_player, volume=volume, wait_for_idle=wait_for_idle
+        )
+        return {"success": True, "message": "TTS request sent via MQTT. Add HA automation if not using addon."}
+    raise HTTPException(status_code=400, detail="Not in HA addon and MQTT not configured")
 
 
 # ========== SPA Static Files & Fallback ==========

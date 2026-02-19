@@ -396,6 +396,41 @@ class MQTTClient:
         }
         await self.publish("last_payment", numeric_value, json_payload)
     
+    async def publish_tts_request(
+        self,
+        message: str,
+        media_player: str,
+        volume: float = 0.7,
+        wait_for_idle: bool = True,
+    ):
+        """
+        Publish TTS request to MQTT for HA automation to handle.
+        Automation should wait for media_player to be 'idle' before playing (if wait_for_idle).
+        """
+        if not self.enabled or not message or not media_player:
+            return
+        if not await self.ensure_connected():
+            logger.warning("MQTT not connected, skipping TTS publish")
+            return
+        topic = f"{self.base_topic}/tts/request"
+        payload = {
+            "message": message.strip(),
+            "media_player": media_player,
+            "volume": max(0.0, min(1.0, float(volume))),
+            "wait_for_idle": bool(wait_for_idle),
+            "timestamp": utc_now_iso(),
+        }
+        try:
+            payload_str = json.dumps(payload)
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                None,
+                lambda: self.client.publish(topic, payload_str, self.qos, False),
+            )
+            logger.info(f"TTS request published to {topic}")
+        except Exception as e:
+            logger.warning(f"Failed to publish TTS request: {e}")
+
     async def publish_bill_pdf_url(self, pdf_url: str, timestamp: Optional[str] = None):
         """Publish single bill PDF URL (backward compat)"""
         json_payload = {
