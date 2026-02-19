@@ -1,5 +1,5 @@
 # Build arg must be declared before first FROM for multi-stage compatibility
-ARG BUILD_FROM=ghcr.io/hassio-addons/base:20.0.1
+ARG BUILD_FROM=ghcr.io/hassio-addons/debian-base:9.2.0
 
 # Stage 1: Build Next.js with addon API URL (same-container backend)
 FROM node:20-bookworm-slim AS nextjs-builder
@@ -15,19 +15,20 @@ ENV DOCKER_BUILD=true
 ENV API_BASE_URL=http://127.0.0.1:8000
 RUN npm run build
 
-# Stage 2: Addon image with Node + Python + both apps
+# Stage 2: Addon image with Node + Python + both apps (Debian base for Playwright/glibc)
 FROM ${BUILD_FROM}
 
-RUN apk add --no-cache \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     nodejs \
     npm \
     python3 \
-    py3-pip \
-    && rm -rf /var/cache/apk/*
+    python3-pip \
+    python3-venv \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Copy Python service and install dependencies
+# Copy Python service and install dependencies (Playwright needs glibc/manylinux - Debian provides it)
 COPY python-service/requirements.txt /app/python-service/
 RUN pip3 install --no-cache-dir -r /app/python-service/requirements.txt
 
