@@ -1,0 +1,7 @@
+#!/command/with-contenv bashio
+# shellcheck shell=bash
+# ==============================================================================
+# ConEd Scraper - Init script
+# ==============================================================================
+
+bashio::log.info "ConEd Scraper initializing..."

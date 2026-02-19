@@ -1,0 +1,20 @@
+---
+name: ConEd Scraper
+version: dev
+slug: coned_scraper
+description: Automated ConEd billing data scraper with webhooks and web UI
+url: https://github.com/zodyking/conedison
+ingress: true
+ingress_port: 3000
+panel_icon: mdi:flash
+init: false
+homeassistant: 2023.3.0
+arch:
+  - aarch64
+  - amd64
+map:
+  - addon_config:rw
+options:
+  log_level: info
+schema:
+  log_level: list(trace|debug|info|notice|warning|error|fatal)

@@ -2,6 +2,11 @@
 
 Automated ConEd billing data scraper with webhooks and web UI. Built with Next.js 15 and Python FastAPI.
 
+## Deployment Options
+
+- **Dokploy** (below): One-click deploy via Docker Compose
+- **Home Assistant Addon**: Install as a single addon with ingress panel—see [DOCS.md](DOCS.md) for addon-specific docs
+
 ## 🚀 Quick Deploy to Dokploy
 
 This project is configured for one-click deployment to Dokploy using Docker Compose.

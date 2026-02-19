@@ -1,0 +1,15 @@
+#!/command/with-contenv bashio
+# shellcheck shell=bash
+# ==============================================================================
+# ConEd Scraper - Next.js frontend
+# ==============================================================================
+
+bashio::log.info "Starting ConEd Scraper Web UI..."
+
+export NODE_ENV=production
+export PORT=3000
+export HOSTNAME=0.0.0.0
+export API_BASE_URL=http://127.0.0.1:8000
+
+cd /app/web
+exec node server.js

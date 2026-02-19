@@ -22,7 +22,8 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 # Config file path
-IMAP_CONFIG_FILE = Path("./data") / "imap_config.json"
+from data_config import DATA_DIR
+IMAP_CONFIG_FILE = DATA_DIR / "imap_config.json"
 
 # STRICT: Only accept emails from this sender
 CONED_PAYMENT_SENDER = "DoNotReply@billmatrix.com"

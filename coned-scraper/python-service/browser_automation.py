@@ -43,8 +43,8 @@ async def type_text_slowly(page, selector: str, text: str, delay: int = 50):
 async def take_live_preview(page, step_name: str = ""):
     """Take a live preview screenshot for console display"""
     try:
-        from pathlib import Path
-        screenshot_dir = Path("./data")
+        from data_config import DATA_DIR
+        screenshot_dir = DATA_DIR
         screenshot_dir.mkdir(parents=True, exist_ok=True)
         screenshot_path = screenshot_dir / LIVE_PREVIEW_FILENAME
         
@@ -474,9 +474,8 @@ async def scrape_account_data(page, context):
             scraped_data["account_balance"] = account_balance
             # Take screenshot right after finding account balance
             try:
-                from pathlib import Path
-                # Use ./data for persistent storage
-                screenshot_dir = Path("./data")
+                from data_config import DATA_DIR
+                screenshot_dir = DATA_DIR
                 screenshot_dir.mkdir(parents=True, exist_ok=True)
                 screenshot_path = screenshot_dir / SCREENSHOT_FILENAME
                 await page.screenshot(path=str(screenshot_path), full_page=False)
@@ -514,7 +513,8 @@ async def download_pdf_from_url(pdf_url: str) -> bool:
                     
                     if len(pdf_content) > 1000:  # Sanity check - PDF should be at least 1KB
                         # Save to data directory
-                        pdf_dir = Path("./data")
+                        from data_config import DATA_DIR
+                        pdf_dir = DATA_DIR
                         pdf_dir.mkdir(parents=True, exist_ok=True)
                         pdf_path = pdf_dir / "latest_bill.pdf"
                         

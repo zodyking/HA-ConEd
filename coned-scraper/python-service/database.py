@@ -10,8 +10,9 @@ def utc_now_iso() -> str:
     """Get current UTC time as ISO string"""
     return datetime.now(timezone.utc).isoformat()
 
-# Use /data for persistent storage (mounted volume in Home Assistant)
-DB_PATH = Path("./data") / "scraper.db"
+# Use configurable data dir (DATA_DIR env for addon)
+from data_config import DATA_DIR
+DB_PATH = DATA_DIR / "scraper.db"
 
 def get_connection():
     """Get database connection with row factory"""

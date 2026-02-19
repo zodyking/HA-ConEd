@@ -53,10 +53,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Configuration
-# Use ./data for persistent storage (works in both Docker and local)
-DATA_DIR = Path("./data")
-DATA_DIR.mkdir(parents=True, exist_ok=True)
+# Configuration - use DATA_DIR env for addon (e.g. /config), else ./data
+from data_config import DATA_DIR
+
 CREDENTIALS_FILE = DATA_DIR / "credentials.json"
 WEBHOOKS_FILE = DATA_DIR / "webhooks.json"
 MQTT_CONFIG_FILE = DATA_DIR / "mqtt_config.json"
