@@ -994,7 +994,7 @@ async def get_bill_document_endpoint(bill_id: int = None):
         latest_id = get_latest_bill_id_with_document()
         if not latest_id:
             return JSONResponse(
-                {"error": "No bill PDF available. Add a PDF from the Account Ledger."},
+                {"error": "No bill PDF available. Add a PDF in Settings → App Settings."},
                 status_code=404
             )
         doc = get_bill_document(latest_id)
