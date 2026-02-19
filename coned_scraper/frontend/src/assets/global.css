@@ -392,26 +392,35 @@ body {
   font-size: 0.8rem;
 }
 
-/* Account Ledger Styles */
+/* Ledger: summary in header area (white space below nav), ledger scrolls below */
 .ha-ledger {
   display: flex;
   flex-direction: column;
   gap: 0;
+  min-height: 0;
+  flex: 1;
 }
-
-/* Sticky wrapper: solid white bg + shadow so scrolling content disappears underneath (no gaps) */
-.ha-sticky-summary-wrap {
-  position: sticky;
-  top: 0;
-  z-index: 20;
+.ha-ledger-header {
   flex-shrink: 0;
   background: #fff;
   padding: 0 0 0.75rem;
   margin: 0 -1.25rem 0;
-  margin-bottom: -0.75rem;
+  margin-bottom: 0;
   padding-left: 1.25rem;
   padding-right: 1.25rem;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.06);
+}
+.ha-ledger-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  margin: 0 -1.25rem 0;
+  padding: 0 1.25rem;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.ha-ledger-scroll::-webkit-scrollbar {
+  display: none;
 }
 
 .ha-card-summary {
@@ -448,8 +457,12 @@ body {
   padding: 0.5rem;
 }
 
-/* Single scroll for ledger, hidden scrollbar */
+/* Ledger view: flex column, content fills and ledger scrolls */
 .ha-content-ledger {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 1rem 1.25rem;
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
@@ -692,7 +705,8 @@ body {
     padding: 0.75rem 1rem;
   }
 
-  .ha-sticky-summary-wrap {
+  .ha-ledger-header,
+  .ha-ledger-scroll {
     margin: 0 -1rem 0;
     padding-left: 1rem;
     padding-right: 1rem;

@@ -7,7 +7,7 @@
     <div class="ha-card-content">
       <p class="ha-tts-intro">
         Configure text-to-speech for Con Edison events. Messages use <strong>(prefix), (message)</strong>.
-        When running as a Home Assistant addon, TTS is sent via the HA API. Outside HA, use MQTT + automation.
+        When running as a Home Assistant addon, TTS is sent directly via the HA API.
       </p>
 
       <div class="ha-tts-form">
@@ -135,12 +135,6 @@
       </div>
 
       <div v-if="message" :class="['ha-message', message.type]">{{ message.text }}</div>
-
-      <details class="ha-tts-docs">
-        <summary>MQTT Fallback — Automation (when not using addon)</summary>
-        <p class="ha-form-hint">Only needed when running outside the HA addon. The addon uses the HA API directly.</p>
-        <pre class="ha-automation-yaml">{{ automationYaml }}</pre>
-      </details>
     </div>
   </div>
 </template>
@@ -177,36 +171,6 @@ const placeholders: Record<string, string> = {
   new_bill: 'Your new Con Edison bill for {month_range} is now available.',
   payment_received: 'Good news — your payment of {amount} has been received. Your account balance is now {balance}.',
 }
-
-const automationYaml = `# ConEd TTS - waits for media player idle before playing
-trigger:
-  - platform: mqtt
-    topic: coned/tts/request
-action:
-  - variables:
-      payload: "{{ trigger.payload_json }}"
-      mp: "{{ payload.media_player }}"
-      msg: "{{ payload.message }}"
-      vol: "{{ payload.volume | default(0.7) }}"
-      wait_idle: "{{ payload.wait_for_idle | default(true) }}"
-  - if:
-      - condition: template
-        value_template: "{{ wait_idle == true or wait_idle == 'true' }}"
-    then:
-      - wait_for_trigger:
-          - platform: state
-            entity_id: "{{ mp }}"
-            to: idle
-    else: []
-  - service: media_player.volume_set
-    target:
-      entity_id: "{{ mp }}"
-    data:
-      volume_level: "{{ vol }}"
-  - service: tts.google_translate_say
-    data:
-      entity_id: "{{ mp }}"
-      message: "{{ msg }}"`
 
 function formatLabel(key: string) {
   return key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
@@ -449,26 +413,6 @@ onMounted(loadConfig)
   cursor: not-allowed;
 }
 
-.ha-tts-docs {
-  margin-top: 1.5rem;
-  padding: 1rem 1.25rem;
-  background: #f5f5f5;
-  border-radius: 8px;
-  border: 1px solid #e0e0e0;
-}
-.ha-tts-docs summary { cursor: pointer; font-weight: 600; color: #555; }
-.ha-automation-yaml {
-  margin: 0.75rem 0;
-  padding: 1rem;
-  background: #1e1e1e;
-  color: #d4d4d4;
-  border-radius: 6px;
-  font-size: 0.75rem;
-  line-height: 1.5;
-  overflow-x: auto;
-  white-space: pre-wrap;
-}
-
 .ha-message {
   margin-top: 1rem;
   padding: 0.75rem 1rem;
@@ -479,4 +423,9 @@ onMounted(loadConfig)
 .ha-message.error { background: #ffebee; color: #c62828; }
 
 .ha-input-mono { font-family: ui-monospace, monospace; }
+
+.tts-card {
+  flex: 1;
+  min-height: 400px;
+}
 </style>

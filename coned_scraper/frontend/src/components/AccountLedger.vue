@@ -46,8 +46,8 @@
 
     <!-- Ledger Content -->
     <div v-else class="ha-ledger">
-      <!-- Account Summary Card (sticky wrapper covers gap, solid bg hides scrolling content) -->
-      <div class="ha-sticky-summary-wrap">
+      <!-- Account Summary (header area - stays above scroll) -->
+      <div class="ha-ledger-header">
       <div class="ha-card ha-card-summary">
         <div class="ha-card-header">
           <span class="ha-card-icon">💰</span>
@@ -91,7 +91,8 @@
       </div>
       </div>
 
-      <!-- Bill History Ledger -->
+      <!-- Bill History Ledger (scrollable) -->
+      <div class="ha-ledger-scroll">
       <div class="ha-card ha-card-ledger">
         <div class="ha-card-header">
           <span class="ha-card-icon">📋</span>
@@ -217,6 +218,7 @@
             <p class="ha-no-bills-desc">Run the scraper to populate bill history data.</p>
           </div>
         </div>
+      </div>
       </div>
     </div>
   </div>

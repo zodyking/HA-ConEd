@@ -13,41 +13,39 @@
 
       <div class="ha-section">
         <h4 class="ha-section-title">📄 Bill PDFs</h4>
-        <p class="ha-pdf-desc">Add a PDF for each billing period. Paste the ConEd link, select the period, then download. The app stores and hosts the PDF.</p>
+        <p class="ha-pdf-desc">Add a PDF for each billing period. Paste the ConEd link, then download. The app stores and hosts the PDF.</p>
 
-        <div class="ha-form-group">
-          <label for="bill-period" class="ha-form-label">Billing Period</label>
-          <select id="bill-period" v-model="selectedBillId" class="ha-form-input">
-            <option value="">Select a billing period...</option>
-            <option v-for="b in bills" :key="b.id" :value="b.id">
-              {{ b.month_range || b.bill_cycle_date }} {{ b.pdf_exists ? '✓' : '' }}
-            </option>
-          </select>
-          <div class="info-text">Run the scraper first if the list is empty</div>
+        <div v-if="!bills.length" class="info-text">Run the scraper first to load billing periods</div>
+        <div v-for="b in bills" :key="b.id" class="ha-pdf-cycle-block">
+          <div class="ha-pdf-cycle-header">
+            <span class="ha-pdf-cycle-period">{{ b.month_range || b.bill_cycle_date }}{{ b.pdf_exists ? ' ✓' : '' }}</span>
+            <span v-if="b.pdf_exists" class="ha-pdf-cycle-actions">
+              <a :href="`${getApiBase()}/bill-document/${b.id}`" target="_blank" rel="noopener" class="ha-btn ha-btn-blue">View</a>
+              <button type="button" class="ha-btn ha-btn-red" :disabled="pdfLoading" @click="handleDeletePdf(b.id)">Delete</button>
+            </span>
+          </div>
+          <div v-if="!b.pdf_exists" class="ha-pdf-cycle-form">
+            <input
+              v-model="pdfUrls[b.id]"
+              type="text"
+              class="ha-form-input ha-pdf-url-input"
+              placeholder="Paste ConEd PDF link here"
+            />
+            <button
+              type="button"
+              class="ha-button ha-button-primary ha-btn-green"
+              :disabled="pdfLoading || !(pdfUrls[b.id] || '').trim()"
+              @click="handleDownloadPdfForBill(b.id)"
+            >
+              {{ pdfLoading ? 'Downloading...' : '⬇️ Download & Save' }}
+            </button>
+          </div>
         </div>
-        <div class="ha-form-group">
-          <label class="ha-form-label">PDF Link</label>
-          <textarea v-model="pdfUrl" class="ha-form-input" placeholder="Paste the ConEd bill PDF link here" rows="3" />
-          <div class="info-text">Get this link by clicking View Current Bill on ConEd website</div>
-        </div>
-        <button type="button" class="ha-button ha-button-primary ha-btn-green" :disabled="pdfLoading || !pdfUrl.trim() || !selectedBillId" @click="handleDownloadPdf">
-          {{ pdfLoading ? 'Downloading...' : '⬇️ Download & Save PDF' }}
-        </button>
-        <div v-if="pdfMessage" :class="['ha-message', pdfMessage.type]">{{ pdfMessage.text }}</div>
 
         <div v-if="billsWithPdf.length" class="ha-pdf-actions-row">
           <button type="button" class="ha-btn ha-btn-purple" :disabled="pdfLoading" @click="handleSendMqtt">Send MQTT</button>
         </div>
-        <div v-if="billsWithPdf.length" class="ha-pdf-list">
-          <div class="ha-pdf-list-title">Stored PDFs</div>
-          <div v-for="b in billsWithPdf" :key="b.id" class="ha-pdf-list-row">
-            <span class="ha-pdf-period">{{ b.month_range || b.bill_cycle_date }}</span>
-            <span v-if="b.size_kb" class="ha-pdf-size">{{ b.size_kb }} KB</span>
-            <a :href="`${getApiBase()}/bill-document/${b.id}`" target="_blank" rel="noopener" class="ha-btn ha-btn-blue">View</a>
-            <button type="button" class="ha-btn ha-btn-red" :disabled="pdfLoading" @click="handleDeletePdf(b.id)">Delete</button>
-          </div>
-        </div>
-        <div v-if="bills.length && !billsWithPdf.length" class="ha-pdf-none">No PDFs stored yet. Add one above.</div>
+        <div v-if="pdfMessage" :class="['ha-message', pdfMessage.type]">{{ pdfMessage.text }}</div>
       </div>
 
       <div class="ha-section">
@@ -93,12 +91,11 @@ const newPassword = ref('')
 const confirmPassword = ref('')
 const isLoading = ref(false)
 const message = ref<{ type: 'success' | 'error'; text: string } | null>(null)
-const pdfUrl = ref('')
+const pdfUrls = ref<Record<number, string>>({})
 const pdfLoading = ref(false)
 const pdfMessage = ref<{ type: 'success' | 'error'; text: string } | null>(null)
 const appBaseUrl = ref('')
 const bills = ref<Bill[]>([])
-const selectedBillId = ref<number | ''>('')
 const billStatuses = ref<Record<number, { size_kb: number }>>({})
 
 const billsWithPdf = computed(() =>
@@ -114,14 +111,21 @@ async function loadBills() {
     if (res.ok) {
       const data = await res.json()
       bills.value = data.bills || []
-      if (bills.value.length && !selectedBillId.value) {
-        selectedBillId.value = bills.value[0].id
+      const next: Record<number, string> = {}
+      for (const b of bills.value) {
+        next[b.id] = pdfUrls.value[b.id] ?? ''
       }
+      pdfUrls.value = next
     } else {
       const billsRes = await fetch(`${getApiBase()}/bills`)
       if (billsRes.ok) {
         const data = await billsRes.json()
         bills.value = (data.bills || []).map((b: Bill) => ({ ...b, pdf_exists: false }))
+        const next: Record<number, string> = {}
+        for (const b of bills.value) {
+          next[b.id] = pdfUrls.value[b.id] ?? ''
+        }
+        pdfUrls.value = next
       }
     }
   } catch { /* ignore */ }
@@ -141,10 +145,10 @@ async function loadBillStatuses() {
   billStatuses.value = next
 }
 
-async function handleDownloadPdf() {
-  const billId = selectedBillId.value
-  if (!billId || !pdfUrl.value.trim()) {
-    pdfMessage.value = { type: 'error', text: 'Select a period and enter a PDF URL' }
+async function handleDownloadPdfForBill(billId: number) {
+  const url = (pdfUrls.value[billId] || '').trim()
+  if (!url) {
+    pdfMessage.value = { type: 'error', text: 'Enter a PDF URL' }
     return
   }
   pdfLoading.value = true
@@ -153,12 +157,12 @@ async function handleDownloadPdf() {
     const res = await fetch(`${getApiBase()}/bills/${billId}/pdf/download`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: pdfUrl.value.trim() }),
+      body: JSON.stringify({ url }),
     })
     const data = await res.json().catch(() => ({}))
     if (res.ok) {
       pdfMessage.value = { type: 'success', text: data.message || 'PDF saved' }
-      pdfUrl.value = ''
+      pdfUrls.value = { ...pdfUrls.value, [billId]: '' }
       await loadBills()
       await loadBillStatuses()
     } else {
@@ -279,6 +283,12 @@ onUnmounted(() => clearInterval(timeInterval))
 .ha-time-display { padding: 0.75rem 1.25rem; background: #1a1a2e; border-radius: 8px; font-family: monospace; font-size: 1.5rem; font-weight: bold; color: #4ade80; min-width: 150px; text-align: center; margin: 0.5rem 0; }
 .ha-section-title { font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem; color: #333; }
 .ha-pdf-desc { font-size: 0.9rem; color: #555; margin-bottom: 1rem; line-height: 1.5; }
+.ha-pdf-cycle-block { margin-bottom: 1rem; padding: 1rem; background: #f9f9f9; border-radius: 8px; border: 1px solid #e0e0e0; }
+.ha-pdf-cycle-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; flex-wrap: wrap; gap: 0.5rem; }
+.ha-pdf-cycle-period { font-weight: 600; color: #333; }
+.ha-pdf-cycle-actions { display: flex; gap: 0.5rem; }
+.ha-pdf-cycle-form { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+.ha-pdf-url-input { flex: 1; min-width: 200px; }
 .ha-pdf-actions-row { margin-top: 0.75rem; }
 .ha-btn-purple { background: #9c27b0; }
 .ha-pdf-list { margin-top: 1.25rem; padding: 1rem; background: #f5f5f5; border-radius: 8px; }
