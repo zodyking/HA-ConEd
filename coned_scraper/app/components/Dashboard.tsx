@@ -275,7 +275,7 @@ export default function Dashboard() {
             >
               {isRunning ? (
                 <>
-                  <img src="/images/ajax-loader.gif" alt="Loading" className="ha-loader-inline" />
+                  <img src="images/ajax-loader.gif" alt="Loading" className="ha-loader-inline" />
                   Running...
                 </>
               ) : (
@@ -330,7 +330,7 @@ export default function Dashboard() {
                 {isRunning ? (
                   <>
                     <img 
-                      src="/images/ajax-loader.gif" 
+                      src="images/ajax-loader.gif" 
                       alt="Loading" 
                       style={{ width: '40px', height: '40px', marginBottom: '1rem' }} 
                     />

@@ -13,6 +13,7 @@ RUN chmod -R +x node_modules/.bin 2>/dev/null || true
 
 ENV DOCKER_BUILD=true
 ENV API_BASE_URL=http://127.0.0.1:8000
+ENV NEXT_PUBLIC_API_URL=api
 RUN npm run build
 
 # Stage 2: Addon image with Node + Python + both apps (Debian base for Playwright/glibc)
@@ -42,6 +43,7 @@ COPY python-service/ /app/python-service/
 COPY --from=nextjs-builder /app/.next/standalone ./web/
 COPY --from=nextjs-builder /app/.next/static ./web/.next/static
 COPY --from=nextjs-builder /app/public ./web/public
+COPY app/server-ingress.js ./web/
 
 # Copy root filesystem (S6 overlay)
 COPY rootfs /

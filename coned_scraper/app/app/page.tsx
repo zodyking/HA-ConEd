@@ -26,7 +26,7 @@ export default function Home() {
         <div className="ha-header-content">
           <div className="ha-logo-container">
             <img 
-              src="/images/logo.svg" 
+              src="images/logo.svg" 
               alt="ConEd Logo" 
               width={100}
               height={20}

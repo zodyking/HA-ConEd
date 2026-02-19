@@ -365,7 +365,7 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
         minHeight: '400px'
       }}>
         <img 
-          src="/images/ajax-loader.gif" 
+          src="images/ajax-loader.gif" 
           alt="Loading" 
           style={{ width: '64px', height: '64px', marginBottom: '1.5rem' }} 
         />
@@ -396,7 +396,7 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
         minHeight: '400px'
       }}>
         <img 
-          src="/images/ajax-loader.gif" 
+          src="images/ajax-loader.gif" 
           alt="Setup Required" 
           style={{ width: '80px', height: '80px', marginBottom: '2rem', opacity: 0.8 }} 
         />
@@ -788,7 +788,7 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
                 minHeight: '300px'
               }}>
                 <img 
-                  src="/images/ajax-loader.gif" 
+                  src="images/ajax-loader.gif" 
                   alt="Loading" 
                   style={{ width: '120px', height: '120px', marginBottom: '2rem' }} 
                 />

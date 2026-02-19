@@ -1,6 +1,8 @@
 import type { NextConfig } from 'next'
 import path from 'path'
 
+const isAddonBuild = process.env.DOCKER_BUILD === 'true'
+
 const nextConfig: NextConfig = {
   compress: true,
   poweredByHeader: false,
@@ -15,6 +17,11 @@ const nextConfig: NextConfig = {
   },
 
   output: 'standalone',
+
+  // Home Assistant ingress: use relative paths so assets/API work under /api/hassio_ingress/XXX/
+  ...(isAddonBuild && {
+    assetPrefix: '.',
+  }),
 
   // IMPORTANT: tracing root should be the folder that contains node_modules at build time
   // In Docker, this will be /app (the WORKDIR), so we use process.cwd() or relative path

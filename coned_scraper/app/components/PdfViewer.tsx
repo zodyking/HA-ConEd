@@ -113,7 +113,7 @@ export default function PdfViewer({ url, onClose }: PdfViewerProps) {
         {loading && (
           <div style={{ color: 'white', padding: '2rem', textAlign: 'center' }}>
             <div style={{ marginBottom: '1rem' }}>Loading PDF...</div>
-            <img src="/images/ajax-loader.gif" alt="Loading" style={{ width: '40px' }} />
+            <img src="images/ajax-loader.gif" alt="Loading" style={{ width: '40px' }} />
           </div>
         )}
         
