@@ -48,5 +48,5 @@ This addon uses Home Assistant Ingress. The web interface is accessed through th
 
 ## Support
 
-- [GitHub Repository](https://github.com/zodyking/conedison)
+- [GitHub Repository](https://github.com/zodyking/HA-ConEd)
 - [Home Assistant Community Forum](https://community.home-assistant.io)

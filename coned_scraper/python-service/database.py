@@ -175,8 +175,21 @@ def init_database():
         )
     ''')
     
+    # Bill documents - PDF per billing period
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS bill_documents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            bill_id INTEGER NOT NULL UNIQUE,
+            pdf_path TEXT NOT NULL,
+            source_url TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (bill_id) REFERENCES bills(id) ON DELETE CASCADE
+        )
+    ''')
+    
     # Create indexes for performance
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_bills_cycle_date ON bills(bill_cycle_date)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_bill_documents_bill_id ON bill_documents(bill_id)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_payments_date ON payments(payment_date)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_payments_bill_id ON payments(bill_id)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_payments_first_scraped ON payments(first_scraped_at)')
@@ -300,6 +313,98 @@ def get_bill_by_id(bill_id: int) -> Optional[Dict[str, Any]]:
     conn.close()
     
     return dict(row) if row else None
+
+# ==========================================
+# BILL DOCUMENTS (PDF per billing period)
+# ==========================================
+
+def upsert_bill_document(bill_id: int, pdf_path: str, source_url: Optional[str] = None) -> bool:
+    """Store or update PDF path for a bill"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    now = utc_now_iso()
+    try:
+        cursor.execute('''
+            INSERT INTO bill_documents (bill_id, pdf_path, source_url, created_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(bill_id) DO UPDATE SET
+                pdf_path = excluded.pdf_path,
+                source_url = COALESCE(excluded.source_url, source_url),
+                created_at = excluded.created_at
+        ''', (bill_id, pdf_path, source_url, now))
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+def get_bill_document(bill_id: int) -> Optional[Dict[str, Any]]:
+    """Get bill document record by bill_id"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT * FROM bill_documents WHERE bill_id = ?', (bill_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+def get_all_bill_documents_with_periods() -> List[Dict[str, Any]]:
+    """Get all bill documents with month_range for MQTT attributes. Caller builds hosted URLs."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT bd.bill_id, bd.pdf_path, b.month_range
+        FROM bill_documents bd
+        JOIN bills b ON bd.bill_id = b.id
+        ORDER BY b.bill_cycle_date DESC
+    ''')
+    rows = cursor.fetchall()
+    conn.close()
+    return [{"bill_id": r["bill_id"], "pdf_path": r["pdf_path"], "month_range": r["month_range"] or f"Bill {r['bill_id']}"} for r in rows]
+
+def get_latest_bill_id_with_document() -> Optional[int]:
+    """Get bill_id of the most recent bill that has a PDF"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT bd.bill_id FROM bill_documents bd
+        JOIN bills b ON bd.bill_id = b.id
+        ORDER BY b.bill_cycle_date DESC LIMIT 1
+    ''')
+    row = cursor.fetchone()
+    conn.close()
+    return row["bill_id"] if row else None
+
+def delete_bill_document(bill_id: int) -> bool:
+    """Remove bill document record"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('DELETE FROM bill_documents WHERE bill_id = ?', (bill_id,))
+    deleted = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return deleted
+
+def migrate_legacy_pdf() -> bool:
+    """Migrate legacy latest_bill.pdf to bill_documents. Returns True if migrated."""
+    legacy_pdf = DATA_DIR / "latest_bill.pdf"
+    if not legacy_pdf.exists():
+        return False
+    try:
+        bills = get_all_bills(limit=1)
+        if not bills:
+            return False
+        bill_id = bills[0]['id']
+        bills_dir = DATA_DIR / "bills"
+        bills_dir.mkdir(exist_ok=True)
+        new_path = bills_dir / f"bill_{bill_id}.pdf"
+        import shutil
+        shutil.copy2(legacy_pdf, new_path)
+        upsert_bill_document(bill_id, f"bills/bill_{bill_id}.pdf")
+        legacy_pdf.unlink()
+        logging.getLogger(__name__).info(f"Migrated legacy PDF to bill {bill_id}")
+        return True
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"Legacy PDF migration skipped: {e}")
+        return False
 
 # ==========================================
 # PAYMENT FUNCTIONS
@@ -1274,9 +1379,11 @@ def get_ledger_data() -> Dict[str, Any]:
     # Sort bills by date (newest first)
     bills = sort_bills_by_date(bills, desc=True)
     
-    # Get payments grouped by bill
-    # Order: manual_order first (if set), then payment_date DESC, then first_scraped_at ASC
+    cursor.execute('SELECT bill_id FROM bill_documents')
+    bills_with_pdf = {row['bill_id'] for row in cursor.fetchall()}
+    
     for bill in bills:
+        bill['pdf_exists'] = bill['id'] in bills_with_pdf
         cursor.execute('''
             SELECT p.*, u.name as payee_name FROM payments p
             LEFT JOIN payee_users u ON p.payee_user_id = u.id
@@ -1523,3 +1630,4 @@ def get_scrape_history(limit: int = 50) -> List[Dict[str, Any]]:
 
 # Initialize database on import
 init_database()
+migrate_legacy_pdf()  # Migrate legacy latest_bill.pdf to bill_documents

@@ -235,6 +235,8 @@ class MQTTClient:
                     "unique_id": "coned_bill_pdf_url",
                     "state_topic": f"{bt}/bill_pdf_url",
                     "value_template": "{{ value }}",
+                    "json_attributes_topic": f"{bt}/bill_pdf_url_json",
+                    "json_attributes_template": "{{ value_json.data | tojson }}",
                     "device": device,
                 },
             },
@@ -395,16 +397,36 @@ class MQTTClient:
         await self.publish("last_payment", numeric_value, json_payload)
     
     async def publish_bill_pdf_url(self, pdf_url: str, timestamp: Optional[str] = None):
-        """Publish bill PDF URL for Home Assistant"""
+        """Publish single bill PDF URL (backward compat)"""
+        json_payload = {
+            "event_type": "bill_pdf_url",
+            "timestamp": timestamp or utc_now_iso(),
+            "data": {"pdf_url": pdf_url, "all_bills": {}, "timestamp": timestamp or utc_now_iso()}
+        }
+        await self.publish("bill_pdf_url", pdf_url, json_payload)
+
+    async def publish_bill_pdf_url_all(self, base_url: str, timestamp: Optional[str] = None):
+        """Publish bill PDF URLs: state=latest, attributes=all period links"""
+        from database import get_all_bill_documents_with_periods, get_latest_bill_id_with_document
+        docs = get_all_bill_documents_with_periods()
+        latest_id = get_latest_bill_id_with_document()
+        latest_url = f"{base_url.rstrip('/')}/api/bill-document/{latest_id}" if latest_id else ""
+        all_bills = {}
+        for d in docs:
+            url = f"{base_url.rstrip('/')}/api/bill-document/{d['bill_id']}"
+            key = d.get("month_range") or f"bill_{d['bill_id']}"
+            all_bills[key] = url
         json_payload = {
             "event_type": "bill_pdf_url",
             "timestamp": timestamp or utc_now_iso(),
             "data": {
-                "pdf_url": pdf_url,
+                "pdf_url": latest_url,
+                "latest": latest_url,
+                "all_bills": all_bills,
                 "timestamp": timestamp or utc_now_iso()
             }
         }
-        await self.publish("bill_pdf_url", pdf_url, json_payload)
+        await self.publish("bill_pdf_url", latest_url or "unknown", json_payload)
 
     async def publish_payee_summary(self, payee_data: list, bill_info: Dict[str, Any], timestamp: Optional[str] = None):
         """
