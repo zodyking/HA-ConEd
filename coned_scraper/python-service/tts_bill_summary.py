@@ -21,6 +21,7 @@ DEFAULT_BILL_SUMMARY_CONFIG = {
     "end_hour": 10,
     "frequency_hours": 1,  # Play every N hours
     "minute_of_hour": 0,   # Play at minute X (0-59)
+    "sensor_current_usage": "",   # "You used X so far this cycle"
     "sensor_avg_daily": "",
     "sensor_estimate_min": "",
     "sensor_estimate_max": "",
@@ -132,12 +133,17 @@ async def build_bill_summary_message(bill_summary_config: dict, tts_config: dict
     # HA sensors
     config = bill_summary_config
     sensor_ids = [
+        config.get("sensor_current_usage"),
         config.get("sensor_avg_daily"),
         config.get("sensor_estimate_min"),
         config.get("sensor_estimate_max"),
     ]
     sensor_ids = [s for s in sensor_ids if s and isinstance(s, str)]
     sensor_vals = await _get_ha_sensor_values(sensor_ids) if sensor_ids else {}
+
+    current_usage = "unknown"
+    if config.get("sensor_current_usage"):
+        current_usage = sensor_vals.get(config["sensor_current_usage"], "unknown")
 
     avg_daily = "unknown"
     if config.get("sensor_avg_daily"):
@@ -154,6 +160,8 @@ async def build_bill_summary_message(bill_summary_config: dict, tts_config: dict
     parts = [
         f"Your latest Con Edison bill was {bill_str} and your current account balance is {balance_str}."
     ]
+    if config.get("sensor_current_usage"):
+        parts.append(f" You have used {current_usage} so far this billing cycle.")
     parts.append(_bill_message(bill_amt))
     parts.append(
         f" Your average daily power consumption is {avg_daily}. "

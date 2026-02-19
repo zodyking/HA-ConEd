@@ -122,6 +122,14 @@
                         <label class="ha-form-label">Volume ({{ Math.round((p.volume ?? 0.7) * 100) }}%)</label>
                         <input v-model.number="p.volume" type="range" class="ha-volume-slider" min="0" max="1" step="0.05" />
                       </div>
+                      <button
+                        type="button"
+                        class="ha-button ha-btn-test ha-btn-test-sm"
+                        :disabled="!ttsEnabled || !getTtsMpEntityId(p) || !effectiveTtsEngine || ttsTestLoadingByIdx[idx]"
+                        @click="handleTtsTestForPlayer(idx)"
+                      >
+                        {{ ttsTestLoadingByIdx[idx] ? 'Sending...' : 'Test TTS' }}
+                      </button>
                     </div>
                     <button type="button" class="ha-button ha-button-secondary" @click="addTtsMediaPlayer">+ Add Media Player</button>
                   </div>
@@ -246,17 +254,24 @@
                           <input v-model.number="billSummaryMinuteOfHour" type="number" class="ha-form-input" min="0" max="59" />
                         </div>
                       </div>
+                      <datalist id="ha-sensor-datalist">
+                        <option v-for="e in haSensorEntities" :key="e" :value="e" />
+                      </datalist>
                       <div class="ha-form-group">
-                        <label class="ha-form-label">Avg daily usage sensor (HA entity)</label>
-                        <input v-model="billSummarySensorAvg" type="text" class="ha-form-input" placeholder="sensor.daily_energy_usage" />
+                        <label class="ha-form-label">Current usage sensor (used X so far this cycle)</label>
+                        <input v-model="billSummarySensorCurrent" type="text" class="ha-form-input" list="ha-sensor-datalist" placeholder="sensor.usage_this_cycle" autocomplete="off" />
+                      </div>
+                      <div class="ha-form-group">
+                        <label class="ha-form-label">Avg daily usage sensor</label>
+                        <input v-model="billSummarySensorAvg" type="text" class="ha-form-input" list="ha-sensor-datalist" placeholder="sensor.daily_energy_usage" autocomplete="off" />
                       </div>
                       <div class="ha-form-group">
                         <label class="ha-form-label">Bill estimate sensor (min)</label>
-                        <input v-model="billSummarySensorEstMin" type="text" class="ha-form-input" placeholder="sensor.bill_estimate_low" />
+                        <input v-model="billSummarySensorEstMin" type="text" class="ha-form-input" list="ha-sensor-datalist" placeholder="sensor.bill_estimate_low" autocomplete="off" />
                       </div>
                       <div class="ha-form-group">
                         <label class="ha-form-label">Bill estimate sensor (max)</label>
-                        <input v-model="billSummarySensorEstMax" type="text" class="ha-form-input" placeholder="sensor.bill_estimate_high" />
+                        <input v-model="billSummarySensorEstMax" type="text" class="ha-form-input" list="ha-sensor-datalist" placeholder="sensor.bill_estimate_high" autocomplete="off" />
                       </div>
                       <div class="ha-tts-buttons ha-tts-buttons-sm">
                         <button type="submit" class="ha-button ha-button-primary" :disabled="billSummarySaving">{{ billSummarySaving ? 'Saving...' : 'Save Bill Summary Config' }}</button>
@@ -269,9 +284,7 @@
 
                 <div class="ha-tts-buttons">
                   <button type="submit" class="ha-button ha-button-primary" :disabled="ttsSaving">{{ ttsSaving ? 'Saving...' : 'Save TTS Config' }}</button>
-                  <button type="button" class="ha-button ha-btn-test" :disabled="!ttsEnabled || !ttsMediaPlayersListValid.length || !effectiveTtsEngine || ttsTestLoading" @click="handleTtsTest">{{ ttsTestLoading ? 'Sending...' : 'Test TTS' }}</button>
                 </div>
-                <p class="ha-tts-test-hint">Test TTS plays: <strong>Con Edison.</strong></p>
               </form>
               <div v-if="ttsMessage" :class="['ha-message', ttsMessage.type]">{{ ttsMessage.text }}</div>
             </div>
@@ -314,6 +327,7 @@ const passwordError = ref('')
 const ttsEnabled = ref(false)
 const ttsMediaPlayersList = ref<Array<{ entity_id: string; entity_id_custom: string; volume: number }>>([{ entity_id: '', entity_id_custom: '', volume: 0.7 }])
 const ttsMediaPlayersListOptions = ref<string[]>([])
+const haSensorEntities = ref<string[]>([])
 const ttsEntityStates = ref<Record<string, string>>({})
 const ttsEngine = ref('')
 const ttsEngineCustom = ref('')
@@ -324,7 +338,7 @@ const ttsWaitForIdle = ref(true)
 const ttsMsgNewBill = ref('Your new Con Edison bill for {month_range} is now available.')
 const ttsMsgPayment = ref('Good news — your payment of {amount} has been received. Your account balance is now {balance}.')
 const ttsSaving = ref(false)
-const ttsTestLoading = ref(false)
+const ttsTestLoadingByIdx = ref<Record<number, boolean>>({})
 const ttsMessage = ref<{ type: 'success' | 'error'; text: string } | null>(null)
 let ttsStatePollTimer: ReturnType<typeof setInterval> | null = null
 
@@ -339,6 +353,7 @@ const billSummaryEndHour12 = ref(10)
 const billSummaryEndAmPm = ref<'am' | 'pm'>('am')
 const billSummaryFrequencyHours = ref(1)
 const billSummaryMinuteOfHour = ref(0)
+const billSummarySensorCurrent = ref('')
 const billSummarySensorAvg = ref('')
 const billSummarySensorEstMin = ref('')
 const billSummarySensorEstMax = ref('')
@@ -496,10 +511,11 @@ function cancelLock() {
 
 async function loadTtsConfig() {
   try {
-    const [configRes, playersRes, entitiesRes] = await Promise.all([
+    const [configRes, playersRes, entitiesRes, sensorsRes] = await Promise.all([
       fetch(`${getApiBase()}/tts-config`),
       fetch(`${getApiBase()}/ha-media-players`),
       fetch(`${getApiBase()}/ha-tts-entities`),
+      fetch(`${getApiBase()}/ha-sensor-entities`),
     ])
     if (playersRes.ok) {
       const p = await playersRes.json()
@@ -508,6 +524,10 @@ async function loadTtsConfig() {
     if (entitiesRes.ok) {
       const e = await entitiesRes.json()
       ttsEntities.value = e.tts_entities ?? []
+    }
+    if (sensorsRes.ok) {
+      const s = await sensorsRes.json()
+      haSensorEntities.value = s.entities ?? []
     }
     if (configRes.ok) {
       const d = await configRes.json()
@@ -597,6 +617,7 @@ async function loadBillSummaryConfig() {
       billSummaryEndAmPm.value = end12.ampm
       billSummaryFrequencyHours.value = typeof d.frequency_hours === 'number' ? Math.max(1, d.frequency_hours) : 1
       billSummaryMinuteOfHour.value = typeof d.minute_of_hour === 'number' ? Math.max(0, Math.min(59, d.minute_of_hour)) : 0
+      billSummarySensorCurrent.value = (d.sensor_current_usage ?? '').trim()
       billSummarySensorAvg.value = (d.sensor_avg_daily ?? '').trim()
       billSummarySensorEstMin.value = (d.sensor_estimate_min ?? '').trim()
       billSummarySensorEstMax.value = (d.sensor_estimate_max ?? '').trim()
@@ -617,6 +638,7 @@ async function handleBillSummarySave() {
         end_hour: hour12To24(billSummaryEndHour12.value, billSummaryEndAmPm.value),
         frequency_hours: Math.max(1, Math.min(24, billSummaryFrequencyHours.value)),
         minute_of_hour: Math.max(0, Math.min(59, billSummaryMinuteOfHour.value)),
+        sensor_current_usage: billSummarySensorCurrent.value.trim(),
         sensor_avg_daily: billSummarySensorAvg.value.trim(),
         sensor_estimate_min: billSummarySensorEstMin.value.trim(),
         sensor_estimate_max: billSummarySensorEstMax.value.trim(),
@@ -639,6 +661,7 @@ async function handleBillSummaryPreview() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        sensor_current_usage: billSummarySensorCurrent.value.trim(),
         sensor_avg_daily: billSummarySensorAvg.value.trim(),
         sensor_estimate_min: billSummarySensorEstMin.value.trim(),
         sensor_estimate_max: billSummarySensorEstMax.value.trim(),
@@ -706,12 +729,18 @@ async function handleTtsSave() {
   }
 }
 
-async function handleTtsTest() {
-  if (!ttsEnabled.value || !ttsMediaPlayersListValid.value.length) return
-  ttsTestLoading.value = true
+async function handleTtsTestForPlayer(idx: number) {
+  const p = ttsMediaPlayersList.value[idx]
+  const entityId = getTtsMpEntityId(p)
+  if (!ttsEnabled.value || !entityId || !effectiveTtsEngine.value) return
+  ttsTestLoadingByIdx.value = { ...ttsTestLoadingByIdx.value, [idx]: true }
   ttsMessage.value = null
   try {
-    const res = await fetch(`${getApiBase()}/tts/test`, { method: 'POST' })
+    const res = await fetch(`${getApiBase()}/tts/test`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ entity_id: entityId, volume: p.volume ?? 0.7 }),
+    })
     const data = await res.json().catch(() => ({}))
     ttsMessage.value = res.ok ? { type: 'success', text: data.message || 'Sent' } : { type: 'error', text: data.detail || 'Failed' }
     if (res.ok) {
@@ -723,7 +752,7 @@ async function handleTtsTest() {
   } catch {
     ttsMessage.value = { type: 'error', text: 'Failed' }
   } finally {
-    ttsTestLoading.value = false
+    ttsTestLoadingByIdx.value = { ...ttsTestLoadingByIdx.value, [idx]: false }
   }
 }
 </script>
@@ -882,6 +911,7 @@ async function handleTtsTest() {
 .ha-tts-test-hint { font-size: 0.8rem; color: #666; margin-top: 0.75rem; }
 .ha-btn-test { background: #ff9800 !important; color: white !important; }
 .ha-btn-test:disabled { opacity: 0.6; cursor: not-allowed; }
+.ha-btn-test-sm { font-size: 0.85rem; padding: 0.4rem 0.75rem; margin-top: 0.5rem; }
 .ha-message { margin-top: 1rem; padding: 0.75rem; border-radius: 4px; }
 .ha-message.success { background: #e8f5e9; color: #2e7d32; }
 .ha-message.error { background: #ffebee; color: #c62828; }

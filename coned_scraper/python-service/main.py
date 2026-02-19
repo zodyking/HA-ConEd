@@ -1931,6 +1931,35 @@ async def get_ha_entity_states(entity_ids: str = ""):
         return {}
 
 
+@app.get("/api/ha-sensor-entities")
+async def get_ha_sensor_entities():
+    """Get sensor/helper entity IDs from HA for autocomplete (sensor.*, input_number.*, number.*)."""
+    token = os.environ.get("SUPERVISOR_TOKEN")
+    if not token:
+        return {"entities": []}
+    prefixes = ("sensor.", "input_number.", "number.")
+    try:
+        import aiohttp
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                "http://supervisor/core/api/states",
+                headers={"Authorization": f"Bearer {token}"},
+            ) as resp:
+                if resp.status != 200:
+                    return {"entities": []}
+                data = await resp.json()
+                entities = [
+                    s["entity_id"]
+                    for s in (data or [])
+                    if isinstance(s, dict)
+                    and any(s.get("entity_id", "").startswith(p) for p in prefixes)
+                ]
+                return {"entities": sorted(entities)}
+    except Exception as e:
+        add_log("debug", f"Could not get HA sensor entities: {e}")
+        return {"entities": []}
+
+
 @app.get("/api/ha-media-players")
 async def get_ha_media_players():
     """Get list of media_player entity IDs from Home Assistant (addon only)."""
@@ -2007,6 +2036,7 @@ class TTSBillSummaryConfigModel(BaseModel):
     end_hour: Optional[int] = None
     frequency_hours: Optional[int] = None
     minute_of_hour: Optional[int] = None
+    sensor_current_usage: Optional[str] = None
     sensor_avg_daily: Optional[str] = None
     sensor_estimate_min: Optional[str] = None
     sensor_estimate_max: Optional[str] = None
@@ -2028,6 +2058,7 @@ async def save_tts_bill_summary_config_endpoint(config: TTSBillSummaryConfigMode
 
 
 class BillSummaryPreviewRequest(BaseModel):
+    sensor_current_usage: Optional[str] = None
     sensor_avg_daily: Optional[str] = None
     sensor_estimate_min: Optional[str] = None
     sensor_estimate_max: Optional[str] = None
@@ -2038,6 +2069,8 @@ async def preview_bill_summary_tts(body: Optional[BillSummaryPreviewRequest] = N
     """Build and return the bill summary message (for testing). Uses saved config, sensors overridden by body if provided."""
     cfg = load_tts_bill_summary_config()
     if body:
+        if body.sensor_current_usage is not None:
+            cfg["sensor_current_usage"] = body.sensor_current_usage
         if body.sensor_avg_daily is not None:
             cfg["sensor_avg_daily"] = body.sensor_avg_daily
         if body.sensor_estimate_min is not None:
@@ -2063,19 +2096,33 @@ def build_tts_message(config: dict, key: str, **kwargs) -> str:
     return f"{prefix}, {msg}".strip()
 
 
+class TtsTestRequest(BaseModel):
+    entity_id: Optional[str] = None  # If set, test only this media player
+    volume: Optional[float] = None  # Optional override; from config if not provided
+
+
 @app.post("/api/tts/test")
-async def test_tts():
-    """Queue test TTS 'Con Edison.' to all configured media players."""
+async def test_tts(body: Optional[TtsTestRequest] = None):
+    """Queue test TTS 'Con Edison.' to specified media player, or all if entity_id not given."""
     config = load_tts_config()
     if not config.get("enabled"):
         raise HTTPException(status_code=400, detail="TTS is not enabled")
-    media_players = config.get("media_players") or []
-    media_players = [p for p in media_players if isinstance(p, dict) and (p.get("entity_id") or "").strip()]
-    if not media_players:
-        raise HTTPException(status_code=400, detail="No media players configured")
     tts_engine = (config.get("tts_engine") or "").strip()
     if not tts_engine:
         raise HTTPException(status_code=400, detail="TTS engine (target entity) not configured")
+
+    all_players = config.get("media_players") or []
+    all_players = [p for p in all_players if isinstance(p, dict) and (p.get("entity_id") or "").strip()]
+
+    entity_id = (body.entity_id or "").strip() if body else ""
+    if entity_id:
+        player = next((p for p in all_players if (p.get("entity_id") or "").strip() == entity_id), None)
+        vol = body.volume if body and body.volume is not None else (player.get("volume", 0.7) if player else 0.7)
+        media_players = [{"entity_id": entity_id, "volume": max(0.0, min(1.0, float(vol)))}]
+    else:
+        if not all_players:
+            raise HTTPException(status_code=400, detail="No media players configured")
+        media_players = all_players
 
     from tts_queue import enqueue_tts
     await enqueue_tts(
