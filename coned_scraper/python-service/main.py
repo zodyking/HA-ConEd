@@ -2036,6 +2036,7 @@ class TTSBillSummaryConfigModel(BaseModel):
     end_hour: Optional[int] = None
     frequency_hours: Optional[int] = None
     minute_of_hour: Optional[int] = None
+    timezone_offset_hours: Optional[int] = None  # Local = UTC + offset (e.g. -5 for EST)
     sensor_current_usage: Optional[str] = None
     sensor_avg_daily: Optional[str] = None
     sensor_estimate_min: Optional[str] = None
@@ -2045,7 +2046,13 @@ class TTSBillSummaryConfigModel(BaseModel):
 
 @app.get("/api/tts-bill-summary-config")
 async def get_tts_bill_summary_config():
-    return load_tts_bill_summary_config()
+    from tts_bill_summary import _get_ha_timezone
+    cfg = load_tts_bill_summary_config()
+    ha_tz = await _get_ha_timezone()
+    if ha_tz:
+        cfg = dict(cfg)
+        cfg["ha_timezone"] = ha_tz
+    return cfg
 
 
 @app.post("/api/tts-bill-summary-config")
@@ -2085,6 +2092,38 @@ async def preview_bill_summary_tts(body: Optional[BillSummaryPreviewRequest] = N
     from tts_bill_summary import build_bill_summary_message
     msg = await build_bill_summary_message(cfg, tts_cfg)
     return {"message": msg or ""}
+
+
+@app.post("/api/tts/bill-summary/test")
+async def test_bill_summary_tts():
+    """Build bill summary message and queue it to TTS (same as scheduled trigger)."""
+    tts_cfg = load_tts_config()
+    if not tts_cfg.get("enabled"):
+        raise HTTPException(status_code=400, detail="TTS is not enabled")
+    tts_engine = (tts_cfg.get("tts_engine") or "").strip()
+    if not tts_engine:
+        raise HTTPException(status_code=400, detail="TTS engine not configured")
+    media_players = tts_cfg.get("media_players") or []
+    media_players = [p for p in media_players if isinstance(p, dict) and (p.get("entity_id") or "").strip()]
+    if not media_players:
+        raise HTTPException(status_code=400, detail="No media players configured")
+
+    cfg = load_tts_bill_summary_config()
+    from tts_bill_summary import build_bill_summary_message
+    msg = await build_bill_summary_message(cfg, tts_cfg)
+    if not msg:
+        raise HTTPException(status_code=400, detail="Could not build bill summary message")
+
+    from tts_queue import enqueue_tts
+    await enqueue_tts(
+        source="bill_summary_test",
+        message=msg,
+        media_players=media_players,
+        tts_engine=tts_engine,
+        cache=tts_cfg.get("cache", True),
+        wait_for_idle=tts_cfg.get("wait_for_idle", True),
+    )
+    return {"success": True, "message": "Bill summary TTS queued. Check TTS Logs for status."}
 
 
 def build_tts_message(config: dict, key: str, **kwargs) -> str:

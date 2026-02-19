@@ -6,8 +6,9 @@ import asyncio
 import json
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,7 @@ DEFAULT_BILL_SUMMARY_CONFIG = {
     "sensor_estimate_min": "",    # kWh - will convert to $ via kwh_cost
     "sensor_estimate_max": "",    # kWh - will convert to $ via kwh_cost
     "sensor_kwh_cost": "",        # $ per kWh (helper, e.g. input_number)
+    "timezone_offset_hours": 0,  # Local = UTC + this (e.g. -5 for EST)
     "last_played_slot": None,  # YYYY-MM-DD-HH to avoid replay same slot
 }
 
@@ -270,6 +272,56 @@ async def build_bill_summary_message(bill_summary_config: dict, tts_config: dict
     return f"{prefix} {msg}".strip()
 
 
+_cached_ha_timezone: Optional[str] = None
+_cached_ha_timezone_at: Optional[datetime] = None
+_CACHE_TTL_SECONDS = 3600  # 1 hour
+
+
+async def _get_ha_timezone() -> Optional[str]:
+    """Fetch timezone from Home Assistant /api/config. Cached for 1 hour."""
+    global _cached_ha_timezone, _cached_ha_timezone_at
+    now = datetime.now(timezone.utc)
+    if _cached_ha_timezone is not None and _cached_ha_timezone_at is not None:
+        if (now - _cached_ha_timezone_at).total_seconds() < _CACHE_TTL_SECONDS:
+            return _cached_ha_timezone
+    token = os.environ.get("SUPERVISOR_TOKEN")
+    if not token:
+        return None
+    try:
+        import aiohttp
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                "http://supervisor/core/api/config",
+                headers={"Authorization": f"Bearer {token}"},
+            ) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json()
+                tz = (data.get("time_zone") or "").strip()
+                if tz:
+                    # Validate it's a known zone
+                    try:
+                        ZoneInfo(tz)
+                        _cached_ha_timezone = tz
+                        _cached_ha_timezone_at = now
+                        return tz
+                    except Exception:
+                        pass
+    except Exception as e:
+        logger.debug(f"Could not get HA timezone: {e}")
+    return None
+
+
+async def _get_local_now(cfg: dict):
+    """Get current time in user's local zone. Uses HA timezone when available, else timezone_offset_hours."""
+    now_utc = datetime.now(timezone.utc)
+    tz_str = await _get_ha_timezone()
+    if tz_str:
+        return now_utc.astimezone(ZoneInfo(tz_str))
+    offset = int(cfg.get("timezone_offset_hours", 0))
+    return now_utc + timedelta(hours=offset)
+
+
 async def _maybe_trigger_bill_summary():
     """Check if we're in the time window and day, then queue bill summary TTS."""
     cfg = load_bill_summary_config()
@@ -288,7 +340,7 @@ async def _maybe_trigger_bill_summary():
     if not tts_engine:
         return
 
-    now = datetime.now(timezone.utc)
+    now = await _get_local_now(cfg)
     # Python: weekday() 0=Monday, 6=Sunday
     day = now.weekday()
     hour = now.hour
@@ -345,7 +397,7 @@ _bill_summary_task = None
 
 
 def start_bill_summary_scheduler():
-    """Start the bill summary check loop (runs every minute)."""
+    """Start the bill summary check loop. Polls every 30s for accurate trigger timing."""
     global _bill_summary_task
 
     async def _loop():
@@ -354,7 +406,7 @@ def start_bill_summary_scheduler():
                 await _maybe_trigger_bill_summary()
             except Exception as e:
                 logger.exception("Bill summary scheduler error")
-            await asyncio.sleep(60)
+            await asyncio.sleep(30)
 
     _bill_summary_task = asyncio.create_task(_loop())
     logger.info("TTS bill summary scheduler started")

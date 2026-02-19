@@ -253,6 +253,12 @@
                           <label class="ha-form-label">Minute of hour (0–59)</label>
                           <input v-model.number="billSummaryMinuteOfHour" type="number" class="ha-form-input" min="0" max="59" />
                         </div>
+                        <div>
+                          <label class="ha-form-label">Timezone</label>
+                          <div v-if="billSummaryHaTimezone" class="info-text" style="margin-bottom: 4px;">Using {{ billSummaryHaTimezone }} from Home Assistant</div>
+                          <input v-model.number="billSummaryTimezoneOffset" type="number" class="ha-form-input" min="-12" max="14" placeholder="-5" />
+                          <div class="info-text">Fallback when HA timezone unavailable. Set e.g. -5 for Eastern, -8 for Pacific.</div>
+                        </div>
                       </div>
                       <datalist id="ha-sensor-datalist">
                         <option v-for="e in haSensorEntities" :key="e" :value="e" />
@@ -281,6 +287,7 @@
                       <div class="ha-tts-buttons ha-tts-buttons-sm">
                         <button type="submit" class="ha-button ha-button-primary" :disabled="billSummarySaving">{{ billSummarySaving ? 'Saving...' : 'Save Bill Summary Config' }}</button>
                         <button type="button" class="ha-button ha-button-secondary" :disabled="billSummaryPreviewLoading" @click="handleBillSummaryPreview">{{ billSummaryPreviewLoading ? 'Loading...' : 'Preview Message' }}</button>
+                        <button type="button" class="ha-button ha-button-secondary" :disabled="billSummaryTestLoading" @click="handleBillSummaryTest">{{ billSummaryTestLoading ? 'Sending...' : 'Test Bill Summary TTS' }}</button>
                       </div>
                       <div v-if="billSummaryPreview" class="ha-tts-preview-box">{{ billSummaryPreview }}</div>
                     </form>
@@ -358,6 +365,8 @@ const billSummaryEndHour12 = ref(10)
 const billSummaryEndAmPm = ref<'am' | 'pm'>('am')
 const billSummaryFrequencyHours = ref(1)
 const billSummaryMinuteOfHour = ref(0)
+const billSummaryTimezoneOffset = ref(0)
+const billSummaryHaTimezone = ref('')
 const billSummarySensorCurrent = ref('')
 const billSummarySensorAvg = ref('')
 const billSummarySensorEstMin = ref('')
@@ -365,6 +374,7 @@ const billSummarySensorEstMax = ref('')
 const billSummarySensorKwhCost = ref('')
 const billSummarySaving = ref(false)
 const billSummaryPreviewLoading = ref(false)
+const billSummaryTestLoading = ref(false)
 const billSummaryPreview = ref('')
 const hour12Options = [12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
 const weekdays = [
@@ -623,6 +633,8 @@ async function loadBillSummaryConfig() {
       billSummaryEndAmPm.value = end12.ampm
       billSummaryFrequencyHours.value = typeof d.frequency_hours === 'number' ? Math.max(1, d.frequency_hours) : 1
       billSummaryMinuteOfHour.value = typeof d.minute_of_hour === 'number' ? Math.max(0, Math.min(59, d.minute_of_hour)) : 0
+      billSummaryTimezoneOffset.value = typeof d.timezone_offset_hours === 'number' ? d.timezone_offset_hours : 0
+      billSummaryHaTimezone.value = (d.ha_timezone ?? '').toString()
       billSummarySensorCurrent.value = (d.sensor_current_usage ?? '').trim()
       billSummarySensorAvg.value = (d.sensor_avg_daily ?? '').trim()
       billSummarySensorEstMin.value = (d.sensor_estimate_min ?? '').trim()
@@ -645,6 +657,7 @@ async function handleBillSummarySave() {
         end_hour: hour12To24(billSummaryEndHour12.value, billSummaryEndAmPm.value),
         frequency_hours: Math.max(1, Math.min(24, billSummaryFrequencyHours.value)),
         minute_of_hour: Math.max(0, Math.min(59, billSummaryMinuteOfHour.value)),
+        timezone_offset_hours: Math.max(-12, Math.min(14, billSummaryTimezoneOffset.value)),
         sensor_current_usage: billSummarySensorCurrent.value.trim(),
         sensor_avg_daily: billSummarySensorAvg.value.trim(),
         sensor_estimate_min: billSummarySensorEstMin.value.trim(),
@@ -682,6 +695,24 @@ async function handleBillSummaryPreview() {
     billSummaryPreview.value = 'Failed to load preview'
   } finally {
     billSummaryPreviewLoading.value = false
+  }
+}
+
+async function handleBillSummaryTest() {
+  billSummaryTestLoading.value = true
+  ttsMessage.value = null
+  try {
+    const res = await fetch(`${getApiBase()}/tts/bill-summary/test`, { method: 'POST' })
+    const d = await res.json().catch(() => ({}))
+    if (res.ok && d.success) {
+      ttsMessage.value = { type: 'success', text: d.message ?? 'Bill summary TTS queued.' }
+    } else {
+      ttsMessage.value = { type: 'error', text: d.detail ?? d.message ?? 'Failed to queue TTS.' }
+    }
+  } catch {
+    ttsMessage.value = { type: 'error', text: 'Failed to connect' }
+  } finally {
+    billSummaryTestLoading.value = false
   }
 }
 
