@@ -1,5 +1,5 @@
 <template>
-  <div class="ha-card tts-card">
+  <div class="ha-card">
     <div class="ha-card-header">
       <span class="ha-card-icon">🔊</span>
       <span>TTS Alerts</span>
@@ -423,9 +423,4 @@ onMounted(loadConfig)
 .ha-message.error { background: #ffebee; color: #c62828; }
 
 .ha-input-mono { font-family: ui-monospace, monospace; }
-
-.tts-card {
-  flex: 1;
-  min-height: 400px;
-}
 </style>

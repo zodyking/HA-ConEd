@@ -382,7 +382,6 @@ class MQTTConfigModel(BaseModel):
 class AppSettingsModel(BaseModel):
     time_offset_hours: float = 0.0
     settings_password: str = "0000"
-    app_base_url: str = ""  # e.g., https://coned.brandon-built.com
 
 def encrypt_data(data: str) -> str:
     """Encrypt sensitive data"""
@@ -539,11 +538,10 @@ def should_publish_last_payment() -> tuple:
     return should_publish, last_payment, reason
 
 def save_app_settings(settings: dict):
-    """Save app settings (time offset, password, base URL) to file"""
+    """Save app settings (time offset, password) to file"""
     settings_data = {
         "time_offset_hours": float(settings.get("time_offset_hours", 0.0)),
         "settings_password": encrypt_data(settings.get("settings_password", "0000")),
-        "app_base_url": settings.get("app_base_url", ""),
         "updated_at": utc_now_iso()
     }
     SETTINGS_FILE.write_text(json.dumps(settings_data))
@@ -555,7 +553,6 @@ def load_app_settings() -> dict:
         default_settings = {
             "time_offset_hours": 0.0,
             "settings_password": "0000",
-            "app_base_url": ""
         }
         save_app_settings(default_settings)
         return default_settings
@@ -565,11 +562,10 @@ def load_app_settings() -> dict:
         return {
             "time_offset_hours": float(data.get("time_offset_hours", 0.0)),
             "settings_password": decrypt_data(data.get("settings_password", encrypt_data("0000"))) if data.get("settings_password") else "0000",
-            "app_base_url": data.get("app_base_url", "")
         }
     except Exception as e:
         add_log("warning", f"Failed to load app settings: {str(e)}")
-        return {"time_offset_hours": 0.0, "settings_password": "0000", "app_base_url": ""}
+        return {"time_offset_hours": 0.0, "settings_password": "0000"}
 
 def verify_settings_password(password: str) -> bool:
     """Verify settings password"""
@@ -848,12 +844,11 @@ async def get_mqtt_config():
 
 @app.post("/api/app-settings")
 async def save_app_settings_endpoint(settings: AppSettingsModel):
-    """Save app settings (time offset, password, base URL)"""
+    """Save app settings (time offset, password)"""
     try:
         settings_dict = {
             "time_offset_hours": settings.time_offset_hours,
             "settings_password": settings.settings_password.strip() if settings.settings_password else "0000",
-            "app_base_url": settings.app_base_url.strip().rstrip('/') if settings.app_base_url else ""
         }
         save_app_settings(settings_dict)
         add_log("success", "App settings saved successfully")
@@ -873,11 +868,10 @@ async def get_app_settings_endpoint():
             "time_offset_hours": settings.get("time_offset_hours", 0.0),
             "has_password": bool(settings.get("settings_password")),
             "settings_password": settings.get("settings_password", "0000"),  # Needed for preservation
-            "app_base_url": settings.get("app_base_url", "")
         }
     except Exception as e:
         add_log("error", f"Failed to get app settings: {str(e)}")
-        return {"time_offset_hours": 0.0, "has_password": True, "settings_password": "0000", "app_base_url": ""}
+        return {"time_offset_hours": 0.0, "has_password": True, "settings_password": "0000"}
 
 class PasswordVerifyModel(BaseModel):
     password: str
@@ -1108,16 +1102,39 @@ async def download_bill_pdf(request: PdfDownloadRequest):
     await _publish_bill_pdf_mqtt()
     return result
 
+async def _get_ha_external_base_url() -> str | None:
+    """Get Home Assistant external URL when running as addon. Returns base URL for addon ingress or None."""
+    token = os.environ.get("SUPERVISOR_TOKEN")
+    if not token:
+        return None
+    try:
+        import aiohttp
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                "http://supervisor/core/api/config",
+                headers={"Authorization": f"Bearer {token}"},
+            ) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json()
+                external = (data.get("external_url") or "").rstrip("/")
+                if not external:
+                    return None
+                return f"{external}/api/hassio_ingress/coned_scraper"
+    except Exception as e:
+        add_log("debug", f"Could not get HA external URL: {e}")
+        return None
+
+
 async def _publish_bill_pdf_mqtt():
-    """Publish bill PDF URLs to MQTT (state=latest, attributes=all)"""
+    """Publish bill PDF URLs to MQTT (state=latest, attributes=all). Uses HA external URL."""
     from mqtt_client import get_mqtt_client
     mqtt_client = get_mqtt_client()
     if not mqtt_client:
         return
-    app_settings = load_app_settings()
-    base_url = app_settings.get("app_base_url", "").rstrip("/")
+    base_url = await _get_ha_external_base_url()
     if not base_url:
-        add_log("warning", "App Base URL not configured, skipping MQTT publish for PDF")
+        add_log("warning", "Could not get Home Assistant external URL (addon only), skipping MQTT PDF publish")
         return
     await mqtt_client.publish_bill_pdf_url_all(base_url, utc_now_iso())
 

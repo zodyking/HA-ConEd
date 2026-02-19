@@ -5,7 +5,7 @@
   >
     <!-- Header -->
     <div class="ha-pdf-header">
-      <span class="ha-pdf-title">📄 Latest Bill</span>
+      <span class="ha-pdf-title">📄 Bill PDF</span>
       <div class="ha-pdf-controls">
         <button class="ha-pdf-ctrl" title="Zoom out" @click="zoomOut">−</button>
         <span class="ha-pdf-scale">{{ Math.round(scale * 100) }}%</span>
@@ -31,8 +31,8 @@
         <button class="ha-pdf-open-btn" @click="openDirect">Open PDF Directly</button>
       </div>
       <VuePdfEmbed
-        v-else
-        :source="url"
+        v-else-if="pdfSource"
+        :source="pdfSource"
         :page="pageNumber"
         :width="pageWidth"
         @loaded="onLoaded"
@@ -64,9 +64,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { ajaxLoader } from '../lib/assets'
 import VuePdfEmbed from 'vue-pdf-embed'
+
+const FETCH_TIMEOUT_MS = 30000
 
 const props = defineProps<{
   url: string
@@ -79,7 +81,51 @@ const pageNumber = ref(1)
 const scale = ref(1)
 const loading = ref(true)
 const error = ref<string | null>(null)
+const pdfSource = ref<ArrayBuffer | null>(null)
 const pageWidth = computed(() => Math.min(800, window.innerWidth - 48) * scale.value)
+
+let abortController: AbortController | null = null
+
+async function fetchPdf() {
+  loading.value = true
+  error.value = null
+  pdfSource.value = null
+  abortController = new AbortController()
+  const timeoutId = setTimeout(() => abortController?.abort(), FETCH_TIMEOUT_MS)
+  try {
+    const res = await fetch(props.url, {
+      signal: abortController.signal,
+      credentials: 'same-origin',
+    })
+    if (!res.ok) {
+      throw new Error(res.status === 404 ? 'PDF not found' : `HTTP ${res.status}`)
+    }
+    const buf = await res.arrayBuffer()
+    pdfSource.value = buf
+    loading.value = false
+  } catch (e) {
+    if (e instanceof Error) {
+      if (e.name === 'AbortError') {
+        error.value = 'Request timed out. Try opening the PDF directly.'
+      } else {
+        error.value = e.message || 'Failed to load PDF'
+      }
+    } else {
+      error.value = 'Failed to load PDF'
+    }
+  } finally {
+    clearTimeout(timeoutId)
+    abortController = null
+  }
+}
+
+watch(() => props.url, fetchPdf, { immediate: false })
+
+onMounted(fetchPdf)
+
+onUnmounted(() => {
+  abortController?.abort()
+})
 
 function onLoaded(pdf: { numPages: number }) {
   numPages.value = pdf.numPages
@@ -88,7 +134,7 @@ function onLoaded(pdf: { numPages: number }) {
 }
 
 function onLoadError() {
-  error.value = 'Failed to load PDF'
+  error.value = 'Failed to render PDF'
   loading.value = false
 }
 

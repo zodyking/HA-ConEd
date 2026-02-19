@@ -392,35 +392,14 @@ body {
   font-size: 0.8rem;
 }
 
-/* Ledger: summary in header area (white space below nav), ledger scrolls below */
+/* Ledger: summary at top, then ledger - whole page scrolls */
 .ha-ledger {
   display: flex;
   flex-direction: column;
-  gap: 0;
-  min-height: 0;
-  flex: 1;
+  gap: 0.75rem;
 }
-.ha-ledger-header {
+.ha-ledger-summary {
   flex-shrink: 0;
-  background: #fff;
-  padding: 0 0 0.75rem;
-  margin: 0 -1.25rem 0;
-  margin-bottom: 0;
-  padding-left: 1.25rem;
-  padding-right: 1.25rem;
-  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.06);
-}
-.ha-ledger-scroll {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  margin: 0 -1.25rem 0;
-  padding: 0 1.25rem;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-.ha-ledger-scroll::-webkit-scrollbar {
-  display: none;
 }
 
 .ha-card-summary {
@@ -457,18 +436,9 @@ body {
   padding: 0.5rem;
 }
 
-/* Ledger view: flex column, content fills and ledger scrolls */
+/* Ledger view: normal scroll like other pages */
 .ha-content-ledger {
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  padding: 1rem 1.25rem;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-
-.ha-content-ledger::-webkit-scrollbar {
-  display: none;
+  /* uses default ha-content overflow-y: auto - page scrolls normally */
 }
 
 .ha-bill-card {
@@ -621,18 +591,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
-  height: 100%;
   min-height: 0;
-}
-
-.ha-settings .ha-card {
-  overflow-y: auto;
-  max-height: calc(100vh - 200px);
-}
-
-.ha-settings .ha-card .ha-card-content {
-  overflow-y: auto;
-  max-height: inherit;
 }
 
 .ha-totp-display {
@@ -705,12 +664,6 @@ body {
     padding: 0.75rem 1rem;
   }
 
-  .ha-ledger-header,
-  .ha-ledger-scroll {
-    margin: 0 -1rem 0;
-    padding-left: 1rem;
-    padding-right: 1rem;
-  }
   
   .ha-title {
     font-size: 1rem;

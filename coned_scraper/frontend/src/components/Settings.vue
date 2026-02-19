@@ -66,7 +66,6 @@
       <!-- Console -->
       <template v-else>
         <button type="button" class="ha-back-btn" @click="currentPage = 'menu'">← Back to Settings</button>
-        <div class="ha-settings-tab-area">
         <Dashboard v-if="currentPage === 'console'" />
         <SettingsCredentialsTab v-else-if="currentPage === 'credentials'" />
         <SettingsAutomatedTab v-else-if="currentPage === 'automated'" />
@@ -75,7 +74,6 @@
         <SettingsPayeesPaymentsTab v-else-if="currentPage === 'payees-payments'" />
         <SettingsTtsTab v-else-if="currentPage === 'tts'" />
         <SettingsImapTab v-else-if="currentPage === 'imap'" />
-        </div>
       </template>
     </template>
   </div>
@@ -280,11 +278,5 @@ function cancelLock() {
   padding: 0.5rem 0;
   font-size: 0.9rem;
   margin-bottom: 1rem;
-}
-.ha-settings-tab-area {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
 }
 </style>

@@ -45,16 +45,8 @@
         <div v-if="billsWithPdf.length" class="ha-pdf-actions-row">
           <button type="button" class="ha-btn ha-btn-purple" :disabled="pdfLoading" @click="handleSendMqtt">Send MQTT</button>
         </div>
+        <div class="info-text" v-if="billsWithPdf.length">PDF URLs use your Home Assistant external URL</div>
         <div v-if="pdfMessage" :class="['ha-message', pdfMessage.type]">{{ pdfMessage.text }}</div>
-      </div>
-
-      <div class="ha-section">
-        <h4 class="ha-section-title">🌐 App Base URL (for MQTT)</h4>
-        <div class="ha-form-group">
-          <label class="ha-form-label">Base URL</label>
-          <input v-model="appBaseUrl" type="text" class="ha-form-input" placeholder="https://coned.your-domain.com" />
-        </div>
-        <button type="button" class="ha-button ha-button-primary" :disabled="isLoading" @click="handleSaveBaseUrl">{{ isLoading ? 'Saving...' : 'Save Base URL' }}</button>
       </div>
 
       <form @submit.prevent="handleSave" class="ha-section">
@@ -94,7 +86,6 @@ const message = ref<{ type: 'success' | 'error'; text: string } | null>(null)
 const pdfUrls = ref<Record<number, string>>({})
 const pdfLoading = ref(false)
 const pdfMessage = ref<{ type: 'success' | 'error'; text: string } | null>(null)
-const appBaseUrl = ref('')
 const bills = ref<Bill[]>([])
 const billStatuses = ref<Record<number, { size_kb: number }>>({})
 
@@ -208,24 +199,6 @@ async function handleSendMqtt() {
   }
 }
 
-async function handleSaveBaseUrl() {
-  isLoading.value = true
-  message.value = null
-  try {
-    const cur = await fetch(`${getApiBase()}/app-settings`).then((r) => r.json())
-    const res = await fetch(`${getApiBase()}/app-settings`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ time_offset_hours: cur.time_offset_hours || 0, settings_password: cur.settings_password || '0000', app_base_url: appBaseUrl.value.trim() }),
-    })
-    message.value = res.ok ? { type: 'success', text: 'App Base URL saved!' } : { type: 'error', text: 'Failed' }
-  } catch {
-    message.value = { type: 'error', text: 'Failed to connect' }
-  } finally {
-    isLoading.value = false
-  }
-}
-
 async function handleSave() {
   if (newPassword.value && newPassword.value !== confirmPassword.value) {
     message.value = { type: 'error', text: 'Passwords do not match' }
@@ -263,12 +236,6 @@ async function handleSave() {
 
 let timeInterval: ReturnType<typeof setInterval>
 onMounted(() => {
-  fetch(`${getApiBase()}/app-settings`)
-    .then((r) => r.json())
-    .then((d) => {
-      appBaseUrl.value = d.app_base_url || ''
-    })
-    .catch(() => {})
   loadBills().then(() => loadBillStatuses())
   timeInterval = setInterval(() => {
     currentTime.value = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })
