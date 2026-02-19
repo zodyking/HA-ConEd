@@ -95,7 +95,7 @@
                         <input v-model="ttsWaitForIdle" type="checkbox" />
                         <span>Wait for media player idle</span>
                       </label>
-                      <div class="info-text">Waits for each player to be idle before playing (idle, unknown, unavailable)</div>
+                      <div class="info-text">Waits for each player to be idle before playing. Unknown or unavailable (disconnected) are not treated as ready.</div>
                     </div>
                   </div>
                 </details>
@@ -167,6 +167,106 @@
                   </div>
                 </details>
 
+                <details class="ha-tts-details" @toggle="e => (e.target as HTMLDetailsElement).open && fetchTtsLogsAndQueue()">
+                  <summary>TTS Logs</summary>
+                  <div class="ha-tts-details-content">
+                    <p class="info-text">Every TTS sent from this app (success or fail) and the current queue.</p>
+                    <div v-if="ttsQueue.length" class="ha-tts-queue-section">
+                      <div class="ha-tts-section-label">Queue ({{ ttsQueue.length }})</div>
+                      <div v-for="(q, i) in ttsQueue" :key="i" class="ha-tts-log-entry ha-tts-queue-entry">
+                        <span class="ha-tts-log-source">{{ q.source || 'pending' }}</span>
+                        <span class="ha-tts-log-msg">{{ (q.message || '').slice(0, 60) }}{{ (q.message || '').length > 60 ? '…' : '' }}</span>
+                      </div>
+                    </div>
+                    <div class="ha-tts-logs-section">
+                      <div class="ha-tts-section-label">Logs ({{ ttsLogs.length }})</div>
+                      <div v-if="!ttsLogs.length" class="ha-tts-logs-empty">No TTS logs yet.</div>
+                      <div v-for="(log, i) in ttsLogs" :key="i" class="ha-tts-log-entry" :class="log.success ? 'success' : 'error'">
+                        <span class="ha-tts-log-ts">{{ formatTtsLogTs(log.ts) }}</span>
+                        <span class="ha-tts-log-source">{{ log.source }}</span>
+                        <span class="ha-tts-log-status">{{ log.success ? '✓' : '✗' }}</span>
+                        <span class="ha-tts-log-msg">{{ log.message }}</span>
+                        <span v-if="log.error" class="ha-tts-log-error">{{ log.error }}</span>
+                      </div>
+                    </div>
+                  </div>
+                </details>
+
+                <details class="ha-tts-details">
+                  <summary>Special TTS Message (Bill Summary)</summary>
+                  <div class="ha-tts-details-content">
+                    <p class="info-text">A scheduled TTS that reports bill, balance, avg daily usage, and bill estimates. Plays at the configured frequency between the selected hours on selected days.</p>
+                    <form @submit.prevent="handleBillSummarySave" class="ha-tts-form">
+                      <div class="ha-form-group">
+                        <label class="ha-check-label">
+                          <input v-model="billSummaryEnabled" type="checkbox" />
+                          <span>Enable scheduled bill summary TTS</span>
+                        </label>
+                      </div>
+                      <div class="ha-form-group">
+                        <label class="ha-form-label">Days of week</label>
+                        <div class="ha-check-row">
+                          <label v-for="d in weekdays" :key="d.value" class="ha-check-inline">
+                            <input v-model="billSummaryDays" type="checkbox" :value="d.value" />
+                            <span>{{ d.label }}</span>
+                          </label>
+                        </div>
+                      </div>
+                      <div class="ha-form-group ha-form-row">
+                        <div>
+                          <label class="ha-form-label">Start time</label>
+                          <div class="ha-time-row">
+                            <select v-model.number="billSummaryStartHour12" class="ha-form-input">
+                              <option v-for="h in hour12Options" :key="h" :value="h">{{ h }}</option>
+                            </select>
+                            <select v-model="billSummaryStartAmPm" class="ha-form-input">
+                              <option value="am">AM</option>
+                              <option value="pm">PM</option>
+                            </select>
+                          </div>
+                        </div>
+                        <div>
+                          <label class="ha-form-label">End time</label>
+                          <div class="ha-time-row">
+                            <select v-model.number="billSummaryEndHour12" class="ha-form-input">
+                              <option v-for="h in hour12Options" :key="h" :value="h">{{ h }}</option>
+                            </select>
+                            <select v-model="billSummaryEndAmPm" class="ha-form-input">
+                              <option value="am">AM</option>
+                              <option value="pm">PM</option>
+                            </select>
+                          </div>
+                        </div>
+                        <div>
+                          <label class="ha-form-label">Every X hours</label>
+                          <input v-model.number="billSummaryFrequencyHours" type="number" class="ha-form-input" min="1" max="24" />
+                        </div>
+                        <div>
+                          <label class="ha-form-label">Minute of hour (0–59)</label>
+                          <input v-model.number="billSummaryMinuteOfHour" type="number" class="ha-form-input" min="0" max="59" />
+                        </div>
+                      </div>
+                      <div class="ha-form-group">
+                        <label class="ha-form-label">Avg daily usage sensor (HA entity)</label>
+                        <input v-model="billSummarySensorAvg" type="text" class="ha-form-input" placeholder="sensor.daily_energy_usage" />
+                      </div>
+                      <div class="ha-form-group">
+                        <label class="ha-form-label">Bill estimate sensor (min)</label>
+                        <input v-model="billSummarySensorEstMin" type="text" class="ha-form-input" placeholder="sensor.bill_estimate_low" />
+                      </div>
+                      <div class="ha-form-group">
+                        <label class="ha-form-label">Bill estimate sensor (max)</label>
+                        <input v-model="billSummarySensorEstMax" type="text" class="ha-form-input" placeholder="sensor.bill_estimate_high" />
+                      </div>
+                      <div class="ha-tts-buttons ha-tts-buttons-sm">
+                        <button type="submit" class="ha-button ha-button-primary" :disabled="billSummarySaving">{{ billSummarySaving ? 'Saving...' : 'Save Bill Summary Config' }}</button>
+                        <button type="button" class="ha-button ha-button-secondary" :disabled="billSummaryPreviewLoading" @click="handleBillSummaryPreview">{{ billSummaryPreviewLoading ? 'Loading...' : 'Preview Message' }}</button>
+                      </div>
+                      <div v-if="billSummaryPreview" class="ha-tts-preview-box">{{ billSummaryPreview }}</div>
+                    </form>
+                  </div>
+                </details>
+
                 <div class="ha-tts-buttons">
                   <button type="submit" class="ha-button ha-button-primary" :disabled="ttsSaving">{{ ttsSaving ? 'Saving...' : 'Save TTS Config' }}</button>
                   <button type="button" class="ha-button ha-btn-test" :disabled="!ttsEnabled || !ttsMediaPlayersListValid.length || !effectiveTtsEngine || ttsTestLoading" @click="handleTtsTest">{{ ttsTestLoading ? 'Sending...' : 'Test TTS' }}</button>
@@ -227,6 +327,34 @@ const ttsSaving = ref(false)
 const ttsTestLoading = ref(false)
 const ttsMessage = ref<{ type: 'success' | 'error'; text: string } | null>(null)
 let ttsStatePollTimer: ReturnType<typeof setInterval> | null = null
+
+const ttsLogs = ref<Array<{ ts: string; source: string; message: string; success: boolean; error?: string }>>([])
+const ttsQueue = ref<Array<{ source: string; message: string }>>([])
+
+const billSummaryEnabled = ref(false)
+const billSummaryDays = ref<number[]>([0, 1, 2, 3, 4, 5, 6])
+const billSummaryStartHour12 = ref(8)
+const billSummaryStartAmPm = ref<'am' | 'pm'>('am')
+const billSummaryEndHour12 = ref(10)
+const billSummaryEndAmPm = ref<'am' | 'pm'>('am')
+const billSummaryFrequencyHours = ref(1)
+const billSummaryMinuteOfHour = ref(0)
+const billSummarySensorAvg = ref('')
+const billSummarySensorEstMin = ref('')
+const billSummarySensorEstMax = ref('')
+const billSummarySaving = ref(false)
+const billSummaryPreviewLoading = ref(false)
+const billSummaryPreview = ref('')
+const hour12Options = [12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+const weekdays = [
+  { value: 0, label: 'Mon' },
+  { value: 1, label: 'Tue' },
+  { value: 2, label: 'Wed' },
+  { value: 3, label: 'Thu' },
+  { value: 4, label: 'Fri' },
+  { value: 5, label: 'Sat' },
+  { value: 6, label: 'Sun' },
+]
 
 const ttsMediaPlayersListValid = computed(() =>
   ttsMediaPlayersList.value
@@ -334,22 +462,28 @@ async function handlePasswordSubmit() {
   await verifyPassword(pwd)
 }
 
+let ttsLogsPollTimer: ReturnType<typeof setInterval> | null = null
+
 watch(currentPage, (page) => {
   if (page === 'tts') {
     loadTtsConfig()
-    ttsStatePollTimer = setInterval(fetchTtsEntityStates, 5000)
+    ttsStatePollTimer = setInterval(fetchTtsEntityStates, 2000)
+    ttsLogsPollTimer = setInterval(fetchTtsLogsAndQueue, 5000)
   } else {
     if (ttsStatePollTimer) {
       clearInterval(ttsStatePollTimer)
       ttsStatePollTimer = null
     }
+    if (ttsLogsPollTimer) {
+      clearInterval(ttsLogsPollTimer)
+      ttsLogsPollTimer = null
+    }
   }
 })
 
 onUnmounted(() => {
-  if (ttsStatePollTimer) {
-    clearInterval(ttsStatePollTimer)
-  }
+  if (ttsStatePollTimer) clearInterval(ttsStatePollTimer)
+  if (ttsLogsPollTimer) clearInterval(ttsLogsPollTimer)
 })
 
 function cancelLock() {
@@ -404,7 +538,119 @@ async function loadTtsConfig() {
       if (d.messages?.payment_received) ttsMsgPayment.value = d.messages.payment_received
     }
     fetchTtsEntityStates()
+    loadBillSummaryConfig()
   } catch (e) { console.error(e) }
+}
+
+async function fetchTtsLogsAndQueue() {
+  try {
+    const [logsRes, queueRes] = await Promise.all([
+      fetch(`${getApiBase()}/tts-logs`),
+      fetch(`${getApiBase()}/tts-queue`),
+    ])
+    if (logsRes.ok) {
+      const d = await logsRes.json()
+      ttsLogs.value = (d.logs ?? []).slice().reverse()
+    }
+    if (queueRes.ok) {
+      const d = await queueRes.json()
+      ttsQueue.value = d.queue ?? []
+    }
+  } catch (e) { console.error(e) }
+}
+
+function hour24To12(h24: number): { hour: number; ampm: 'am' | 'pm' } {
+  if (h24 === 0) return { hour: 12, ampm: 'am' }
+  if (h24 < 12) return { hour: h24, ampm: 'am' }
+  if (h24 === 12) return { hour: 12, ampm: 'pm' }
+  return { hour: h24 - 12, ampm: 'pm' }
+}
+function hour12To24(h12: number, ampm: string): number {
+  if (ampm === 'am') return h12 === 12 ? 0 : h12
+  return h12 === 12 ? 12 : h12 + 12
+}
+
+function formatTtsLogTs(ts: string): string {
+  if (!ts) return ''
+  try {
+    const d = new Date(ts)
+    return d.toLocaleString()
+  } catch {
+    return ts
+  }
+}
+
+async function loadBillSummaryConfig() {
+  try {
+    const res = await fetch(`${getApiBase()}/tts-bill-summary-config`)
+    if (res.ok) {
+      const d = await res.json()
+      billSummaryEnabled.value = d.enabled ?? false
+      billSummaryDays.value = Array.isArray(d.days_of_week) ? [...d.days_of_week] : [0, 1, 2, 3, 4, 5, 6]
+      const start24 = typeof d.start_hour === 'number' ? Math.max(0, Math.min(23, d.start_hour)) : 8
+      const end24 = typeof d.end_hour === 'number' ? Math.max(0, Math.min(23, d.end_hour)) : 10
+      const start12 = hour24To12(start24)
+      const end12 = hour24To12(end24)
+      billSummaryStartHour12.value = start12.hour
+      billSummaryStartAmPm.value = start12.ampm
+      billSummaryEndHour12.value = end12.hour
+      billSummaryEndAmPm.value = end12.ampm
+      billSummaryFrequencyHours.value = typeof d.frequency_hours === 'number' ? Math.max(1, d.frequency_hours) : 1
+      billSummaryMinuteOfHour.value = typeof d.minute_of_hour === 'number' ? Math.max(0, Math.min(59, d.minute_of_hour)) : 0
+      billSummarySensorAvg.value = (d.sensor_avg_daily ?? '').trim()
+      billSummarySensorEstMin.value = (d.sensor_estimate_min ?? '').trim()
+      billSummarySensorEstMax.value = (d.sensor_estimate_max ?? '').trim()
+    }
+  } catch (e) { console.error(e) }
+}
+
+async function handleBillSummarySave() {
+  billSummarySaving.value = true
+  try {
+    const res = await fetch(`${getApiBase()}/tts-bill-summary-config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        enabled: billSummaryEnabled.value,
+        days_of_week: billSummaryDays.value,
+        start_hour: hour12To24(billSummaryStartHour12.value, billSummaryStartAmPm.value),
+        end_hour: hour12To24(billSummaryEndHour12.value, billSummaryEndAmPm.value),
+        frequency_hours: Math.max(1, Math.min(24, billSummaryFrequencyHours.value)),
+        minute_of_hour: Math.max(0, Math.min(59, billSummaryMinuteOfHour.value)),
+        sensor_avg_daily: billSummarySensorAvg.value.trim(),
+        sensor_estimate_min: billSummarySensorEstMin.value.trim(),
+        sensor_estimate_max: billSummarySensorEstMax.value.trim(),
+      }),
+    })
+    if (res.ok) ttsMessage.value = { type: 'success', text: 'Bill summary config saved.' }
+    else ttsMessage.value = { type: 'error', text: 'Failed to save.' }
+  } catch {
+    ttsMessage.value = { type: 'error', text: 'Failed to connect' }
+  } finally {
+    billSummarySaving.value = false
+  }
+}
+
+async function handleBillSummaryPreview() {
+  billSummaryPreviewLoading.value = true
+  billSummaryPreview.value = ''
+  try {
+    const res = await fetch(`${getApiBase()}/tts/bill-summary/preview`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sensor_avg_daily: billSummarySensorAvg.value.trim(),
+        sensor_estimate_min: billSummarySensorEstMin.value.trim(),
+        sensor_estimate_max: billSummarySensorEstMax.value.trim(),
+      }),
+    })
+    const d = await res.json().catch(() => ({}))
+    billSummaryPreview.value = d.message ?? '(empty)'
+  } catch {
+    billSummaryPreview.value = 'Failed to load preview'
+  } finally {
+    billSummaryPreviewLoading.value = false
+  }
 }
 
 function float(v: unknown, def: number): number {
@@ -468,6 +714,12 @@ async function handleTtsTest() {
     const res = await fetch(`${getApiBase()}/tts/test`, { method: 'POST' })
     const data = await res.json().catch(() => ({}))
     ttsMessage.value = res.ok ? { type: 'success', text: data.message || 'Sent' } : { type: 'error', text: data.detail || 'Failed' }
+    if (res.ok) {
+      fetchTtsEntityStates()
+      fetchTtsLogsAndQueue()
+      const burst = setInterval(fetchTtsEntityStates, 1000)
+      setTimeout(() => clearInterval(burst), 15000)
+    }
   } catch {
     ttsMessage.value = { type: 'error', text: 'Failed' }
   } finally {
@@ -633,4 +885,50 @@ async function handleTtsTest() {
 .ha-message { margin-top: 1rem; padding: 0.75rem; border-radius: 4px; }
 .ha-message.success { background: #e8f5e9; color: #2e7d32; }
 .ha-message.error { background: #ffebee; color: #c62828; }
+
+/* TTS Logs */
+.ha-tts-queue-section { margin-bottom: 1rem; }
+.ha-tts-logs-section { margin-top: 0.5rem; }
+.ha-tts-section-label { font-weight: 600; font-size: 0.85rem; margin-bottom: 0.5rem; color: #555; }
+.ha-tts-log-entry {
+  font-size: 0.8rem;
+  padding: 0.4rem 0.5rem;
+  border-radius: 4px;
+  margin-bottom: 0.25rem;
+  background: #f5f5f5;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+.ha-tts-log-entry.success { background: #e8f5e9; }
+.ha-tts-log-entry.error { background: #ffebee; }
+.ha-tts-queue-entry { background: #e3f2fd; }
+.ha-tts-log-ts { color: #666; font-family: monospace; font-size: 0.75rem; }
+.ha-tts-log-source { font-weight: 600; min-width: 8ch; }
+.ha-tts-log-status { font-weight: bold; }
+.ha-tts-log-msg { flex: 1; min-width: 0; }
+.ha-tts-log-error { color: #c62828; font-size: 0.75rem; width: 100%; }
+.ha-tts-logs-empty { font-size: 0.9rem; color: #999; padding: 0.5rem 0; }
+
+/* Bill Summary */
+.ha-check-row { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; }
+.ha-check-inline { display: flex; align-items: center; gap: 0.35rem; cursor: pointer; font-size: 0.9rem; }
+.ha-check-inline input { width: 16px; height: 16px; }
+.ha-form-row { display: flex; gap: 1rem; flex-wrap: wrap; }
+.ha-time-row { display: flex; gap: 0.5rem; }
+.ha-time-row select { min-width: 4rem; }
+.ha-form-row > div { flex: 1; min-width: 120px; }
+.ha-tts-buttons-sm { margin-top: 0.5rem; }
+.ha-tts-preview-box {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: #f5f5f5;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  max-height: 200px;
+  overflow-y: auto;
+}
 </style>

@@ -12,7 +12,7 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 HA_BASE = "http://supervisor/core"
-IDLE_STATES = ("idle", "unknown", "unavailable")
+IDLE_STATES = ("idle",)  # unknown/unavailable = disconnected; only true idle is ready
 MAX_WAIT_SECONDS = 300
 POLL_INTERVAL = 2
 
@@ -73,6 +73,11 @@ async def _wait_for_idle(media_player: str) -> bool:
     return False
 
 
+def _is_idle(state: Optional[str]) -> bool:
+    """Check if media player state is considered idle for TTS."""
+    return state in IDLE_STATES if state else False
+
+
 async def send_tts(
     message: str,
     media_players: list,
@@ -99,9 +104,11 @@ async def send_tts(
         volume = max(0.0, min(1.0, float(item.get("volume", 0.7))))
 
         if wait_for_idle:
-            idle = await _wait_for_idle(entity_id)
-            if not idle:
-                return False, f"Media player {entity_id} did not become idle in time"
+            state = await get_entity_state(entity_id)
+            if not _is_idle(state):
+                idle = await _wait_for_idle(entity_id)
+                if not idle:
+                    return False, f"Media player {entity_id} did not become idle in time"
 
         status, _ = await _ha_request(
             "POST",

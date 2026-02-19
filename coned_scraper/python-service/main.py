@@ -24,7 +24,7 @@ def utc_now_iso() -> str:
     """Get current UTC time as ISO string"""
     return datetime.now(timezone.utc).isoformat()
 from database import (
-    get_logs, get_latest_scraped_data, get_all_scraped_data, add_log, clear_logs, 
+    get_logs, get_latest_scraped_data, get_all_scraped_data, add_log, clear_logs,
     add_scrape_history, get_scrape_history,
     # New normalized data functions
     get_ledger_data, get_all_bills, get_bill_by_id, get_all_payments, get_latest_payment,
@@ -36,6 +36,7 @@ from database import (
     update_payee_responsibilities, get_bill_payee_summary, calculate_all_payee_balances,
     upsert_bill_document, get_bill_document, get_all_bill_documents_with_periods,
     get_latest_bill_id_with_document, delete_bill_document, migrate_legacy_pdf,
+    get_current_balance, parse_amount,
 )
 
 app = FastAPI(title="Con Edison API")
@@ -66,6 +67,7 @@ SETTINGS_FILE = DATA_DIR / "app_settings.json"
 IMAP_CONFIG_FILE = DATA_DIR / "imap_config.json"
 LAST_PAYMENT_STATE_FILE = DATA_DIR / "last_payment_state.json"
 TTS_CONFIG_FILE = DATA_DIR / "tts_config.json"
+TTS_BILL_SUMMARY_CONFIG_FILE = DATA_DIR / "tts_bill_summary_config.json"
 KEY_FILE = DATA_DIR / ".key"
 
 # Default TTS settings (uses tts.speak, supports multiple media players)
@@ -349,6 +351,18 @@ async def startup_event():
     if schedule["enabled"]:
         _scheduler_task = asyncio.create_task(scheduler_loop())
         add_log("info", f"Scheduler started with {schedule['frequency']}s frequency")
+
+    try:
+        from tts_queue import start_processor
+        start_processor()
+    except Exception as e:
+        add_log("warning", f"TTS queue processor failed to start: {e}")
+
+    try:
+        from tts_bill_summary import start_bill_summary_scheduler
+        start_bill_summary_scheduler()
+    except Exception as e:
+        add_log("warning", f"TTS bill summary scheduler failed to start: {e}")
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -1944,6 +1958,20 @@ async def get_ha_media_players():
         return {"media_players": []}
 
 
+@app.get("/api/tts-logs")
+async def get_tts_logs():
+    """Get TTS logs (every TTS sent, success or fail)."""
+    from tts_queue import get_logs
+    return {"logs": get_logs()}
+
+
+@app.get("/api/tts-queue")
+async def get_tts_queue():
+    """Get current TTS queue (pending items from our app)."""
+    from tts_queue import get_queue
+    return {"queue": get_queue()}
+
+
 @app.get("/api/tts-config")
 async def get_tts_config():
     """Get TTS configuration"""
@@ -1961,6 +1989,67 @@ async def save_tts_config_endpoint(config: TTSConfigModel):
     return {"success": True}
 
 
+# ========== TTS Bill Summary (Scheduled) ==========
+def load_tts_bill_summary_config() -> dict:
+    from tts_bill_summary import load_bill_summary_config
+    return load_bill_summary_config()
+
+
+def save_tts_bill_summary_config(config: dict):
+    from tts_bill_summary import save_bill_summary_config
+    save_bill_summary_config(config)
+
+
+class TTSBillSummaryConfigModel(BaseModel):
+    enabled: Optional[bool] = None
+    days_of_week: Optional[list] = None  # 0=Mon .. 6=Sun
+    start_hour: Optional[int] = None
+    end_hour: Optional[int] = None
+    frequency_hours: Optional[int] = None
+    minute_of_hour: Optional[int] = None
+    sensor_avg_daily: Optional[str] = None
+    sensor_estimate_min: Optional[str] = None
+    sensor_estimate_max: Optional[str] = None
+
+
+@app.get("/api/tts-bill-summary-config")
+async def get_tts_bill_summary_config():
+    return load_tts_bill_summary_config()
+
+
+@app.post("/api/tts-bill-summary-config")
+async def save_tts_bill_summary_config_endpoint(config: TTSBillSummaryConfigModel):
+    current = load_tts_bill_summary_config()
+    updates = config.model_dump(exclude_none=True)
+    for k, v in updates.items():
+        current[k] = v
+    save_tts_bill_summary_config(current)
+    return {"success": True}
+
+
+class BillSummaryPreviewRequest(BaseModel):
+    sensor_avg_daily: Optional[str] = None
+    sensor_estimate_min: Optional[str] = None
+    sensor_estimate_max: Optional[str] = None
+
+
+@app.post("/api/tts/bill-summary/preview")
+async def preview_bill_summary_tts(body: Optional[BillSummaryPreviewRequest] = None):
+    """Build and return the bill summary message (for testing). Uses saved config, sensors overridden by body if provided."""
+    cfg = load_tts_bill_summary_config()
+    if body:
+        if body.sensor_avg_daily is not None:
+            cfg["sensor_avg_daily"] = body.sensor_avg_daily
+        if body.sensor_estimate_min is not None:
+            cfg["sensor_estimate_min"] = body.sensor_estimate_min
+        if body.sensor_estimate_max is not None:
+            cfg["sensor_estimate_max"] = body.sensor_estimate_max
+    tts_cfg = load_tts_config()
+    from tts_bill_summary import build_bill_summary_message
+    msg = await build_bill_summary_message(cfg, tts_cfg)
+    return {"message": msg or ""}
+
+
 def build_tts_message(config: dict, key: str, **kwargs) -> str:
     """Build TTS message: (prefix), (message)"""
     prefix = config.get("prefix", DEFAULT_TTS_PREFIX)
@@ -1976,7 +2065,7 @@ def build_tts_message(config: dict, key: str, **kwargs) -> str:
 
 @app.post("/api/tts/test")
 async def test_tts():
-    """Send test TTS 'Con Edison.' to all configured media players."""
+    """Queue test TTS 'Con Edison.' to all configured media players."""
     config = load_tts_config()
     if not config.get("enabled"):
         raise HTTPException(status_code=400, detail="TTS is not enabled")
@@ -1987,37 +2076,17 @@ async def test_tts():
     tts_engine = (config.get("tts_engine") or "").strip()
     if not tts_engine:
         raise HTTPException(status_code=400, detail="TTS engine (target entity) not configured")
-    full_msg = "Con Edison."
-    wait_for_idle = config.get("wait_for_idle", True)
-    cache = config.get("cache", True)
 
-    if os.environ.get("SUPERVISOR_TOKEN"):
-        from ha_tts import send_tts
-        success, err = await send_tts(
-            message=full_msg,
-            media_players=media_players,
-            tts_engine=tts_engine,
-            cache=cache,
-            wait_for_idle=wait_for_idle,
-        )
-        if success:
-            return {"success": True, "message": "TTS sent via Home Assistant."}
-        raise HTTPException(status_code=500, detail=err or "TTS failed")
-
-    from mqtt_client import get_mqtt_client
-    mqtt_client = get_mqtt_client()
-    if mqtt_client and mqtt_client.enabled:
-        for p in media_players:
-            mp = (p.get("entity_id") or "").strip()
-            if mp:
-                await mqtt_client.publish_tts_request(
-                    message=full_msg,
-                    media_player=mp,
-                    volume=float(p.get("volume", 0.7)),
-                    wait_for_idle=wait_for_idle,
-                )
-        return {"success": True, "message": "TTS request sent via MQTT. Add HA automation if not using addon."}
-    raise HTTPException(status_code=400, detail="Not in HA addon and MQTT not configured")
+    from tts_queue import enqueue_tts
+    await enqueue_tts(
+        source="test",
+        message="Con Edison.",
+        media_players=media_players,
+        tts_engine=tts_engine,
+        cache=config.get("cache", True),
+        wait_for_idle=config.get("wait_for_idle", True),
+    )
+    return {"success": True, "message": "TTS queued. Check TTS Logs for status."}
 
 
 # ========== SPA Static Files & Fallback ==========
