@@ -89,7 +89,68 @@
                 </div>
                 <div class="ha-form-group">
                   <label for="tts-media-player" class="ha-form-label">Media Player</label>
-                  <input id="tts-media-player" v-model="ttsMediaPlayer" type="text" class="ha-form-input" placeholder="media_player.living_room" />
+                  <select
+                    v-if="ttsMediaPlayers.length"
+                    id="tts-media-player"
+                    v-model="ttsMediaPlayerSelect"
+                    class="ha-form-input"
+                    @change="onTtsMediaPlayerChange"
+                  >
+                    <option value="">Select a media player...</option>
+                    <option v-for="p in ttsMediaPlayers" :key="p" :value="p">{{ p }}</option>
+                    <option value="__custom__">Other (enter manually)</option>
+                  </select>
+                  <input
+                    v-else
+                    id="tts-media-player"
+                    v-model="ttsMediaPlayer"
+                    type="text"
+                    class="ha-form-input"
+                    placeholder="media_player.living_room"
+                  />
+                  <input
+                    v-if="ttsMediaPlayers.length && ttsMediaPlayerSelect === '__custom__'"
+                    v-model="ttsMediaPlayer"
+                    type="text"
+                    class="ha-form-input ha-form-input-mt"
+                    placeholder="media_player.living_room"
+                  />
+                </div>
+                <div class="ha-form-group">
+                  <label for="tts-engine" class="ha-form-label">TTS Engine (Target)</label>
+                  <select
+                    v-if="ttsEntities.length"
+                    id="tts-engine"
+                    v-model="ttsEngine"
+                    class="ha-form-input"
+                  >
+                    <option value="">Select TTS engine...</option>
+                    <option v-for="e in ttsEntities" :key="e" :value="e">{{ e }}</option>
+                    <option value="__custom__">Other (enter manually)</option>
+                  </select>
+                  <input
+                    v-if="ttsEntities.length && ttsEngine === '__custom__'"
+                    v-model="ttsEngineCustom"
+                    type="text"
+                    class="ha-form-input ha-form-input-mt"
+                    placeholder="tts.google_translate_en_com"
+                  />
+                  <input
+                    v-else-if="!ttsEntities.length"
+                    id="tts-engine"
+                    v-model="ttsEngineCustom"
+                    type="text"
+                    class="ha-form-input"
+                    placeholder="tts.google_translate_en_com"
+                  />
+                  <div class="info-text">Home Assistant TTS entity (e.g. tts.google_translate_en_com)</div>
+                </div>
+                <div class="ha-form-group">
+                  <label class="ha-check-label">
+                    <input v-model="ttsCache" type="checkbox" />
+                    <span>Cache TTS</span>
+                  </label>
+                  <div class="info-text">Cache generated audio for reuse</div>
                 </div>
                 <div class="ha-form-group">
                   <label for="tts-prefix" class="ha-form-label">TTS Prefix</label>
@@ -101,18 +162,25 @@
                     <span>Wait for media player idle</span>
                   </label>
                 </div>
-                <div class="ha-form-group">
-                  <label class="ha-form-label">New Bill Message</label>
-                  <input v-model="ttsMsgNewBill" type="text" class="ha-form-input" placeholder="Your new Con Edison bill for {month_range} is now available." />
+
+                <div class="ha-tts-messages-section">
+                  <h4 class="ha-tts-section-title">TTS Message Templates</h4>
+                  <p class="ha-tts-section-desc">Use <code>{placeholder}</code> for variables (e.g. <code>{amount}</code>, <code>{balance}</code>, <code>{month_range}</code>).</p>
+                  <div class="ha-form-group">
+                    <label for="tts-msg-new-bill" class="ha-form-label">New Bill Message</label>
+                    <input id="tts-msg-new-bill" v-model="ttsMsgNewBill" type="text" class="ha-form-input" placeholder="Your new Con Edison bill for {month_range} is now available." />
+                  </div>
+                  <div class="ha-form-group">
+                    <label for="tts-msg-payment" class="ha-form-label">Payment Received Message</label>
+                    <input id="tts-msg-payment" v-model="ttsMsgPayment" type="text" class="ha-form-input" placeholder="Your payment of {amount} has been received. Balance is now {balance}." />
+                  </div>
                 </div>
-                <div class="ha-form-group">
-                  <label class="ha-form-label">Payment Received Message</label>
-                  <input v-model="ttsMsgPayment" type="text" class="ha-form-input" placeholder="Your payment of {amount} has been received. Balance is now {balance}." />
-                </div>
+
                 <div class="ha-tts-buttons">
                   <button type="submit" class="ha-button ha-button-primary" :disabled="ttsSaving">{{ ttsSaving ? 'Saving...' : 'Save TTS Config' }}</button>
-                  <button type="button" class="ha-button ha-btn-test" :disabled="!ttsEnabled || !ttsMediaPlayer.trim() || ttsTestLoading" @click="handleTtsTest">{{ ttsTestLoading ? 'Sending...' : 'Test TTS' }}</button>
+                  <button type="button" class="ha-button ha-btn-test" :disabled="!ttsEnabled || !effectiveTtsMediaPlayer || !effectiveTtsEngine || ttsTestLoading" @click="handleTtsTest">{{ ttsTestLoading ? 'Sending...' : 'Test TTS' }}</button>
                 </div>
+                <p class="ha-tts-test-hint">Test TTS plays: <strong>Con Edison.</strong></p>
               </form>
               <div v-if="ttsMessage" :class="['ha-message', ttsMessage.type]">{{ ttsMessage.text }}</div>
             </div>
@@ -125,7 +193,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, nextTick, watch } from 'vue'
+import { ref, computed, nextTick, watch } from 'vue'
 import { getApiBase } from '../lib/api-base'
 import Dashboard from './Dashboard.vue'
 import SettingsCredentialsTab from './settings/SettingsCredentialsTab.vue'
@@ -154,6 +222,12 @@ const passwordError = ref('')
 
 const ttsEnabled = ref(false)
 const ttsMediaPlayer = ref('')
+const ttsMediaPlayerSelect = ref('')
+const ttsMediaPlayers = ref<string[]>([])
+const ttsEngine = ref('')
+const ttsEngineCustom = ref('')
+const ttsEntities = ref<string[]>([])
+const ttsCache = ref(true)
 const ttsPrefix = ref('Message from Con Edison.')
 const ttsWaitForIdle = ref(true)
 const ttsMsgNewBill = ref('Your new Con Edison bill for {month_range} is now available.')
@@ -161,6 +235,23 @@ const ttsMsgPayment = ref('Good news — your payment of {amount} has been recei
 const ttsSaving = ref(false)
 const ttsTestLoading = ref(false)
 const ttsMessage = ref<{ type: 'success' | 'error'; text: string } | null>(null)
+
+const effectiveTtsMediaPlayer = computed(() => {
+  if (ttsMediaPlayerSelect.value === '__custom__') return ttsMediaPlayer.value.trim()
+  if (ttsMediaPlayerSelect.value) return ttsMediaPlayerSelect.value
+  return ttsMediaPlayer.value.trim()
+})
+
+const effectiveTtsEngine = computed(() => {
+  if (ttsEngine.value && ttsEngine.value !== '__custom__') return ttsEngine.value
+  return ttsEngineCustom.value.trim()
+})
+
+function onTtsMediaPlayerChange() {
+  if (ttsMediaPlayerSelect.value !== '__custom__') {
+    ttsMediaPlayer.value = ttsMediaPlayerSelect.value
+  }
+}
 
 const menuItems = [
   { id: 'console' as Page, icon: '📊', label: 'Console', description: 'View logs and system status' },
@@ -255,11 +346,37 @@ function cancelLock() {
 
 async function loadTtsConfig() {
   try {
-    const res = await fetch(`${getApiBase()}/tts-config`)
-    if (res.ok) {
-      const d = await res.json()
+    const [configRes, playersRes, entitiesRes] = await Promise.all([
+      fetch(`${getApiBase()}/tts-config`),
+      fetch(`${getApiBase()}/ha-media-players`),
+      fetch(`${getApiBase()}/ha-tts-entities`),
+    ])
+    if (playersRes.ok) {
+      const p = await playersRes.json()
+      ttsMediaPlayers.value = p.media_players ?? []
+    }
+    if (entitiesRes.ok) {
+      const e = await entitiesRes.json()
+      ttsEntities.value = e.tts_entities ?? []
+    }
+    if (configRes.ok) {
+      const d = await configRes.json()
       ttsEnabled.value = d.enabled ?? false
-      ttsMediaPlayer.value = d.media_player ?? ''
+      const mp = (d.media_player ?? '').trim()
+      ttsMediaPlayer.value = mp
+      if (ttsMediaPlayers.value.includes(mp)) {
+        ttsMediaPlayerSelect.value = mp
+      } else {
+        ttsMediaPlayerSelect.value = mp ? '__custom__' : ''
+      }
+      const te = (d.tts_engine ?? '').trim()
+      ttsEngineCustom.value = te
+      if (ttsEntities.value.includes(te)) {
+        ttsEngine.value = te
+      } else {
+        ttsEngine.value = te ? '__custom__' : ''
+      }
+      ttsCache.value = d.cache !== false
       ttsPrefix.value = d.prefix ?? 'Message from Con Edison.'
       ttsWaitForIdle.value = d.wait_for_idle ?? true
       if (d.messages?.new_bill) ttsMsgNewBill.value = d.messages.new_bill
@@ -277,11 +394,12 @@ async function handleTtsSave() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         enabled: ttsEnabled.value,
-        media_player: ttsMediaPlayer.value.trim(),
+        media_player: effectiveTtsMediaPlayer.value,
+        tts_engine: effectiveTtsEngine.value,
+        cache: ttsCache.value,
         volume: 0.7,
         language: 'en',
         prefix: ttsPrefix.value,
-        tts_service: 'tts.google_translate_say',
         wait_for_idle: ttsWaitForIdle.value,
         messages: { new_bill: ttsMsgNewBill.value, payment_received: ttsMsgPayment.value },
       }),
@@ -406,9 +524,19 @@ async function handleTtsTest() {
 .ha-tts-card { min-height: 200px; }
 .ha-tts-intro { margin-bottom: 1.25rem; color: #555; font-size: 0.95rem; }
 .ha-tts-form { display: flex; flex-direction: column; gap: 1rem; }
+.ha-form-input-mt { margin-top: 0.5rem; }
 .ha-check-label { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; }
 .ha-check-label input { width: 18px; height: 18px; }
+.ha-tts-messages-section {
+  margin-top: 1rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid #e0e0e0;
+}
+.ha-tts-section-title { font-size: 1rem; font-weight: 600; margin: 0 0 0.5rem 0; color: #333; }
+.ha-tts-section-desc { font-size: 0.85rem; color: #666; margin-bottom: 1rem; }
+.ha-tts-section-desc code { background: #f0f0f0; padding: 0.1em 0.3em; border-radius: 3px; font-size: 0.9em; }
 .ha-tts-buttons { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 0.5rem; }
+.ha-tts-test-hint { font-size: 0.8rem; color: #666; margin-top: 0.75rem; }
 .ha-btn-test { background: #ff9800 !important; color: white !important; }
 .ha-btn-test:disabled { opacity: 0.6; cursor: not-allowed; }
 .ha-message { margin-top: 1rem; padding: 0.75rem; border-radius: 4px; }

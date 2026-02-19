@@ -68,16 +68,17 @@ LAST_PAYMENT_STATE_FILE = DATA_DIR / "last_payment_state.json"
 TTS_CONFIG_FILE = DATA_DIR / "tts_config.json"
 KEY_FILE = DATA_DIR / ".key"
 
-# Default TTS settings (like Home-Energy)
+# Default TTS settings (uses tts.speak with target entity)
 DEFAULT_TTS_PREFIX = "Message from Con Edison."
 DEFAULT_TTS_CONFIG = {
     "enabled": False,
     "media_player": "",
+    "tts_engine": "",
+    "cache": True,
     "volume": 0.7,
     "language": "en",
     "prefix": DEFAULT_TTS_PREFIX,
     "wait_for_idle": True,
-    "tts_service": "tts.google_translate_say",
     "messages": {
         "new_bill": "Your new Con Edison bill for {month_range} is now available.",
         "payment_received": "Good news — your payment of {amount} has been received. Your account balance is now {balance}.",
@@ -1823,7 +1824,10 @@ def load_tts_config() -> dict:
         data = json.loads(TTS_CONFIG_FILE.read_text())
         merged = DEFAULT_TTS_CONFIG.copy()
         merged.update(data)
-        merged.setdefault("tts_service", "tts.google_translate_say")
+        if "tts_service" in data and not merged.get("tts_engine"):
+            merged["tts_engine"] = ""
+        merged.setdefault("tts_engine", "")
+        merged.setdefault("cache", True)
         if "messages" not in data or not data["messages"]:
             merged["messages"] = DEFAULT_TTS_CONFIG["messages"].copy()
         else:
@@ -1845,12 +1849,67 @@ def save_tts_config(config: dict):
 class TTSConfigModel(BaseModel):
     enabled: Optional[bool] = None
     media_player: Optional[str] = None
+    tts_engine: Optional[str] = None
+    cache: Optional[bool] = None
     volume: Optional[float] = None
     language: Optional[str] = None
     prefix: Optional[str] = None
     wait_for_idle: Optional[bool] = None
-    tts_service: Optional[str] = None
     messages: Optional[dict] = None
+
+
+@app.get("/api/ha-tts-entities")
+async def get_ha_tts_entities():
+    """Get list of TTS entity IDs (tts.*) from Home Assistant (addon only)."""
+    token = os.environ.get("SUPERVISOR_TOKEN")
+    if not token:
+        return {"tts_entities": []}
+    try:
+        import aiohttp
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                "http://supervisor/core/api/states",
+                headers={"Authorization": f"Bearer {token}"},
+            ) as resp:
+                if resp.status != 200:
+                    return {"tts_entities": []}
+                data = await resp.json()
+                entities = [
+                    s["entity_id"]
+                    for s in (data or [])
+                    if isinstance(s, dict) and s.get("entity_id", "").startswith("tts.")
+                ]
+                return {"tts_entities": sorted(entities)}
+    except Exception as e:
+        add_log("debug", f"Could not get HA TTS entities: {e}")
+        return {"tts_entities": []}
+
+
+@app.get("/api/ha-media-players")
+async def get_ha_media_players():
+    """Get list of media_player entity IDs from Home Assistant (addon only)."""
+    token = os.environ.get("SUPERVISOR_TOKEN")
+    if not token:
+        return {"media_players": []}
+    try:
+        import aiohttp
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                "http://supervisor/core/api/states",
+                headers={"Authorization": f"Bearer {token}"},
+            ) as resp:
+                if resp.status != 200:
+                    return {"media_players": []}
+                data = await resp.json()
+                players = [
+                    s["entity_id"]
+                    for s in (data or [])
+                    if isinstance(s, dict) and s.get("entity_id", "").startswith("media_player.")
+                ]
+                return {"media_players": sorted(players)}
+    except Exception as e:
+        add_log("debug", f"Could not get HA media players: {e}")
+        return {"media_players": []}
 
 
 @app.get("/api/tts-config")
@@ -1885,26 +1944,30 @@ def build_tts_message(config: dict, key: str, **kwargs) -> str:
 
 @app.post("/api/tts/test")
 async def test_tts():
-    """Send test TTS: direct HA API when addon, else MQTT fallback"""
+    """Send test TTS using new_bill message template with sample data."""
     config = load_tts_config()
     if not config.get("enabled"):
         raise HTTPException(status_code=400, detail="TTS is not enabled")
     media_player = (config.get("media_player") or "").strip()
     if not media_player:
         raise HTTPException(status_code=400, detail="Media player not configured")
-    full_msg = f"{config.get('prefix', DEFAULT_TTS_PREFIX)}, Con Edison test message."
+    tts_engine = (config.get("tts_engine") or "").strip()
+    if not tts_engine:
+        raise HTTPException(status_code=400, detail="TTS engine (target entity) not configured")
+    full_msg = "Con Edison."
     volume = config.get("volume", 0.7)
     wait_for_idle = config.get("wait_for_idle", True)
-    tts_service = config.get("tts_service", "tts.google_translate_say")
+    cache = config.get("cache", True)
 
     if os.environ.get("SUPERVISOR_TOKEN"):
         from ha_tts import send_tts
         success, err = await send_tts(
             message=full_msg,
             media_player=media_player,
+            tts_engine=tts_engine,
+            cache=cache,
             volume=volume,
             wait_for_idle=wait_for_idle,
-            tts_service=tts_service,
         )
         if success:
             return {"success": True, "message": "TTS sent via Home Assistant."}

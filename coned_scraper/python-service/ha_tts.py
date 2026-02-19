@@ -1,5 +1,6 @@
 """
-Send TTS via Home Assistant REST API (addon with homeassistant_api).
+Send TTS via Home Assistant tts.speak service (addon with homeassistant_api).
+Uses target TTS entity, media_player_entity_id, message, cache.
 Waits for media player idle when configured.
 """
 import asyncio
@@ -74,24 +75,27 @@ async def _wait_for_idle(media_player: str) -> bool:
 async def send_tts(
     message: str,
     media_player: str,
+    tts_engine: str,
+    cache: bool = True,
     volume: float = 0.7,
     wait_for_idle: bool = True,
-    tts_service: str = "tts.google_translate_say",
 ) -> tuple[bool, str]:
     """
-    Send TTS via Home Assistant. Returns (success, error_message).
-    Uses direct HA REST API when running as addon with homeassistant_api.
+    Send TTS via Home Assistant tts.speak service.
+    Uses target TTS entity (tts_engine), media_player_entity_id, message, cache.
+    Returns (success, error_message).
     """
     if not message or not media_player:
         return False, "Message and media player required"
+    if not tts_engine or not tts_engine.strip():
+        return False, "TTS engine (target entity) required"
     media_player = media_player.strip()
+    tts_engine = tts_engine.strip()
 
     if wait_for_idle:
         idle = await _wait_for_idle(media_player)
         if not idle:
             return False, "Media player did not become idle in time"
-
-    domain, service = tts_service.split(".", 1) if "." in tts_service else ("tts", "google_translate_say")
 
     status, _ = await _ha_request(
         "POST",
@@ -101,12 +105,19 @@ async def send_tts(
     if status not in (200, 201):
         logger.warning(f"Volume set returned {status}, continuing with TTS")
 
-    status, _ = await _ha_request(
-        "POST",
-        f"/api/services/{domain}/{service}",
-        {"entity_id": media_player, "message": message},
-    )
+    body = {
+        "entity_id": tts_engine,
+        "media_player_entity_id": media_player,
+        "message": message,
+        "cache": bool(cache),
+    }
+    status, resp = await _ha_request("POST", "/api/services/tts/speak", body)
     if status in (200, 201):
-        logger.info(f"TTS sent to {media_player}")
+        logger.info(f"TTS sent to {media_player} via {tts_engine}")
         return True, ""
-    return False, f"TTS service returned {status}"
+    err_msg = "Unknown error"
+    if resp and isinstance(resp, dict) and "message" in resp:
+        err_msg = resp["message"]
+    elif isinstance(resp, str):
+        err_msg = resp
+    return False, f"TTS service returned {status}: {err_msg}"
