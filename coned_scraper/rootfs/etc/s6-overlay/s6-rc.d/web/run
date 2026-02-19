@@ -1,7 +1,7 @@
 #!/command/with-contenv bashio
 # shellcheck shell=bash
 # ==============================================================================
-# ConEd Scraper - Next.js frontend (ingress-aware)
+# ConEd Scraper - Next.js frontend (ingress-aware via assetPrefix injection)
 # ==============================================================================
 
 bashio::log.info "Starting ConEd Scraper Web UI..."
@@ -11,9 +11,12 @@ export PORT=3000
 export HOSTNAME=0.0.0.0
 export API_BASE_URL=http://127.0.0.1:8000
 
-# Ingress base path for correct asset/API URLs (bashio provides this when addon uses ingress)
+# Inject ingress path into Next.js built files so assets load correctly
 INGRESS_PATH="$(bashio::addon.ingress_entry 2>/dev/null || true)"
 export INGRESS_PATH
-
 cd /app/web
-exec node server-ingress.js
+if [ -n "$INGRESS_PATH" ]; then
+  bashio::log.info "Setting assetPrefix to: $INGRESS_PATH"
+  node inject-ingress.js
+fi
+exec node server.js

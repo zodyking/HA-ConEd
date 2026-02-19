@@ -43,7 +43,7 @@ COPY python-service/ /app/python-service/
 COPY --from=nextjs-builder /app/.next/standalone ./web/
 COPY --from=nextjs-builder /app/.next/static ./web/.next/static
 COPY --from=nextjs-builder /app/public ./web/public
-COPY app/server-ingress.js ./web/
+COPY app/inject-ingress.js ./web/
 
 # Copy root filesystem (S6 overlay)
 COPY rootfs /
