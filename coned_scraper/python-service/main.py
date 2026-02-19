@@ -68,14 +68,13 @@ LAST_PAYMENT_STATE_FILE = DATA_DIR / "last_payment_state.json"
 TTS_CONFIG_FILE = DATA_DIR / "tts_config.json"
 KEY_FILE = DATA_DIR / ".key"
 
-# Default TTS settings (uses tts.speak with target entity)
+# Default TTS settings (uses tts.speak, supports multiple media players)
 DEFAULT_TTS_PREFIX = "Message from Con Edison."
 DEFAULT_TTS_CONFIG = {
     "enabled": False,
-    "media_player": "",
+    "media_players": [],
     "tts_engine": "",
     "cache": True,
-    "volume": 0.7,
     "language": "en",
     "prefix": DEFAULT_TTS_PREFIX,
     "wait_for_idle": True,
@@ -1828,6 +1827,10 @@ def load_tts_config() -> dict:
             merged["tts_engine"] = ""
         merged.setdefault("tts_engine", "")
         merged.setdefault("cache", True)
+        if "media_player" in data and data.get("media_player") and not merged.get("media_players"):
+            merged["media_players"] = [{"entity_id": data["media_player"], "volume": float(data.get("volume", 0.7))}]
+        if "media_players" not in merged or not isinstance(merged.get("media_players"), list):
+            merged["media_players"] = []
         if "messages" not in data or not data["messages"]:
             merged["messages"] = DEFAULT_TTS_CONFIG["messages"].copy()
         else:
@@ -1846,12 +1849,15 @@ def save_tts_config(config: dict):
     TTS_CONFIG_FILE.write_text(json.dumps(config))
 
 
+class MediaPlayerConfig(BaseModel):
+    entity_id: str
+    volume: float = 0.7
+
 class TTSConfigModel(BaseModel):
     enabled: Optional[bool] = None
-    media_player: Optional[str] = None
+    media_players: Optional[list] = None
     tts_engine: Optional[str] = None
     cache: Optional[bool] = None
-    volume: Optional[float] = None
     language: Optional[str] = None
     prefix: Optional[str] = None
     wait_for_idle: Optional[bool] = None
@@ -1883,6 +1889,32 @@ async def get_ha_tts_entities():
     except Exception as e:
         add_log("debug", f"Could not get HA TTS entities: {e}")
         return {"tts_entities": []}
+
+
+@app.get("/api/ha-entity-states")
+async def get_ha_entity_states(entity_ids: str = ""):
+    """Get current state of entities from HA. entity_ids comma-separated (e.g. media_player.a,media_player.b)."""
+    token = os.environ.get("SUPERVISOR_TOKEN")
+    if not token or not entity_ids.strip():
+        return {}
+    ids = {x.strip() for x in entity_ids.split(",") if x.strip()}
+    if not ids:
+        return {}
+    try:
+        import aiohttp
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                "http://supervisor/core/api/states",
+                headers={"Authorization": f"Bearer {token}"},
+            ) as resp:
+                if resp.status != 200:
+                    return {e: "unavailable" for e in ids}
+                data = await resp.json()
+                by_id = {s["entity_id"]: s.get("state", "unknown") for s in (data or []) if isinstance(s, dict) and "entity_id" in s}
+                return {e: by_id.get(e, "unavailable") for e in ids}
+    except Exception as e:
+        add_log("debug", f"Could not get entity states: {e}")
+        return {}
 
 
 @app.get("/api/ha-media-players")
@@ -1944,18 +1976,18 @@ def build_tts_message(config: dict, key: str, **kwargs) -> str:
 
 @app.post("/api/tts/test")
 async def test_tts():
-    """Send test TTS using new_bill message template with sample data."""
+    """Send test TTS 'Con Edison.' to all configured media players."""
     config = load_tts_config()
     if not config.get("enabled"):
         raise HTTPException(status_code=400, detail="TTS is not enabled")
-    media_player = (config.get("media_player") or "").strip()
-    if not media_player:
-        raise HTTPException(status_code=400, detail="Media player not configured")
+    media_players = config.get("media_players") or []
+    media_players = [p for p in media_players if isinstance(p, dict) and (p.get("entity_id") or "").strip()]
+    if not media_players:
+        raise HTTPException(status_code=400, detail="No media players configured")
     tts_engine = (config.get("tts_engine") or "").strip()
     if not tts_engine:
         raise HTTPException(status_code=400, detail="TTS engine (target entity) not configured")
     full_msg = "Con Edison."
-    volume = config.get("volume", 0.7)
     wait_for_idle = config.get("wait_for_idle", True)
     cache = config.get("cache", True)
 
@@ -1963,10 +1995,9 @@ async def test_tts():
         from ha_tts import send_tts
         success, err = await send_tts(
             message=full_msg,
-            media_player=media_player,
+            media_players=media_players,
             tts_engine=tts_engine,
             cache=cache,
-            volume=volume,
             wait_for_idle=wait_for_idle,
         )
         if success:
@@ -1976,9 +2007,15 @@ async def test_tts():
     from mqtt_client import get_mqtt_client
     mqtt_client = get_mqtt_client()
     if mqtt_client and mqtt_client.enabled:
-        await mqtt_client.publish_tts_request(
-            message=full_msg, media_player=media_player, volume=volume, wait_for_idle=wait_for_idle
-        )
+        for p in media_players:
+            mp = (p.get("entity_id") or "").strip()
+            if mp:
+                await mqtt_client.publish_tts_request(
+                    message=full_msg,
+                    media_player=mp,
+                    volume=float(p.get("volume", 0.7)),
+                    wait_for_idle=wait_for_idle,
+                )
         return {"success": True, "message": "TTS request sent via MQTT. Add HA automation if not using addon."}
     raise HTTPException(status_code=400, detail="Not in HA addon and MQTT not configured")
 

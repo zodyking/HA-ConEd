@@ -79,106 +79,97 @@
               <span>TTS Alerts</span>
             </div>
             <div class="ha-card-content">
-              <p class="ha-tts-intro">Configure text-to-speech for Con Edison events. Messages use (prefix), (message).</p>
+              <p class="ha-tts-intro">Configure text-to-speech for Con Edison events. Add multiple media players; TTS is sent to each when triggered.</p>
               <form @submit.prevent="handleTtsSave" class="ha-tts-form">
-                <div class="ha-form-group">
-                  <label class="ha-check-label">
-                    <input v-model="ttsEnabled" type="checkbox" />
-                    <span>Enable TTS Alerts</span>
-                  </label>
-                </div>
-                <div class="ha-form-group">
-                  <label for="tts-media-player" class="ha-form-label">Media Player</label>
-                  <select
-                    v-if="ttsMediaPlayers.length"
-                    id="tts-media-player"
-                    v-model="ttsMediaPlayerSelect"
-                    class="ha-form-input"
-                    @change="onTtsMediaPlayerChange"
-                  >
-                    <option value="">Select a media player...</option>
-                    <option v-for="p in ttsMediaPlayers" :key="p" :value="p">{{ p }}</option>
-                    <option value="__custom__">Other (enter manually)</option>
-                  </select>
-                  <input
-                    v-else
-                    id="tts-media-player"
-                    v-model="ttsMediaPlayer"
-                    type="text"
-                    class="ha-form-input"
-                    placeholder="media_player.living_room"
-                  />
-                  <input
-                    v-if="ttsMediaPlayers.length && ttsMediaPlayerSelect === '__custom__'"
-                    v-model="ttsMediaPlayer"
-                    type="text"
-                    class="ha-form-input ha-form-input-mt"
-                    placeholder="media_player.living_room"
-                  />
-                </div>
-                <div class="ha-form-group">
-                  <label for="tts-engine" class="ha-form-label">TTS Engine (Target)</label>
-                  <select
-                    v-if="ttsEntities.length"
-                    id="tts-engine"
-                    v-model="ttsEngine"
-                    class="ha-form-input"
-                  >
-                    <option value="">Select TTS engine...</option>
-                    <option v-for="e in ttsEntities" :key="e" :value="e">{{ e }}</option>
-                    <option value="__custom__">Other (enter manually)</option>
-                  </select>
-                  <input
-                    v-if="ttsEntities.length && ttsEngine === '__custom__'"
-                    v-model="ttsEngineCustom"
-                    type="text"
-                    class="ha-form-input ha-form-input-mt"
-                    placeholder="tts.google_translate_en_com"
-                  />
-                  <input
-                    v-else-if="!ttsEntities.length"
-                    id="tts-engine"
-                    v-model="ttsEngineCustom"
-                    type="text"
-                    class="ha-form-input"
-                    placeholder="tts.google_translate_en_com"
-                  />
-                  <div class="info-text">Home Assistant TTS entity (e.g. tts.google_translate_en_com)</div>
-                </div>
-                <div class="ha-form-group">
-                  <label class="ha-check-label">
-                    <input v-model="ttsCache" type="checkbox" />
-                    <span>Cache TTS</span>
-                  </label>
-                  <div class="info-text">Cache generated audio for reuse</div>
-                </div>
-                <div class="ha-form-group">
-                  <label for="tts-prefix" class="ha-form-label">TTS Prefix</label>
-                  <input id="tts-prefix" v-model="ttsPrefix" type="text" class="ha-form-input" placeholder="Message from Con Edison." />
-                </div>
-                <div class="ha-form-group">
-                  <label class="ha-check-label">
-                    <input v-model="ttsWaitForIdle" type="checkbox" />
-                    <span>Wait for media player idle</span>
-                  </label>
-                </div>
+                <details class="ha-tts-details" open>
+                  <summary>General</summary>
+                  <div class="ha-tts-details-content">
+                    <div class="ha-form-group">
+                      <label class="ha-check-label">
+                        <input v-model="ttsEnabled" type="checkbox" />
+                        <span>Enable TTS Alerts</span>
+                      </label>
+                    </div>
+                    <div class="ha-form-group">
+                      <label class="ha-check-label">
+                        <input v-model="ttsWaitForIdle" type="checkbox" />
+                        <span>Wait for media player idle</span>
+                      </label>
+                      <div class="info-text">Waits for each player to be idle before playing (idle, unknown, unavailable)</div>
+                    </div>
+                  </div>
+                </details>
 
-                <div class="ha-tts-messages-section">
-                  <h4 class="ha-tts-section-title">TTS Message Templates</h4>
-                  <p class="ha-tts-section-desc">Use <code>{placeholder}</code> for variables (e.g. <code>{amount}</code>, <code>{balance}</code>, <code>{month_range}</code>).</p>
-                  <div class="ha-form-group">
-                    <label for="tts-msg-new-bill" class="ha-form-label">New Bill Message</label>
-                    <input id="tts-msg-new-bill" v-model="ttsMsgNewBill" type="text" class="ha-form-input" placeholder="Your new Con Edison bill for {month_range} is now available." />
+                <details class="ha-tts-details" open>
+                  <summary>Media Players ({{ ttsMediaPlayersList.length }})</summary>
+                  <div class="ha-tts-details-content">
+                    <div v-for="(p, idx) in ttsMediaPlayersList" :key="idx" class="ha-tts-mp-card">
+                      <div class="ha-tts-mp-header">
+                        <span class="ha-tts-mp-status" :class="'state-' + (ttsEntityStates[getTtsMpEntityId(p)] || 'unknown')">{{ ttsEntityStates[getTtsMpEntityId(p)] || '—' }}</span>
+                        <button type="button" class="ha-btn-sm ha-btn-red" title="Remove" @click="removeTtsMediaPlayer(idx)">×</button>
+                      </div>
+                      <div class="ha-form-group">
+                        <label class="ha-form-label">Media Player</label>
+                        <select v-if="ttsMediaPlayersListOptions.length" v-model="p.entity_id" class="ha-form-input">
+                          <option value="">Select...</option>
+                          <option v-for="mp in ttsMediaPlayersListOptions" :key="mp" :value="mp">{{ mp }}</option>
+                          <option value="__custom__">Other</option>
+                        </select>
+                        <input v-if="p.entity_id === '__custom__'" v-model="p.entity_id_custom" type="text" class="ha-form-input ha-form-input-mt" placeholder="media_player.room" />
+                        <input v-else-if="!ttsMediaPlayersListOptions.length" v-model="p.entity_id_custom" type="text" class="ha-form-input" placeholder="media_player.room" />
+                      </div>
+                      <div class="ha-form-group">
+                        <label class="ha-form-label">Volume ({{ Math.round((p.volume ?? 0.7) * 100) }}%)</label>
+                        <input v-model.number="p.volume" type="range" class="ha-volume-slider" min="0" max="1" step="0.05" />
+                      </div>
+                    </div>
+                    <button type="button" class="ha-button ha-button-secondary" @click="addTtsMediaPlayer">+ Add Media Player</button>
                   </div>
-                  <div class="ha-form-group">
-                    <label for="tts-msg-payment" class="ha-form-label">Payment Received Message</label>
-                    <input id="tts-msg-payment" v-model="ttsMsgPayment" type="text" class="ha-form-input" placeholder="Your payment of {amount} has been received. Balance is now {balance}." />
+                </details>
+
+                <details class="ha-tts-details">
+                  <summary>TTS Engine & Options</summary>
+                  <div class="ha-tts-details-content">
+                    <div class="ha-form-group">
+                      <label class="ha-form-label">TTS Engine (Target)</label>
+                      <select v-if="ttsEntities.length" v-model="ttsEngine" class="ha-form-input">
+                        <option value="">Select...</option>
+                        <option v-for="e in ttsEntities" :key="e" :value="e">{{ e }}</option>
+                        <option value="__custom__">Other</option>
+                      </select>
+                      <input v-if="ttsEngine === '__custom__' || !ttsEntities.length" v-model="ttsEngineCustom" type="text" class="ha-form-input" placeholder="tts.google_translate_en_com" />
+                    </div>
+                    <div class="ha-form-group">
+                      <label class="ha-check-label">
+                        <input v-model="ttsCache" type="checkbox" />
+                        <span>Cache TTS</span>
+                      </label>
+                    </div>
+                    <div class="ha-form-group">
+                      <label class="ha-form-label">TTS Prefix</label>
+                      <input v-model="ttsPrefix" type="text" class="ha-form-input" placeholder="Message from Con Edison." />
+                    </div>
                   </div>
-                </div>
+                </details>
+
+                <details class="ha-tts-details">
+                  <summary>TTS Message Templates</summary>
+                  <div class="ha-tts-details-content">
+                    <p class="info-text">Use <code>{placeholder}</code> for variables (e.g. <code>{amount}</code>, <code>{balance}</code>, <code>{month_range}</code>).</p>
+                    <div class="ha-form-group">
+                      <label class="ha-form-label">New Bill Message</label>
+                      <input v-model="ttsMsgNewBill" type="text" class="ha-form-input" placeholder="Your new Con Edison bill for {month_range} is now available." />
+                    </div>
+                    <div class="ha-form-group">
+                      <label class="ha-form-label">Payment Received Message</label>
+                      <input v-model="ttsMsgPayment" type="text" class="ha-form-input" placeholder="Your payment of {amount} has been received. Balance is now {balance}." />
+                    </div>
+                  </div>
+                </details>
 
                 <div class="ha-tts-buttons">
                   <button type="submit" class="ha-button ha-button-primary" :disabled="ttsSaving">{{ ttsSaving ? 'Saving...' : 'Save TTS Config' }}</button>
-                  <button type="button" class="ha-button ha-btn-test" :disabled="!ttsEnabled || !effectiveTtsMediaPlayer || !effectiveTtsEngine || ttsTestLoading" @click="handleTtsTest">{{ ttsTestLoading ? 'Sending...' : 'Test TTS' }}</button>
+                  <button type="button" class="ha-button ha-btn-test" :disabled="!ttsEnabled || !ttsMediaPlayersListValid.length || !effectiveTtsEngine || ttsTestLoading" @click="handleTtsTest">{{ ttsTestLoading ? 'Sending...' : 'Test TTS' }}</button>
                 </div>
                 <p class="ha-tts-test-hint">Test TTS plays: <strong>Con Edison.</strong></p>
               </form>
@@ -193,7 +184,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, watch } from 'vue'
+import { ref, computed, nextTick, watch, onUnmounted } from 'vue'
 import { getApiBase } from '../lib/api-base'
 import Dashboard from './Dashboard.vue'
 import SettingsCredentialsTab from './settings/SettingsCredentialsTab.vue'
@@ -221,9 +212,9 @@ const pinRefs = ref<(HTMLInputElement | null)[]>([])
 const passwordError = ref('')
 
 const ttsEnabled = ref(false)
-const ttsMediaPlayer = ref('')
-const ttsMediaPlayerSelect = ref('')
-const ttsMediaPlayers = ref<string[]>([])
+const ttsMediaPlayersList = ref<Array<{ entity_id: string; entity_id_custom: string; volume: number }>>([{ entity_id: '', entity_id_custom: '', volume: 0.7 }])
+const ttsMediaPlayersListOptions = ref<string[]>([])
+const ttsEntityStates = ref<Record<string, string>>({})
 const ttsEngine = ref('')
 const ttsEngineCustom = ref('')
 const ttsEntities = ref<string[]>([])
@@ -235,21 +226,32 @@ const ttsMsgPayment = ref('Good news — your payment of {amount} has been recei
 const ttsSaving = ref(false)
 const ttsTestLoading = ref(false)
 const ttsMessage = ref<{ type: 'success' | 'error'; text: string } | null>(null)
+let ttsStatePollTimer: ReturnType<typeof setInterval> | null = null
 
-const effectiveTtsMediaPlayer = computed(() => {
-  if (ttsMediaPlayerSelect.value === '__custom__') return ttsMediaPlayer.value.trim()
-  if (ttsMediaPlayerSelect.value) return ttsMediaPlayerSelect.value
-  return ttsMediaPlayer.value.trim()
-})
+const ttsMediaPlayersListValid = computed(() =>
+  ttsMediaPlayersList.value
+    .map((p) => (p.entity_id === '__custom__' ? (p.entity_id_custom || '').trim() : (p.entity_id || '').trim()))
+    .filter(Boolean)
+)
 
 const effectiveTtsEngine = computed(() => {
   if (ttsEngine.value && ttsEngine.value !== '__custom__') return ttsEngine.value
   return ttsEngineCustom.value.trim()
 })
 
-function onTtsMediaPlayerChange() {
-  if (ttsMediaPlayerSelect.value !== '__custom__') {
-    ttsMediaPlayer.value = ttsMediaPlayerSelect.value
+function getTtsMpEntityId(p: { entity_id: string; entity_id_custom?: string }): string {
+  if (p.entity_id === '__custom__' || (!p.entity_id && p.entity_id_custom)) return (p.entity_id_custom || '').trim()
+  return (p.entity_id || '').trim()
+}
+
+function addTtsMediaPlayer() {
+  ttsMediaPlayersList.value.push({ entity_id: '', entity_id_custom: '', volume: 0.7 })
+}
+
+function removeTtsMediaPlayer(idx: number) {
+  ttsMediaPlayersList.value.splice(idx, 1)
+  if (ttsMediaPlayersList.value.length === 0) {
+    ttsMediaPlayersList.value.push({ entity_id: '', entity_id_custom: '', volume: 0.7 })
   }
 }
 
@@ -333,7 +335,21 @@ async function handlePasswordSubmit() {
 }
 
 watch(currentPage, (page) => {
-  if (page === 'tts') loadTtsConfig()
+  if (page === 'tts') {
+    loadTtsConfig()
+    ttsStatePollTimer = setInterval(fetchTtsEntityStates, 5000)
+  } else {
+    if (ttsStatePollTimer) {
+      clearInterval(ttsStatePollTimer)
+      ttsStatePollTimer = null
+    }
+  }
+})
+
+onUnmounted(() => {
+  if (ttsStatePollTimer) {
+    clearInterval(ttsStatePollTimer)
+  }
 })
 
 function cancelLock() {
@@ -353,7 +369,7 @@ async function loadTtsConfig() {
     ])
     if (playersRes.ok) {
       const p = await playersRes.json()
-      ttsMediaPlayers.value = p.media_players ?? []
+      ttsMediaPlayersListOptions.value = p.media_players ?? []
     }
     if (entitiesRes.ok) {
       const e = await entitiesRes.json()
@@ -362,13 +378,18 @@ async function loadTtsConfig() {
     if (configRes.ok) {
       const d = await configRes.json()
       ttsEnabled.value = d.enabled ?? false
-      const mp = (d.media_player ?? '').trim()
-      ttsMediaPlayer.value = mp
-      if (ttsMediaPlayers.value.includes(mp)) {
-        ttsMediaPlayerSelect.value = mp
-      } else {
-        ttsMediaPlayerSelect.value = mp ? '__custom__' : ''
-      }
+      const mps = d.media_players || []
+      const opts = ttsMediaPlayersListOptions.value
+      ttsMediaPlayersList.value = mps.length
+        ? mps.map((mp: { entity_id?: string; volume?: number }) => {
+            const eid = (mp.entity_id || '').trim()
+            return {
+              entity_id: opts.length && opts.includes(eid) ? eid : (eid ? '__custom__' : ''),
+              entity_id_custom: opts.length && opts.includes(eid) ? '' : eid,
+              volume: Math.max(0, Math.min(1, float(mp.volume, 0.7))),
+            }
+          })
+        : [{ entity_id: '', entity_id_custom: '', volume: 0.7 }]
       const te = (d.tts_engine ?? '').trim()
       ttsEngineCustom.value = te
       if (ttsEntities.value.includes(te)) {
@@ -382,22 +403,44 @@ async function loadTtsConfig() {
       if (d.messages?.new_bill) ttsMsgNewBill.value = d.messages.new_bill
       if (d.messages?.payment_received) ttsMsgPayment.value = d.messages.payment_received
     }
+    fetchTtsEntityStates()
   } catch (e) { console.error(e) }
+}
+
+function float(v: unknown, def: number): number {
+  const n = Number(v)
+  return isNaN(n) ? def : n
+}
+
+async function fetchTtsEntityStates() {
+  const ids = ttsMediaPlayersListValid.value
+  if (!ids.length) {
+    ttsEntityStates.value = {}
+    return
+  }
+  try {
+    const res = await fetch(`${getApiBase()}/ha-entity-states?entity_ids=${encodeURIComponent(ids.join(','))}`)
+    if (res.ok) {
+      ttsEntityStates.value = await res.json()
+    }
+  } catch { /* ignore */ }
 }
 
 async function handleTtsSave() {
   ttsSaving.value = true
   ttsMessage.value = null
   try {
+    const media_players = ttsMediaPlayersList.value
+      .filter((p) => getTtsMpEntityId(p))
+      .map((p) => ({ entity_id: getTtsMpEntityId(p), volume: p.volume ?? 0.7 }))
     const res = await fetch(`${getApiBase()}/tts-config`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         enabled: ttsEnabled.value,
-        media_player: effectiveTtsMediaPlayer.value,
+        media_players,
         tts_engine: effectiveTtsEngine.value,
         cache: ttsCache.value,
-        volume: 0.7,
         language: 'en',
         prefix: ttsPrefix.value,
         wait_for_idle: ttsWaitForIdle.value,
@@ -418,7 +461,7 @@ async function handleTtsSave() {
 }
 
 async function handleTtsTest() {
-  if (!ttsEnabled.value || !ttsMediaPlayer.value.trim()) return
+  if (!ttsEnabled.value || !ttsMediaPlayersListValid.value.length) return
   ttsTestLoading.value = true
   ttsMessage.value = null
   try {
@@ -527,14 +570,62 @@ async function handleTtsTest() {
 .ha-form-input-mt { margin-top: 0.5rem; }
 .ha-check-label { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; }
 .ha-check-label input { width: 18px; height: 18px; }
-.ha-tts-messages-section {
-  margin-top: 1rem;
-  padding-top: 1.25rem;
-  border-top: 1px solid #e0e0e0;
+.ha-tts-details {
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fafafa;
 }
-.ha-tts-section-title { font-size: 1rem; font-weight: 600; margin: 0 0 0.5rem 0; color: #333; }
-.ha-tts-section-desc { font-size: 0.85rem; color: #666; margin-bottom: 1rem; }
-.ha-tts-section-desc code { background: #f0f0f0; padding: 0.1em 0.3em; border-radius: 3px; font-size: 0.9em; }
+.ha-tts-details summary {
+  padding: 0.75rem 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+}
+.ha-tts-details[open] summary { border-bottom: 1px solid #e0e0e0; }
+.ha-tts-details-content { padding: 1rem; }
+.ha-tts-mp-card {
+  padding: 1rem;
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  margin-bottom: 0.75rem;
+}
+.ha-tts-mp-card:last-of-type { margin-bottom: 0; }
+.ha-tts-mp-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+.ha-tts-mp-status {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+.ha-tts-mp-status.state-idle { background: #e8f5e9; color: #2e7d32; }
+.ha-tts-mp-status.state-playing,
+.ha-tts-mp-status.state-streaming { background: #e3f2fd; color: #1565c0; }
+.ha-tts-mp-status.state-paused { background: #fff3e0; color: #e65100; }
+.ha-tts-mp-status.state-unavailable,
+.ha-tts-mp-status.state-off,
+.ha-tts-mp-status.state-unknown { background: #f5f5f5; color: #757575; }
+.ha-btn-sm { padding: 0.25rem 0.5rem; font-size: 1rem; line-height: 1; border: none; border-radius: 4px; cursor: pointer; }
+.ha-btn-red { background: #f44336; color: white; }
+.ha-btn-red:hover { background: #d32f2f; }
+.ha-button-secondary { background: #9e9e9e !important; color: white !important; }
+.ha-volume-slider {
+  width: 100%;
+  height: 8px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: #e0e0e0;
+  border-radius: 4px;
+}
+.ha-volume-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; background: #ff9800; border-radius: 50%; cursor: pointer; }
+.ha-volume-slider::-moz-range-thumb { width: 18px; height: 18px; background: #ff9800; border-radius: 50%; cursor: pointer; border: none; }
 .ha-tts-buttons { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 0.5rem; }
 .ha-tts-test-hint { font-size: 0.8rem; color: #666; margin-top: 0.75rem; }
 .ha-btn-test { background: #ff9800 !important; color: white !important; }
