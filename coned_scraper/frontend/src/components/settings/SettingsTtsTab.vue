@@ -5,20 +5,16 @@
       <span>TTS Alerts</span>
     </div>
     <div class="ha-card-content">
-      <p class="ha-tts-intro">
-        Configure text-to-speech for Con Edison events. Messages use <strong>(prefix), (message)</strong>.
-        When running as a Home Assistant addon, TTS is sent directly via the HA API.
-      </p>
-
-      <div class="ha-tts-form">
-        <div class="ha-form-row">
-          <label class="ha-toggle-wrap">
-            <input v-model="enabled" type="checkbox" class="ha-toggle" />
-            <span class="ha-toggle-slider"></span>
-            <span class="ha-toggle-label">Enable TTS Alerts</span>
+      <div class="info-text" style="margin-bottom: 1.5rem">
+        Configure text-to-speech for Con Edison events. When running as a Home Assistant addon, TTS is sent via the HA API. Messages use <strong>(prefix), (message)</strong>.
+      </div>
+      <form @submit.prevent="handleSave">
+        <div class="ha-form-group">
+          <label class="ha-check-label">
+            <input v-model="enabled" type="checkbox" />
+            <span>Enable TTS Alerts</span>
           </label>
         </div>
-
         <div class="ha-form-group">
           <label for="tts-media-player" class="ha-form-label">Media Player <span class="ha-required">*</span></label>
           <input
@@ -28,12 +24,11 @@
             class="ha-form-input ha-input-mono"
             placeholder="media_player.living_room"
           />
-          <div class="ha-form-hint">Home Assistant entity ID (e.g. media_player.kitchen)</div>
+          <div class="info-text">Home Assistant entity ID (e.g. media_player.kitchen)</div>
         </div>
-
         <div class="ha-form-group">
-          <label for="tts-service" class="ha-form-label">TTS Entity <span class="ha-required">*</span></label>
-          <select id="tts-service" v-model="ttsService" class="ha-form-input ha-form-select">
+          <label for="tts-service" class="ha-form-label">TTS Service</label>
+          <select id="tts-service" v-model="ttsService" class="ha-form-input">
             <option value="tts.google_translate_say">tts.google_translate_say</option>
             <option value="tts.cloud_say">tts.cloud_say</option>
             <option value="tts.amazon_polly_say">tts.amazon_polly_say</option>
@@ -45,27 +40,23 @@
             v-if="ttsService === '_custom'"
             v-model="ttsServiceCustom"
             type="text"
-            class="ha-form-input ha-input-mono ha-form-input-mt"
+            class="ha-form-input ha-input-mono"
+            style="margin-top: 0.5rem"
             placeholder="tts.your_service_say"
           />
         </div>
-
         <div class="ha-form-group">
-          <label for="tts-volume" class="ha-form-label">Volume</label>
-          <div class="ha-volume-row">
-            <input
-              id="tts-volume"
-              v-model.number="volume"
-              type="range"
-              class="ha-volume-slider"
-              min="0"
-              max="1"
-              step="0.05"
-            />
-            <span class="ha-volume-value">{{ volumePercent }}%</span>
-          </div>
+          <label for="tts-volume" class="ha-form-label">Volume ({{ volumePercent }}%)</label>
+          <input
+            id="tts-volume"
+            v-model.number="volume"
+            type="range"
+            class="ha-volume-slider"
+            min="0"
+            max="1"
+            step="0.05"
+          />
         </div>
-
         <div class="ha-form-group">
           <label for="tts-language" class="ha-form-label">Language</label>
           <input
@@ -76,7 +67,6 @@
             placeholder="e.g. en, en-US"
           />
         </div>
-
         <div class="ha-form-group">
           <label for="tts-prefix" class="ha-form-label">TTS Prefix</label>
           <input
@@ -86,54 +76,43 @@
             class="ha-form-input"
             placeholder="Message from Con Edison."
           />
-          <div class="ha-form-hint">Prepended to every message</div>
+          <div class="info-text">Prepended to every message</div>
         </div>
-
-        <div class="ha-form-row">
-          <label class="ha-toggle-wrap">
-            <input v-model="waitForIdle" type="checkbox" class="ha-toggle" />
-            <span class="ha-toggle-slider"></span>
-            <span class="ha-toggle-label">Wait for media player idle</span>
+        <div class="ha-form-group">
+          <label class="ha-check-label">
+            <input v-model="waitForIdle" type="checkbox" />
+            <span>Wait for media player idle</span>
           </label>
-          <div class="ha-form-hint">Only play when media player is idle; otherwise wait up to 5 minutes</div>
+          <div class="info-text">Only play when media player is idle; otherwise wait up to 5 minutes</div>
         </div>
 
-        <button type="button" class="ha-button ha-button-primary ha-btn-save" :disabled="isLoading" @click="handleSave">
-          {{ isLoading ? 'Saving...' : 'Save TTS Config' }}
-        </button>
-      </div>
-
-      <details class="ha-tts-section">
-        <summary>TTS Message Templates</summary>
-        <p class="ha-message-desc">
-          Use <code v-pre>{placeholder}</code> for variables (e.g. <code v-pre>{amount}</code>, <code v-pre>{balance}</code>, <code v-pre>{month_range}</code>).
-        </p>
-        <div v-for="(msg, key) in messageEntries" :key="key" class="ha-form-group">
-          <label :for="`msg-${key}`" class="ha-form-label">{{ formatLabel(key) }}</label>
-          <input
-            :id="`msg-${key}`"
-            v-model="messages[key]"
-            type="text"
-            class="ha-form-input"
-            :placeholder="placeholders[key]"
-          />
+        <div class="ha-section-divider">
+          <h4 class="ha-form-subtitle">Message Templates</h4>
+          <p class="info-text">Use <code>{placeholder}</code> for variables (e.g. <code>{amount}</code>, <code>{balance}</code>, <code>{month_range}</code>).</p>
+          <div v-for="(msg, key) in messageEntries" :key="key" class="ha-form-group">
+            <label :for="`msg-${key}`" class="ha-form-label">{{ formatLabel(key) }}</label>
+            <input
+              :id="`msg-${key}`"
+              v-model="messages[key]"
+              type="text"
+              class="ha-form-input"
+              :placeholder="placeholders[key]"
+            />
+          </div>
         </div>
-        <button type="button" class="ha-button ha-button-primary" :disabled="isLoading" @click="handleSave">
-          {{ isLoading ? 'Saving...' : 'Save Messages' }}
-        </button>
-      </details>
 
-      <div class="ha-tts-actions">
-        <button
-          type="button"
-          class="ha-button ha-btn-test"
-          :disabled="!enabled || !mediaPlayer.trim() || testLoading"
-          @click="handleTest"
-        >
-          {{ testLoading ? 'Sending...' : 'Test TTS' }}
-        </button>
-      </div>
-
+        <div class="ha-form-actions">
+          <button type="submit" class="ha-button ha-button-primary" :disabled="isLoading">{{ isLoading ? 'Saving...' : 'Save TTS Config' }}</button>
+          <button
+            type="button"
+            class="ha-button ha-btn-test"
+            :disabled="!enabled || !mediaPlayer.trim() || testLoading"
+            @click="handleTest"
+          >
+            {{ testLoading ? 'Sending...' : 'Test TTS' }}
+          </button>
+        </div>
+      </form>
       <div v-if="message" :class="['ha-message', message.type]">{{ message.text }}</div>
     </div>
   </div>
@@ -160,9 +139,7 @@ const testLoading = ref(false)
 const message = ref<{ type: 'success' | 'error'; text: string } | null>(null)
 
 const messageEntries = computed(() => Object.keys(messages.value))
-
 const volumePercent = computed(() => Math.round((volume.value || 0) * 100))
-
 const effectiveTtsService = computed(() =>
   ttsService.value === '_custom' ? ttsServiceCustom.value.trim() : ttsService.value
 )
@@ -258,87 +235,13 @@ onMounted(loadConfig)
 </script>
 
 <style scoped>
-.ha-tts-intro {
-  margin-bottom: 1.5rem;
-  font-size: 0.95rem;
-  color: #555;
-  line-height: 1.5;
-}
-.ha-tts-intro strong { color: #333; }
-
-.ha-tts-form {
-  display: flex;
-  flex-direction: column;
-  gap: 1.25rem;
-  margin-bottom: 1.5rem;
-}
-
-.ha-form-row { margin-bottom: 0.5rem; }
-.ha-form-row .ha-form-hint { margin-top: 0.25rem; margin-left: 0; }
-
-.ha-form-group { display: flex; flex-direction: column; gap: 0.35rem; }
-.ha-form-hint { font-size: 0.8rem; color: #666; margin-top: 0.25rem; }
+.ha-input-mono { font-family: ui-monospace, monospace; font-size: 0.9rem; }
 .ha-required { color: #e65100; }
+.ha-check-label { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; }
+.ha-check-label input { width: 18px; height: 18px; flex-shrink: 0; }
 
-.ha-toggle-wrap {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  cursor: pointer;
-}
-.ha-toggle {
-  position: absolute;
-  opacity: 0;
-  width: 0;
-  height: 0;
-}
-.ha-toggle-label {
-  font-weight: 500;
-  color: #333;
-}
-.ha-toggle-slider {
-  position: relative;
-  width: 44px;
-  height: 24px;
-  background: #ccc;
-  border-radius: 24px;
-  transition: background 0.2s;
-}
-.ha-toggle-slider::before {
-  content: '';
-  position: absolute;
-  width: 20px;
-  height: 20px;
-  left: 2px;
-  top: 2px;
-  background: white;
-  border-radius: 50%;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
-  transition: transform 0.2s;
-}
-.ha-toggle:checked + .ha-toggle-slider {
-  background: #03a9f4;
-}
-.ha-toggle:checked + .ha-toggle-slider::before {
-  transform: translateX(20px);
-}
-
-.ha-form-select {
-  cursor: pointer;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%23666' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10l-5 5z'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 0.75rem center;
-  padding-right: 2rem;
-}
-.ha-form-input-mt { margin-top: 0.5rem; }
-
-.ha-volume-row {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-}
 .ha-volume-slider {
-  flex: 1;
+  width: 100%;
   height: 8px;
   -webkit-appearance: none;
   appearance: none;
@@ -353,7 +256,6 @@ onMounted(loadConfig)
   background: #ff9800;
   border-radius: 50%;
   cursor: pointer;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
 }
 .ha-volume-slider::-moz-range-thumb {
   width: 20px;
@@ -363,47 +265,35 @@ onMounted(loadConfig)
   cursor: pointer;
   border: none;
 }
-.ha-volume-value {
-  min-width: 3.5rem;
-  font-weight: 500;
-  color: #333;
-  font-size: 0.9rem;
-}
 
-.ha-btn-save { align-self: flex-start; }
-
-.ha-tts-section {
+.ha-section-divider {
   margin-top: 1.5rem;
-  padding: 1rem 1.25rem;
-  background: #f9f9f9;
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
+  padding-top: 1.5rem;
+  border-top: 1px solid #e0e0e0;
 }
-.ha-tts-section summary {
-  cursor: pointer;
+.ha-form-subtitle {
+  font-size: 1rem;
   font-weight: 600;
+  margin: 0 0 0.5rem 0;
   color: #333;
-  margin-bottom: 0.75rem;
 }
-.ha-tts-section[open] summary { margin-bottom: 1rem; }
-.ha-message-desc {
-  margin-bottom: 1rem;
-  font-size: 0.9rem;
-  color: #555;
-}
-.ha-message-desc code {
-  background: #eee;
-  padding: 0.15rem 0.4rem;
-  border-radius: 4px;
-  font-size: 0.85rem;
+code {
+  font-family: ui-monospace, monospace;
+  font-size: 0.85em;
+  background: #f0f0f0;
+  padding: 0.1em 0.3em;
+  border-radius: 3px;
 }
 
-.ha-tts-actions { margin-top: 1.25rem; }
+.ha-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
 .ha-btn-test {
   background: #ff9800 !important;
   color: white !important;
-  padding: 0.65rem 1.25rem;
-  font-weight: 600;
 }
 .ha-btn-test:hover:not(:disabled) {
   background: #f57c00 !important;
@@ -415,12 +305,9 @@ onMounted(loadConfig)
 
 .ha-message {
   margin-top: 1rem;
-  padding: 0.75rem 1rem;
-  border-radius: 6px;
-  font-size: 0.9rem;
+  padding: 0.75rem;
+  border-radius: 4px;
 }
 .ha-message.success { background: #e8f5e9; color: #2e7d32; }
 .ha-message.error { background: #ffebee; color: #c62828; }
-
-.ha-input-mono { font-family: ui-monospace, monospace; }
 </style>

@@ -63,17 +63,19 @@
         </div>
       </div>
 
-      <!-- Console -->
+      <!-- Sub-pages (Console, Credentials, MQTT, etc.) -->
       <template v-else>
-        <button type="button" class="ha-back-btn" @click="currentPage = 'menu'">← Back to Settings</button>
-        <Dashboard v-if="currentPage === 'console'" />
-        <SettingsCredentialsTab v-else-if="currentPage === 'credentials'" />
-        <SettingsAutomatedTab v-else-if="currentPage === 'automated'" />
-        <SettingsMqttTab v-else-if="currentPage === 'mqtt'" />
-        <SettingsAppTab v-else-if="currentPage === 'app-settings'" />
-        <SettingsPayeesPaymentsTab v-else-if="currentPage === 'payees-payments'" />
-        <SettingsTtsTab v-else-if="currentPage === 'tts'" />
-        <SettingsImapTab v-else-if="currentPage === 'imap'" />
+        <div class="ha-settings-page">
+          <button type="button" class="ha-back-btn" @click="currentPage = 'menu'">← Back to Settings</button>
+          <Dashboard v-if="currentPage === 'console'" />
+          <SettingsCredentialsTab v-else-if="currentPage === 'credentials'" />
+          <SettingsAutomatedTab v-else-if="currentPage === 'automated'" />
+          <SettingsMqttTab v-else-if="currentPage === 'mqtt'" />
+          <SettingsAppTab v-else-if="currentPage === 'app-settings'" />
+          <SettingsPayeesPaymentsTab v-else-if="currentPage === 'payees-payments'" />
+          <SettingsTtsTab v-else-if="currentPage === 'tts'" />
+          <SettingsImapTab v-else-if="currentPage === 'imap'" />
+        </div>
       </template>
     </template>
   </div>
@@ -267,6 +269,10 @@ function cancelLock() {
 .ha-menu-label { font-weight: 600; font-size: 1rem; }
 .ha-menu-desc { font-size: 0.8rem; color: #666; }
 .ha-menu-arrow { margin-left: auto; color: #999; }
+.ha-settings-page {
+  display: block;
+  min-height: 0;
+}
 .ha-back-btn {
   display: flex;
   align-items: center;

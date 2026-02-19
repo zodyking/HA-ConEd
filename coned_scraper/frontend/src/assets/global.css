@@ -593,6 +593,12 @@ body {
   gap: 0.75rem;
   min-height: 0;
 }
+.ha-settings .ha-settings-page {
+  flex: 1 1 auto;
+}
+.ha-settings .ha-settings-page > .ha-card {
+  flex-shrink: 0;
+}
 
 .ha-totp-display {
   background: #f5f5f5;
