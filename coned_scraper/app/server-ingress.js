@@ -22,10 +22,15 @@ if (!INGRESS_PATH) {
 const BASE_TAG = `<base href="${INGRESS_PATH}/">`
 
 function forward(req, res) {
+  // Strip ingress path if HA forwards full path (addon may receive / or /api/hassio_ingress/XXX/...)
+  let path = req.url
+  if (path.startsWith(INGRESS_PATH)) {
+    path = path.slice(INGRESS_PATH.length) || '/'
+  }
   const opts = {
     hostname: '127.0.0.1',
     port: NEXT_PORT,
-    path: req.url,
+    path,
     method: req.method,
     headers: req.headers,
   }
@@ -36,10 +41,13 @@ function forward(req, res) {
       proxyRes.on('data', (c) => chunks.push(c))
       proxyRes.on('end', () => {
         let body = Buffer.concat(chunks).toString('utf8')
-        if (body.includes('<head>') && !body.includes('<base')) {
-          body = body.replace('<head>', `<head>${BASE_TAG}`)
-        } else if (/<head\s/.test(body) && !body.includes('<base')) {
-          body = body.replace(/<head\s/, `<head>${BASE_TAG}<head `)
+        if (!body.includes('<base')) {
+          // Inject base tag as first child of head (handles <head> and <head attr="...">)
+          if (/<head[^>]*>/i.test(body)) {
+            body = body.replace(/(<head[^>]*>)/i, `$1${BASE_TAG}`)
+          } else if (/<html[^>]*>/i.test(body)) {
+            body = body.replace(/(<html[^>]*>)/i, `$1${BASE_TAG}`)
+          }
         }
         const h = { ...proxyRes.headers }
         delete h['content-length']
