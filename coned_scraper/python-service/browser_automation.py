@@ -16,20 +16,22 @@ LIVE_PREVIEW_FILENAME = "live_preview.png"
 async def type_text_slowly(page, selector: str, text: str, delay: int = 50):
     """
     Type text character by character to simulate human typing.
-    Never uses paste or fill - only types.
+    Uses keyboard.type() only - never paste, never fill().
+    Dispatches keydown/keypress/keyup per character for sites that detect paste.
     """
     try:
         element = page.locator(selector).first
+        await element.wait_for(state="visible", timeout=10000)
         await element.click()
         await asyncio.sleep(0.2)  # Small delay after click
         
-        # Clear the field first by selecting all and deleting
+        # Clear the field first by selecting all and deleting (never use fill/paste)
         await page.keyboard.press("Control+A")
         await asyncio.sleep(0.1)
         await page.keyboard.press("Delete")
         await asyncio.sleep(0.1)
         
-        # Type the entire text character by character with delay
+        # Type character by character - simulates real typing, not paste
         await page.keyboard.type(text, delay=delay)
         
         logger.info(f"Typed {len(text)} characters into {selector}")
@@ -111,10 +113,11 @@ async def perform_login(username: str, password: str, totp_code: str):
             username_field = None
             for selector in username_selectors:
                 try:
-                    if await page.locator(selector).count() > 0:
+                    loc = page.locator(selector).first
+                    if await loc.count() > 0 and await loc.is_visible():
                         username_field = selector
                         break
-                except:
+                except Exception:
                     continue
             
             if not username_field:
@@ -139,10 +142,11 @@ async def perform_login(username: str, password: str, totp_code: str):
             password_field = None
             for selector in password_selectors:
                 try:
-                    if await page.locator(selector).count() > 0:
+                    loc = page.locator(selector).first
+                    if await loc.count() > 0 and await loc.is_visible():
                         password_field = selector
                         break
-                except:
+                except Exception:
                     continue
             
             if not password_field:
@@ -155,7 +159,10 @@ async def perform_login(username: str, password: str, totp_code: str):
             add_log("success", "Password entered successfully")
             await take_live_preview(page, "Password entered")
             
-            # Click login/submit button
+            # Brief delay before submit to allow any blur/validation handlers to complete
+            await asyncio.sleep(0.3)
+            
+            # Click login/submit button (only after email and password are fully typed)
             logger.info("Looking for submit button...")
             submit_selectors = [
                 'button[type="submit"]',
@@ -170,10 +177,11 @@ async def perform_login(username: str, password: str, totp_code: str):
             submit_button = None
             for selector in submit_selectors:
                 try:
-                    if await page.locator(selector).count() > 0:
+                    loc = page.locator(selector).first
+                    if await loc.count() > 0 and await loc.is_visible():
                         submit_button = selector
                         break
-                except:
+                except Exception:
                     continue
             
             if not submit_button:
@@ -186,13 +194,33 @@ async def perform_login(username: str, password: str, totp_code: str):
             await asyncio.sleep(3)  # Wait for potential redirect or TOTP field
             await take_live_preview(page, "Login form submitted")
             
-            # Check if TOTP field appears
+            # Check for login error (invalid credentials) - fail fast before TOTP
+            try:
+                content = (await page.content()).lower()
+                if any(phrase in content for phrase in [
+                    'password match', 'no email address', 'password you entered is incorrect',
+                    'email address or password', 'incorrect. please try again'
+                ]):
+                    raise Exception(
+                        "Login failed: Email and/or password incorrect. "
+                        "Please verify your credentials in Settings > Credentials."
+                    )
+            except Exception as e:
+                if "Login failed" in str(e):
+                    raise
+            
+            # Check if TOTP field appears (ConEd-specific first, then generic)
             logger.info("Checking for TOTP/MFA field...")
             totp_selectors = [
+                'input#form-login-mta-code',           # ConEd exact ID
+                'input[name="LoginMFACode"]',           # ConEd MFA field name
+                'input[id*="mta"]',                     # ConEd form-login-mta-code
                 'input[name*="totp"]',
                 'input[name*="mfa"]',
+                'input[name*="MFA"]',
                 'input[name*="code"]',
                 'input[name*="verification"]',
+                'input[type="tel"][id*="code"]',        # ConEd uses type="tel"
                 'input[type="text"][placeholder*="code" i]',
                 'input[type="text"][placeholder*="verification" i]',
                 'input[id*="totp"]',
@@ -203,10 +231,11 @@ async def perform_login(username: str, password: str, totp_code: str):
             totp_field = None
             for selector in totp_selectors:
                 try:
-                    if await page.locator(selector).count() > 0:
+                    loc = page.locator(selector).first
+                    if await loc.count() > 0 and await loc.is_visible():
                         totp_field = selector
                         break
-                except:
+                except Exception:
                     continue
             
             if totp_field:

@@ -1,6 +1,6 @@
 # ConEd Scraper
 
-Automated ConEd billing data scraper with webhooks and web UI. Built with Next.js 15 and Python FastAPI.
+Automated ConEd billing data scraper with MQTT and web UI. Built with Vue 3, Vite, and Python FastAPI.
 
 ## Deployment Options
 
@@ -22,7 +22,7 @@ Automated ConEd billing data scraper with webhooks and web UI. Built with Next.j
 1. Create project → Docker Compose
 2. Connect `https://github.com/zodyking/conedison`, compose file: `coned_scraper/docker-compose.yml`
 3. Deploy, attach domain to `web` service
-4. Configure credentials and webhooks in Settings
+4. Configure credentials and MQTT in Settings
 
 ### Local Development
 
@@ -31,31 +31,15 @@ Automated ConEd billing data scraper with webhooks and web UI. Built with Next.j
 cd python-service && run.bat   # or ./run.sh
 
 # Next.js frontend (port 3000)
-cd app && npm install && npm run dev
+cd frontend && npm install && npm run dev
 ```
 
 ## Features
 
 - Automated scraping with configurable schedule
-- Smart webhooks (only on data changes)
+- MQTT integration for Home Assistant
 - Encrypted credential storage
 - Real-time logs and account ledger
-- Webhook integration for Home Assistant
-
-## Webhook Integration
-
-Configure webhooks in Settings, then add to `configuration.yaml`:
-
-```yaml
-sensor:
-  - platform: webhook
-    webhook_id: YOUR_WEBHOOK_ID
-    name: "ConEd Account Balance"
-    state: "{{ trigger.json.data.account_balance }}"
-    unit_of_measurement: "$"
-```
-
-Payloads: `account_balance`, `latest_bill`, `last_payment`, `previous_bill`
 
 ## Structure
 
@@ -63,7 +47,7 @@ Payloads: `account_balance`, `latest_bill`, `last_payment`, `previous_bill`
 ├── config.yaml, build.yaml, Dockerfile   # HA addon
 ├── docker-compose.yml, Dockerfile.web    # Docker / Dokploy
 ├── rootfs/                               # S6 overlay (addon)
-├── app/                                  # Next.js frontend
+├── frontend/                              # Vue 3 + Vite frontend
 └── python-service/                      # Python FastAPI + Playwright
 ```
 

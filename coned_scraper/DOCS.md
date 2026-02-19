@@ -1,6 +1,6 @@
 # ConEd Scraper - Home Assistant Addon
 
-Automated ConEd billing data scraper with webhooks and web UI. Access the panel directly from your Home Assistant sidebar.
+Automated ConEd billing data scraper with MQTT and web UI. Access the panel directly from your Home Assistant sidebar.
 
 ## Installation
 
@@ -29,27 +29,16 @@ Controls the verbosity of addon logs. Default: `info`
    - ConEd username
    - ConEd password
    - TOTP secret (from Google Authenticator)
-3. (Optional) Configure webhooks for Home Assistant integration.
+3. (Optional) Configure MQTT for Home Assistant integration.
 4. Enable the automated scraping schedule if desired.
 
 ## Data Persistence
 
-All addon data (credentials, webhooks, schedule, database) is stored in the addon configuration directory and persists across restarts.
+All addon data (credentials, MQTT config, schedule, database) is stored in the addon configuration directory and persists across restarts.
 
-## Webhook Integration with Home Assistant
+## MQTT Integration with Home Assistant
 
-Configure webhooks in the Settings tab, then add sensors to your `configuration.yaml`:
-
-```yaml
-sensor:
-  - platform: webhook
-    webhook_id: YOUR_WEBHOOK_ID
-    name: "ConEd Account Balance"
-    state: "{{ trigger.json.data.account_balance }}"
-    unit_of_measurement: "$"
-```
-
-Webhook payloads include: `account_balance`, `latest_bill`, `last_payment`, `previous_bill`.
+Configure MQTT in the Settings tab. The addon publishes to MQTT topics for `account_balance`, `latest_bill`, `last_payment`, `previous_bill`, and payee summaries. Add MQTT sensors in Home Assistant to consume this data.
 
 ## Ingress
 

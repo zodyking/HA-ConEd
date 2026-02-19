@@ -10,21 +10,30 @@
         <div class="ha-card-content">
           <form @submit.prevent="handlePasswordSubmit">
             <div class="ha-form-group">
-              <label for="settings-password" class="ha-form-label">Enter Settings Password</label>
-              <input
-                id="settings-password"
-                v-model="passwordInput"
-                type="password"
-                class="ha-form-input"
-                placeholder="Default: 0000"
-                required
-              />
+              <label class="ha-form-label">Enter 4-digit PIN</label>
+              <div class="ha-pin-row">
+                <input
+                  v-for="(_, i) in 4"
+                  :key="i"
+                  :ref="el => { if (el) pinRefs[i] = el as HTMLInputElement }"
+                  v-model="pinDigits[i]"
+                  type="password"
+                  inputmode="numeric"
+                  maxlength="1"
+                  autocomplete="one-time-code"
+                  class="ha-pin-input"
+                  :class="{ error: passwordError }"
+                  @input="onPinInput(i, $event)"
+                  @keydown="handlePinKeydown($event, i)"
+                  @paste="onPinPaste"
+                />
+              </div>
               <div v-if="passwordError" class="ha-password-error">{{ passwordError }}</div>
-              <div class="info-text">Default password is <strong>0000</strong>. Change it in App Settings after unlocking.</div>
+              <div class="ha-pin-hint">Default PIN is <strong>0000</strong>. Change in App Settings after unlocking.</div>
             </div>
             <div class="ha-form-actions">
               <button type="button" class="ha-button ha-button-gray" @click="cancelLock">Cancel</button>
-              <button type="submit" class="ha-button ha-button-primary">Unlock Settings</button>
+              <button type="submit" class="ha-button ha-button-primary" :disabled="pinDigits.some(d => !d)">Unlock Settings</button>
             </div>
           </form>
         </div>
@@ -61,7 +70,6 @@
         <Dashboard v-if="currentPage === 'console'" />
         <SettingsCredentialsTab v-else-if="currentPage === 'credentials'" />
         <SettingsAutomatedTab v-else-if="currentPage === 'automated'" />
-        <SettingsWebhooksTab v-else-if="currentPage === 'webhooks'" />
         <SettingsMqttTab v-else-if="currentPage === 'mqtt'" />
         <SettingsAppTab v-else-if="currentPage === 'app-settings'" />
         <SettingsPayeesTab v-else-if="currentPage === 'payees'" />
@@ -73,12 +81,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, nextTick } from 'vue'
 import { getApiBase } from '../lib/api-base'
 import Dashboard from './Dashboard.vue'
 import SettingsCredentialsTab from './settings/SettingsCredentialsTab.vue'
 import SettingsAutomatedTab from './settings/SettingsAutomatedTab.vue'
-import SettingsWebhooksTab from './settings/SettingsWebhooksTab.vue'
 import SettingsMqttTab from './settings/SettingsMqttTab.vue'
 import SettingsAppTab from './settings/SettingsAppTab.vue'
 import SettingsPayeesTab from './settings/SettingsPayeesTab.vue'
@@ -90,7 +97,6 @@ type Page =
   | 'console'
   | 'credentials'
   | 'automated'
-  | 'webhooks'
   | 'mqtt'
   | 'app-settings'
   | 'payees'
@@ -99,14 +105,14 @@ type Page =
 
 const currentPage = ref<Page>('menu')
 const isUnlocked = ref(false)
-const passwordInput = ref('')
+const pinDigits = ref<string[]>(['', '', '', ''])
+const pinRefs = ref<(HTMLInputElement | null)[]>([])
 const passwordError = ref('')
 
 const menuItems = [
   { id: 'console' as Page, icon: '📊', label: 'Console', description: 'View logs and system status' },
   { id: 'credentials' as Page, icon: '🔐', label: 'Credentials', description: 'Con Edison login credentials' },
   { id: 'automated' as Page, icon: '⏰', label: 'Automated Scrape', description: 'Schedule automatic data scraping' },
-  { id: 'webhooks' as Page, icon: '🔗', label: 'Webhooks', description: 'Configure webhook notifications' },
   { id: 'mqtt' as Page, icon: '📡', label: 'MQTT', description: 'Home Assistant MQTT integration' },
   { id: 'payees' as Page, icon: '👥', label: 'Payees', description: 'Manage users and responsibility %' },
   { id: 'payments' as Page, icon: '💳', label: 'Payments', description: 'Audit and manage payments' },
@@ -126,12 +132,13 @@ async function verifyPassword(pwd: string) {
       if (data.valid) {
         isUnlocked.value = true
         passwordError.value = ''
+        pinDigits.value = ['', '', '', '']
         return true
       }
-      passwordError.value = 'Incorrect password'
+      passwordError.value = 'Incorrect PIN'
       return false
     }
-    passwordError.value = 'Failed to verify password'
+    passwordError.value = 'Connection error'
     return false
   } catch {
     passwordError.value = 'Connection error'
@@ -139,11 +146,51 @@ async function verifyPassword(pwd: string) {
   }
 }
 
+function getPinValue() {
+  return pinDigits.value.join('')
+}
+
+function onPinInput(index: number, ev: Event) {
+  const el = ev.target as HTMLInputElement
+  const v = el.value.replace(/\D/g, '').slice(-1)
+  pinDigits.value[index] = v
+  passwordError.value = ''
+  if (v && index < 3) {
+    nextTick(() => pinRefs.value[index + 1]?.focus())
+  } else if (v && index === 3) {
+    nextTick(() => handlePasswordSubmit())
+  }
+}
+
+function onPinPaste(ev: ClipboardEvent) {
+  ev.preventDefault()
+  const pasted = (ev.clipboardData?.getData('text') || '').replace(/\D/g, '').slice(0, 4)
+  for (let i = 0; i < 4; i++) {
+    pinDigits.value[i] = pasted[i] || ''
+  }
+  passwordError.value = ''
+  const nextIdx = Math.min(pasted.length, 3)
+  nextTick(() => pinRefs.value[nextIdx]?.focus())
+}
+
+function handlePinKeydown(ev: KeyboardEvent, index: number) {
+  const target = ev.target as HTMLInputElement
+  if (ev.key === 'Backspace' && !target.value && index > 0) {
+    ev.preventDefault()
+    pinDigits.value[index - 1] = ''
+    nextTick(() => pinRefs.value[index - 1]?.focus())
+  }
+}
+
 async function handlePasswordSubmit() {
-  await verifyPassword(passwordInput.value)
+  const pwd = getPinValue()
+  if (pwd.length !== 4) return
+  await verifyPassword(pwd)
 }
 
 function cancelLock() {
+  pinDigits.value = ['', '', '', '']
+  passwordError.value = ''
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('navigateToLedger'))
   }
@@ -160,7 +207,42 @@ function cancelLock() {
   justify-content: center;
   z-index: 1000;
 }
-.ha-lock-card { max-width: 400px; margin: 1rem; }
+.ha-lock-card { max-width: 360px; margin: 1rem; }
+.ha-pin-row {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: center;
+  margin: 1.25rem 0;
+}
+.ha-pin-input {
+  width: 56px;
+  height: 56px;
+  font-size: 1.5rem;
+  font-weight: 600;
+  text-align: center;
+  border: 2px solid #e0e0e0;
+  border-radius: 12px;
+  background: #fafafa;
+  color: #212121;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.ha-pin-input:focus {
+  outline: none;
+  border-color: #03a9f4;
+  box-shadow: 0 0 0 3px rgba(3, 169, 244, 0.2);
+}
+.ha-pin-input.error {
+  border-color: #d32f2f;
+}
+.ha-pin-input.error:focus {
+  box-shadow: 0 0 0 3px rgba(211, 47, 47, 0.2);
+}
+.ha-pin-hint {
+  font-size: 0.85rem;
+  color: #666;
+  margin-top: 1rem;
+  line-height: 1.4;
+}
 .ha-password-error { color: #d32f2f; font-size: 0.85rem; margin-top: 0.5rem; }
 .ha-form-actions { display: flex; gap: 0.5rem; }
 .ha-button-gray { flex: 1; background: #757575 !important; color: white; }

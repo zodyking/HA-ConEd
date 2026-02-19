@@ -1034,6 +1034,30 @@ def get_user_by_card(card_last_four: str) -> Optional[Dict[str, Any]]:
     
     return dict(row) if row else None
 
+def get_user_cards(user_id: int) -> List[Dict[str, Any]]:
+    """Get all cards for a payee user"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT id, user_id, card_last_four, card_label
+        FROM user_cards
+        WHERE user_id = ?
+        ORDER BY id
+    ''', (user_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+def update_user_card(card_id: int, card_label: Optional[str] = None) -> bool:
+    """Update a card's label"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('UPDATE user_cards SET card_label = ? WHERE id = ?', (card_label or "", card_id))
+    updated = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return updated
+
 def delete_user_card(card_id: int) -> bool:
     """Delete a card"""
     conn = get_connection()
