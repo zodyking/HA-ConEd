@@ -247,18 +247,19 @@ async def build_bill_summary_message(bill_summary_config: dict, tts_config: dict
     avg_daily_num = _parse_float(avg_daily_raw) or 0.0
     current_usage_num = _parse_float(current_usage_raw) or 0.0
 
-    # Build message parts
+    # Build message parts: report each value, then its commentary, before moving to the next topic
     parts = [
         f"Your latest Con Edison bill was {bill_str} and your current account balance is {balance_str}."
     ]
+    parts.append(_bill_message(bill_amt))
+
     if config.get("sensor_current_usage"):
         parts.append(f" You have used {current_usage} so far this billing cycle.")
         parts.append(_current_usage_message(current_usage_num))
-    parts.append(_bill_message(bill_amt))
-    parts.append(
-        f" Your average daily power consumption is {avg_daily}. "
-    )
+
+    parts.append(f" Your average daily power consumption is {avg_daily}.")
     parts.append(_daily_usage_message(avg_daily_num))
+
     parts.append(
         f" Based on current usage patterns, we estimate your bill will be {est_str} "
         "by the end of the billing cycle."
