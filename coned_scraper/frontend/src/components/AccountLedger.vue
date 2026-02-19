@@ -17,10 +17,28 @@
 
     <!-- PDF Bill Modal -->
     <PdfViewer
-      v-if="showPdfModal && pdfExists"
-      :url="`${getApiBase()}/bill-document`"
-      @close="showPdfModal = false"
+      v-if="showPdfModal && viewingBillId"
+      :url="`${getApiBase()}/bill-document/${viewingBillId}`"
+      @close="showPdfModal = false; viewingBillId = null"
     />
+    <!-- Add PDF Modal -->
+    <div v-if="addPdfBillId" class="ha-modal-overlay ha-add-pdf-overlay" @click.self="addPdfBillId = null">
+      <div class="ha-modal ha-add-pdf-modal">
+        <div class="ha-modal-header">
+          <span>Add PDF — {{ getBillMonthRange(addPdfBillId) }}</span>
+          <button type="button" class="ha-modal-close" @click="addPdfBillId = null">×</button>
+        </div>
+        <div class="ha-modal-body">
+          <p class="ha-modal-desc">Paste the Con Edison bill PDF link, then click Download.</p>
+          <textarea v-model="addPdfUrl" class="ha-form-input" placeholder="https://..." rows="3" />
+          <div v-if="addPdfMessage" :class="['ha-message', addPdfMessage.type]">{{ addPdfMessage.text }}</div>
+        </div>
+        <div class="ha-modal-footer">
+          <button type="button" class="ha-btn ha-btn-gray" @click="addPdfBillId = null">Cancel</button>
+          <button type="button" class="ha-btn ha-btn-primary" :disabled="addPdfLoading || !addPdfUrl.trim()" @click="handleAddPdf">Download</button>
+        </div>
+      </div>
+    </div>
 
     <!-- Loading -->
     <div v-if="isLoading" class="ha-loading-state">
@@ -82,7 +100,7 @@
             <button
               class="ha-summary-btn"
               :class="pdfExists ? 'green' : 'orange'"
-              @click="pdfExists ? (showPdfModal = true) : $emit('navigate', 'settings')"
+              @click="pdfExists ? openLatestPdf() : openAddPdfForLatest()"
             >
               {{ pdfExists ? 'Latest Bill' : 'Add Bill' }}
             </button>
@@ -116,6 +134,24 @@
                     </div>
                   </div>
                   <div class="ha-bill-amount">{{ bill.bill_total || '-' }}</div>
+                  <div class="ha-bill-pdf-actions">
+                    <button
+                      v-if="bill.pdf_exists"
+                      type="button"
+                      class="ha-btn-link"
+                      @click="openBillPdf(bill.id)"
+                    >
+                      📄 View PDF
+                    </button>
+                    <button
+                      v-else
+                      type="button"
+                      class="ha-btn-link ha-btn-add-pdf"
+                      @click="openAddPdfModal(bill.id)"
+                    >
+                      + Add PDF
+                    </button>
+                  </div>
                 </div>
               </div>
               <template v-if="bill.payments && bill.payments.length">
@@ -222,7 +258,7 @@ import { ajaxLoader } from '../lib/assets'
 import PdfViewer from './PdfViewer.vue'
 import BillPayeeSummary from './BillPayeeSummary.vue'
 
-defineEmits<{ (e: 'navigate', tab: 'console' | 'settings'): void }>()
+const emit = defineEmits<{ (e: 'navigate', tab: 'console' | 'settings'): void }>()
 
 interface Payment {
   id: number
@@ -249,6 +285,7 @@ interface Bill {
   month_range: string
   bill_total: string
   amount_numeric: number | null
+  pdf_exists?: boolean
   first_scraped_at: string
   last_scraped_at: string
   scrape_count: number
@@ -270,7 +307,12 @@ const isLoading = ref(true)
 const apiError = ref<string | null>(null)
 const showScreenshotModal = ref(false)
 const showPdfModal = ref(false)
+const viewingBillId = ref<number | null>(null)
 const pdfExists = ref(false)
+const addPdfBillId = ref<number | null>(null)
+const addPdfUrl = ref('')
+const addPdfMessage = ref<{ type: 'success' | 'error'; text: string } | null>(null)
+const addPdfLoading = ref(false)
 const billSummaries = ref<Record<number, any>>({})
 
 function formatDateShort(date: string) {
@@ -331,6 +373,67 @@ async function checkPdfExists() {
   }
 }
 
+function openLatestPdf() {
+  const b = ledgerData.value?.bills?.find((x: { pdf_exists?: boolean }) => x.pdf_exists)
+  if (b) {
+    viewingBillId.value = b.id
+    showPdfModal.value = true
+  }
+}
+
+function openBillPdf(billId: number) {
+  viewingBillId.value = billId
+  showPdfModal.value = true
+}
+
+function openAddPdfModal(billId: number) {
+  addPdfBillId.value = billId
+  addPdfUrl.value = ''
+  addPdfMessage.value = null
+}
+
+function openAddPdfForLatest() {
+  const bills = ledgerData.value?.bills ?? []
+  const latestWithoutPdf = bills.find((b: Bill) => !b.pdf_exists)
+  const target = latestWithoutPdf ?? bills[0]
+  if (target) {
+    openAddPdfModal(target.id)
+  } else {
+    emit('navigate', 'settings')
+  }
+}
+
+function getBillMonthRange(billId: number) {
+  const b = ledgerData.value?.bills?.find((x: { id: number }) => x.id === billId)
+  return b?.month_range || b?.bill_cycle_date || `Bill ${billId}`
+}
+
+async function handleAddPdf() {
+  if (!addPdfBillId.value || !addPdfUrl.value.trim()) return
+  addPdfLoading.value = true
+  addPdfMessage.value = null
+  try {
+    const res = await fetch(`${getApiBase()}/bills/${addPdfBillId.value}/pdf/download`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: addPdfUrl.value.trim() }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (res.ok) {
+      addPdfMessage.value = { type: 'success', text: data.message || 'PDF saved' }
+      addPdfBillId.value = null
+      await loadLedgerData()
+      await checkPdfExists()
+    } else {
+      addPdfMessage.value = { type: 'error', text: data.detail || 'Failed' }
+    }
+  } catch {
+    addPdfMessage.value = { type: 'error', text: 'Failed to connect' }
+  } finally {
+    addPdfLoading.value = false
+  }
+}
+
 async function loadAllBillSummaries() {
   try {
     const res = await fetch(`${getApiBase()}/bills/all-summaries`)
@@ -372,10 +475,27 @@ onUnmounted(() => clearInterval(interval))
   z-index: 9999;
   padding: 1rem;
 }
+.ha-add-pdf-overlay { background: rgba(0,0,0,0.5); }
+.ha-add-pdf-modal { background: white; border-radius: 12px; max-width: 420px; width: 100%; box-shadow: 0 8px 32px rgba(0,0,0,0.2); }
+.ha-modal-header { display: flex; justify-content: space-between; align-items: center; padding: 1rem 1.25rem; border-bottom: 1px solid #e0e0e0; font-weight: 600; }
+.ha-modal-body { padding: 1.25rem; }
+.ha-modal-footer { display: flex; justify-content: flex-end; gap: 0.5rem; padding: 1rem 1.25rem; border-top: 1px solid #e0e0e0; }
+.ha-modal-desc { font-size: 0.9rem; color: #666; margin: 0 0 1rem 0; }
+.ha-modal-close { background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #666; padding: 0 0.25rem; }
+.ha-btn-link { background: none; border: none; color: #1976d2; cursor: pointer; font-size: 0.85rem; padding: 0.25rem 0; text-decoration: underline; }
+.ha-btn-add-pdf { color: #ff9800; }
+.ha-bill-pdf-actions { margin-left: 0.5rem; }
+.ha-btn { padding: 0.5rem 1rem; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem; }
+.ha-btn-gray { background: #e0e0e0; color: #333; }
+.ha-btn-primary { background: #1976d2; color: white; }
+.ha-message { margin-top: 0.75rem; padding: 0.5rem; border-radius: 4px; font-size: 0.9rem; }
+.ha-message.success { background: #e8f5e9; color: #2e7d32; }
+.ha-message.error { background: #ffebee; color: #c62828; }
+.ha-modal-overlay .ha-modal { margin: auto; }
 .ha-modal-close {
-  position: absolute;
-  top: 1rem;
-  right: 1rem;
+  position: relative;
+  top: 0;
+  right: 0;
   background: white;
   border: none;
   border-radius: 50%;

@@ -27,13 +27,15 @@ from database import (
     get_logs, get_latest_scraped_data, get_all_scraped_data, add_log, clear_logs, 
     add_scrape_history, get_scrape_history,
     # New normalized data functions
-    get_ledger_data, get_all_bills, get_all_payments, get_latest_payment,
+    get_ledger_data, get_all_bills, get_bill_by_id, get_all_payments, get_latest_payment,
     get_payee_users, create_payee_user, update_payee_user, delete_payee_user,
     add_user_card, delete_user_card, get_user_cards, update_user_card, get_user_by_card,
     attribute_payment, get_unverified_payments, clear_payment_attribution,
     wipe_bills_and_payments, update_payment_bill, get_payment_by_id,
     update_payment_order, get_payments_by_user, get_all_bills_with_payments,
-    update_payee_responsibilities, get_bill_payee_summary, calculate_all_payee_balances
+    update_payee_responsibilities, get_bill_payee_summary, calculate_all_payee_balances,
+    upsert_bill_document, get_bill_document, get_all_bill_documents_with_periods,
+    get_latest_bill_id_with_document, delete_bill_document, migrate_legacy_pdf,
 )
 
 app = FastAPI(title="Con Edison API")
@@ -938,172 +940,178 @@ async def get_screenshot(filename: str):
             status_code=404
         )
 
+def _pdf_response(file_path) -> "Response":
+    """Return PDF file as Response with embed headers"""
+    from fastapi.responses import Response
+    with open(file_path, 'rb') as f:
+        pdf_content = f.read()
+    return Response(
+        content=pdf_content,
+        media_type="application/pdf",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+            "Content-Disposition": "inline",
+            "X-Frame-Options": "SAMEORIGIN",
+            "Content-Security-Policy": "frame-ancestors 'self' *",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, OPTIONS",
+            "Access-Control-Allow-Headers": "*"
+        }
+    )
+
 @app.get("/api/bill-document")
-async def get_bill_document():
-    """Get the latest bill PDF (alt endpoint to avoid ad blockers)"""
-    return await get_latest_bill_pdf()
+@app.get("/api/bill-document/{bill_id}")
+async def get_bill_document_endpoint(bill_id: int = None):
+    """Get bill PDF by bill_id, or latest if bill_id omitted"""
+    import os
+    from fastapi.responses import JSONResponse
+    
+    if bill_id:
+        doc = get_bill_document(bill_id)
+        if not doc:
+            return JSONResponse({"error": f"No PDF for bill {bill_id}"}, status_code=404)
+        pdf_path = DATA_DIR / doc["pdf_path"]
+    else:
+        latest_id = get_latest_bill_id_with_document()
+        if not latest_id:
+            return JSONResponse(
+                {"error": "No bill PDF available. Add a PDF from the Account Ledger."},
+                status_code=404
+            )
+        doc = get_bill_document(latest_id)
+        pdf_path = DATA_DIR / doc["pdf_path"]
+    
+    if not os.path.exists(pdf_path):
+        return JSONResponse({"error": "PDF file missing"}, status_code=404)
+    return _pdf_response(pdf_path)
 
 @app.get("/api/latest-bill-pdf")
 async def get_latest_bill_pdf():
-    """Get the latest bill PDF (downloaded and stored locally)"""
-    import os
-    from fastapi.responses import FileResponse, JSONResponse, Response
-    
-    pdf_path = DATA_DIR / "latest_bill.pdf"
-    
-    if os.path.exists(pdf_path):
-        # Read the file and return with proper headers for iframe embedding
-        with open(pdf_path, 'rb') as f:
-            pdf_content = f.read()
-        
-        return Response(
-            content=pdf_content,
-            media_type="application/pdf",
-            headers={
-                "Cache-Control": "no-cache, no-store, must-revalidate",
-                "Pragma": "no-cache",
-                "Expires": "0",
-                "Content-Disposition": "inline",
-                "X-Frame-Options": "SAMEORIGIN",
-                "Content-Security-Policy": "frame-ancestors 'self' *",
-                "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Methods": "GET, OPTIONS",
-                "Access-Control-Allow-Headers": "*"
-            }
-        )
-    else:
-        return JSONResponse(
-            {"error": "No bill PDF available. Add a PDF link in Settings."},
-            status_code=404
-        )
+    """Get the latest bill PDF (backward compat)"""
+    return await get_bill_document_endpoint(bill_id=None)
 
 @app.get("/api/latest-bill-pdf/status")
 async def get_pdf_status():
-    """Check if a bill PDF exists"""
-    import os
-    pdf_path = DATA_DIR / "latest_bill.pdf"
-    exists = os.path.exists(pdf_path)
-    size = os.path.getsize(pdf_path) if exists else 0
-    readable = False
+    """Check if any bill PDF exists (for backward compat)"""
+    exists = get_latest_bill_id_with_document() is not None
+    size = 0
     if exists:
-        try:
-            with open(pdf_path, 'rb') as f:
-                first_bytes = f.read(10)
-                readable = len(first_bytes) > 0
-        except:
-            readable = False
+        latest_id = get_latest_bill_id_with_document()
+        doc = get_bill_document(latest_id)
+        if doc:
+            import os
+            pdf_path = DATA_DIR / doc["pdf_path"]
+            size = os.path.getsize(pdf_path) if os.path.exists(pdf_path) else 0
     return {
         "exists": exists,
         "size_bytes": size,
         "size_kb": round(size / 1024, 1) if size else 0,
-        "readable": readable,
-        "path": str(pdf_path)
+        "readable": size > 0,
+        "path": ""
+    }
+
+@app.get("/api/bills/{bill_id}/pdf/status")
+async def get_bill_pdf_status(bill_id: int):
+    """Check if a specific bill has a PDF"""
+    import os
+    doc = get_bill_document(bill_id)
+    if not doc:
+        return {"exists": False, "size_bytes": 0, "size_kb": 0}
+    pdf_path = DATA_DIR / doc["pdf_path"]
+    exists = os.path.exists(pdf_path)
+    size = os.path.getsize(pdf_path) if exists else 0
+    return {
+        "exists": exists,
+        "size_bytes": size,
+        "size_kb": round(size / 1024, 1) if size else 0,
     }
 
 class PdfDownloadRequest(BaseModel):
     url: str
 
-@app.post("/api/latest-bill-pdf/download")
-async def download_bill_pdf(request: PdfDownloadRequest):
-    """Download a bill PDF from provided URL and store locally"""
+async def _download_and_store_pdf(pdf_url: str, bill_id: int) -> dict:
+    """Download PDF from URL and store for bill_id. Returns {success, message, size_bytes}."""
     import aiohttp
     import os
-    from mqtt_client import get_mqtt_client
     
-    pdf_url = request.url.strip()
-    
-    if not pdf_url:
-        raise HTTPException(status_code=400, detail="PDF URL is required")
-    
-    # Validate URL looks like a PDF
     if not ('blob.core.windows.net' in pdf_url or '.pdf' in pdf_url.lower() or 'cecony' in pdf_url.lower()):
         add_log("warning", f"URL doesn't look like a ConEd PDF: {pdf_url[:50]}...")
     
-    try:
-        add_log("info", f"Downloading PDF from: {pdf_url[:80]}...")
-        
-        async with aiohttp.ClientSession() as session:
-            async with session.get(pdf_url, timeout=aiohttp.ClientTimeout(total=60)) as response:
-                if response.status == 200:
-                    pdf_content = await response.read()
-                    
-                    if len(pdf_content) < 1000:
-                        add_log("error", f"PDF content too small: {len(pdf_content)} bytes")
-                        raise HTTPException(status_code=400, detail="Downloaded file is too small to be a valid PDF")
-                    
-                    # Delete old PDF if exists
-                    pdf_path = DATA_DIR / "latest_bill.pdf"
-                    if os.path.exists(pdf_path):
-                        os.remove(pdf_path)
-                        add_log("info", "Deleted old PDF")
-                    
-                    # Save new PDF
-                    with open(pdf_path, 'wb') as f:
-                        f.write(pdf_content)
-                    
-                    size_kb = round(len(pdf_content) / 1024, 1)
-                    add_log("success", f"PDF saved: {size_kb} KB")
-                    
-                    # Publish PDF URL to MQTT
-                    mqtt_client = get_mqtt_client()
-                    if mqtt_client:
-                        # Get the app's public URL for the PDF
-                        app_settings = load_app_settings()
-                        base_url = app_settings.get("app_base_url", "").rstrip("/")
-                        if base_url:
-                            hosted_pdf_url = f"{base_url}/api/latest-bill-pdf"
-                            await mqtt_client.publish_bill_pdf_url(hosted_pdf_url, utc_now_iso())
-                            add_log("info", f"Published PDF URL to MQTT: {hosted_pdf_url}")
-                        else:
-                            add_log("warning", "App Base URL not configured, skipping MQTT publish for PDF")
-                    
-                    return {
-                        "success": True,
-                        "message": f"PDF downloaded successfully ({size_kb} KB)",
-                        "size_bytes": len(pdf_content)
-                    }
-                else:
-                    add_log("error", f"PDF download failed: HTTP {response.status}")
-                    raise HTTPException(
-                        status_code=400, 
-                        detail=f"Failed to download PDF: HTTP {response.status}. The link may have expired."
-                    )
-                    
-    except aiohttp.ClientError as e:
-        add_log("error", f"PDF download error: {str(e)}")
-        raise HTTPException(status_code=400, detail=f"Download failed: {str(e)}")
-    except Exception as e:
-        add_log("error", f"PDF download error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Download failed: {str(e)}")
+    bill = get_bill_by_id(bill_id) if bill_id else None
+    if bill_id and not bill:
+        raise HTTPException(status_code=404, detail="Bill not found")
+    
+    async with aiohttp.ClientSession() as session:
+        async with session.get(pdf_url, timeout=aiohttp.ClientTimeout(total=60)) as response:
+            if response.status != 200:
+                add_log("error", f"PDF download failed: HTTP {response.status}")
+                raise HTTPException(status_code=400, detail=f"Failed to download: HTTP {response.status}")
+            pdf_content = await response.read()
+            if len(pdf_content) < 1000:
+                raise HTTPException(status_code=400, detail="Downloaded file too small to be valid PDF")
+    
+    bills_dir = DATA_DIR / "bills"
+    bills_dir.mkdir(exist_ok=True)
+    pdf_path = bills_dir / f"bill_{bill_id}.pdf"
+    if os.path.exists(pdf_path):
+        os.remove(pdf_path)
+    with open(pdf_path, 'wb') as f:
+        f.write(pdf_content)
+    upsert_bill_document(bill_id, f"bills/bill_{bill_id}.pdf", source_url=pdf_url)
+    size_kb = round(len(pdf_content) / 1024, 1)
+    add_log("success", f"PDF saved for bill {bill_id}: {size_kb} KB")
+    return {"success": True, "message": f"PDF saved ({size_kb} KB)", "size_bytes": len(pdf_content)}
+
+@app.post("/api/bills/{bill_id}/pdf/download")
+async def download_bill_pdf_for_period(bill_id: int, request: PdfDownloadRequest):
+    """Download PDF for a specific billing period"""
+    bill = get_bill_by_id(bill_id)
+    if not bill:
+        raise HTTPException(status_code=404, detail="Bill not found")
+    pdf_url = request.url.strip()
+    if not pdf_url:
+        raise HTTPException(status_code=400, detail="PDF URL is required")
+    result = await _download_and_store_pdf(pdf_url, bill_id)
+    await _publish_bill_pdf_mqtt()
+    return result
+
+@app.post("/api/latest-bill-pdf/download")
+async def download_bill_pdf(request: PdfDownloadRequest):
+    """Download PDF for the latest bill (backward compat - uses most recent bill in DB)"""
+    pdf_url = request.url.strip()
+    if not pdf_url:
+        raise HTTPException(status_code=400, detail="PDF URL is required")
+    bills = get_all_bills(limit=1)
+    if not bills:
+        raise HTTPException(status_code=400, detail="No bills in ledger. Run scraper first.")
+    bill_id = bills[0]['id']
+    result = await _download_and_store_pdf(pdf_url, bill_id)
+    await _publish_bill_pdf_mqtt()
+    return result
+
+async def _publish_bill_pdf_mqtt():
+    """Publish bill PDF URLs to MQTT (state=latest, attributes=all)"""
+    from mqtt_client import get_mqtt_client
+    mqtt_client = get_mqtt_client()
+    if not mqtt_client:
+        return
+    app_settings = load_app_settings()
+    base_url = app_settings.get("app_base_url", "").rstrip("/")
+    if not base_url:
+        add_log("warning", "App Base URL not configured, skipping MQTT publish for PDF")
+        return
+    await mqtt_client.publish_bill_pdf_url_all(base_url, utc_now_iso())
 
 @app.post("/api/latest-bill-pdf/send-mqtt")
 async def send_pdf_url_mqtt():
-    """Manually send the PDF URL to Home Assistant via MQTT"""
-    import os
-    from mqtt_client import get_mqtt_client
-    
-    pdf_path = DATA_DIR / "latest_bill.pdf"
-    
-    if not os.path.exists(pdf_path):
+    """Manually send bill PDF URLs to Home Assistant via MQTT"""
+    if get_latest_bill_id_with_document() is None:
         raise HTTPException(status_code=404, detail="No PDF available to send")
-    
     try:
-        app_settings = load_app_settings()
-        base_url = app_settings.get("app_base_url", "").rstrip("/")
-        
-        if not base_url:
-            raise HTTPException(status_code=400, detail="App Base URL not configured. Set it in Settings to send PDF URL via MQTT.")
-        
-        mqtt_client = get_mqtt_client()
-        if not mqtt_client:
-            raise HTTPException(status_code=400, detail="MQTT client not available")
-        
-        hosted_pdf_url = f"{base_url}/api/bill-document"
-        await mqtt_client.publish_bill_pdf_url(hosted_pdf_url, utc_now_iso())
-        add_log("info", f"Manually sent PDF URL to MQTT: {hosted_pdf_url}")
-        
-        return {"success": True, "message": f"PDF URL sent to MQTT: {hosted_pdf_url}"}
-        
+        await _publish_bill_pdf_mqtt()
+        return {"success": True, "message": "PDF URLs sent to MQTT"}
     except HTTPException:
         raise
     except Exception as e:
@@ -1111,17 +1119,29 @@ async def send_pdf_url_mqtt():
         raise HTTPException(status_code=500, detail=f"Failed to send: {str(e)}")
 
 @app.delete("/api/latest-bill-pdf")
-async def delete_bill_pdf():
-    """Delete the stored bill PDF"""
+async def delete_latest_bill_pdf():
+    """Delete the latest bill PDF"""
+    latest_id = get_latest_bill_id_with_document()
+    if not latest_id:
+        return {"success": True, "message": "No PDF to delete"}
+    return await _delete_bill_pdf_by_id(latest_id)
+
+@app.delete("/api/bills/{bill_id}/pdf")
+async def delete_bill_pdf_by_id(bill_id: int):
+    """Delete a specific bill's PDF"""
+    return await _delete_bill_pdf_by_id(bill_id)
+
+async def _delete_bill_pdf_by_id(bill_id: int):
     import os
-    pdf_path = DATA_DIR / "latest_bill.pdf"
-    
+    doc = get_bill_document(bill_id)
+    if not doc:
+        return {"success": True, "message": "No PDF to delete"}
+    pdf_path = DATA_DIR / doc["pdf_path"]
+    delete_bill_document(bill_id)
     if os.path.exists(pdf_path):
         os.remove(pdf_path)
         add_log("info", "Bill PDF deleted")
-        return {"success": True, "message": "PDF deleted"}
-    else:
-        return {"success": True, "message": "No PDF to delete"}
+    return {"success": True, "message": "PDF deleted"}
 
 @app.get("/api/live-preview")
 async def get_live_preview():
