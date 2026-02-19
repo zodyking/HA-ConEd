@@ -1,3 +1,6 @@
+# Build arg must be declared before first FROM for multi-stage compatibility
+ARG BUILD_FROM=ghcr.io/hassio-addons/base:20.0.1
+
 # Stage 1: Build Next.js with addon API URL (same-container backend)
 FROM node:20-bookworm-slim AS nextjs-builder
 WORKDIR /app
@@ -13,7 +16,6 @@ ENV API_BASE_URL=http://127.0.0.1:8000
 RUN npm run build
 
 # Stage 2: Addon image with Node + Python + both apps
-ARG BUILD_FROM=ghcr.io/hassio-addons/base:20.0.1
 FROM ${BUILD_FROM}
 
 RUN apk add --no-cache \
