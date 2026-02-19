@@ -1,6 +1,6 @@
-# ConEd Scraper Python Service
+# Con Edison Python Service
 
-Python service for scraping ConEd account data using browser automation.
+Python service for syncing Con Edison account data using browser automation.
 
 ## Quick Start
 

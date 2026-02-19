@@ -36,7 +36,7 @@ from database import (
     update_payee_responsibilities, get_bill_payee_summary, calculate_all_payee_balances
 )
 
-app = FastAPI(title="ConEd Scraper API")
+app = FastAPI(title="Con Edison API")
 
 # Code version for deployment verification
 CODE_VERSION = "2026-01-30-v3"
@@ -319,7 +319,8 @@ async def startup_event():
                 mqtt_config.get("mqtt_password", ""),
                 mqtt_config.get("mqtt_base_topic", "coned"),
                 mqtt_config.get("mqtt_qos", 1),
-                mqtt_config.get("mqtt_retain", True)
+                mqtt_config.get("mqtt_retain", True),
+                mqtt_config.get("mqtt_discovery", True),
             )
             add_log("info", "MQTT client initialized")
     except Exception as e:
@@ -357,6 +358,7 @@ class MQTTConfigModel(BaseModel):
     mqtt_base_topic: str = "coned"
     mqtt_qos: int = 1
     mqtt_retain: bool = True
+    mqtt_discovery: bool = True
 
 class AppSettingsModel(BaseModel):
     time_offset_hours: float = 0.0
@@ -404,6 +406,7 @@ def save_mqtt_config(mqtt_config: dict):
         "mqtt_base_topic": mqtt_config.get("mqtt_base_topic", "coned"),
         "mqtt_qos": mqtt_config.get("mqtt_qos", 1),
         "mqtt_retain": mqtt_config.get("mqtt_retain", True),
+        "mqtt_discovery": mqtt_config.get("mqtt_discovery", True),
         "updated_at": utc_now_iso()
     }
     MQTT_CONFIG_FILE.write_text(json.dumps(config_data))
@@ -421,7 +424,8 @@ def load_mqtt_config() -> dict:
             "mqtt_password": decrypt_data(data.get("mqtt_password", "")) if data.get("mqtt_password") else "",
             "mqtt_base_topic": data.get("mqtt_base_topic", "coned"),
             "mqtt_qos": data.get("mqtt_qos", 1),
-            "mqtt_retain": data.get("mqtt_retain", True)
+            "mqtt_retain": data.get("mqtt_retain", True),
+            "mqtt_discovery": data.get("mqtt_discovery", True),
         }
     except Exception as e:
         add_log("warning", f"Failed to load MQTT config: {str(e)}")
@@ -762,7 +766,8 @@ async def configure_mqtt(config: MQTTConfigModel):
             "mqtt_password": config.mqtt_password.strip(),
             "mqtt_base_topic": config.mqtt_base_topic.strip() or "coned",
             "mqtt_qos": config.mqtt_qos,
-            "mqtt_retain": config.mqtt_retain
+            "mqtt_retain": config.mqtt_retain,
+            "mqtt_discovery": config.mqtt_discovery,
         }
         
         # Save to file for persistence
@@ -776,9 +781,16 @@ async def configure_mqtt(config: MQTTConfigModel):
                 mqtt_config["mqtt_password"],
                 mqtt_config["mqtt_base_topic"],
                 mqtt_config["mqtt_qos"],
-                mqtt_config["mqtt_retain"]
+                mqtt_config["mqtt_retain"],
+                mqtt_config.get("mqtt_discovery", True),
             )
             add_log("success", "MQTT configured successfully")
+            # Trigger connect + discovery so sensors appear immediately
+            from mqtt_client import get_mqtt_client
+            mqtt_client = get_mqtt_client()
+            if mqtt_client:
+                await mqtt_client.connect()
+                await mqtt_client.publish_discovery()
         else:
             add_log("info", "MQTT disabled (no URL provided)")
         
@@ -800,7 +812,8 @@ async def get_mqtt_config():
             "mqtt_password": "***" * (len(mqtt_config.get("mqtt_password", "")) if mqtt_config.get("mqtt_password") else 0),
             "mqtt_base_topic": mqtt_config.get("mqtt_base_topic", "coned"),
             "mqtt_qos": mqtt_config.get("mqtt_qos", 1),
-            "mqtt_retain": mqtt_config.get("mqtt_retain", True)
+            "mqtt_retain": mqtt_config.get("mqtt_retain", True),
+            "mqtt_discovery": mqtt_config.get("mqtt_discovery", True),
         }
     except Exception as e:
         add_log("error", f"Failed to get MQTT config: {str(e)}")
@@ -810,7 +823,8 @@ async def get_mqtt_config():
             "mqtt_password": "",
             "mqtt_base_topic": "coned",
             "mqtt_qos": 1,
-            "mqtt_retain": True
+            "mqtt_retain": True,
+            "mqtt_discovery": True,
         }
 
 @app.post("/api/app-settings")
@@ -1769,7 +1783,7 @@ if FRONTEND_DIST.exists():
 else:
     @app.get("/")
     async def root():
-        return {"message": "ConEd Scraper API", "status": "running"}
+        return {"message": "Con Edison API", "status": "running"}
 
 
 if __name__ == "__main__":

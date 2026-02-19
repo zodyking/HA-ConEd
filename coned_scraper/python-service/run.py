@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Standalone runner for ConEd Scraper Python service
+Standalone runner for Con Edison Python service
 """
 import os
 import sys
@@ -49,7 +49,7 @@ def ensure_data_directory():
 
 def main():
     """Main entry point"""
-    print("ConEd Scraper - Python Service")
+    print("Con Edison - Python Service")
     print("=" * 40)
     
     # Ensure data directory exists

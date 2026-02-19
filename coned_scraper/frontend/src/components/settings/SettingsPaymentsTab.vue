@@ -1,5 +1,30 @@
 <template>
   <div class="ha-card">
+    <!-- Payee Audit Modal -->
+    <div v-if="auditPayment" class="ha-modal-overlay" @click.self="auditPayment = null">
+      <div class="ha-modal ha-payee-audit-modal">
+        <div class="ha-modal-header">
+          <span>Assign Payee</span>
+          <button type="button" class="ha-modal-close" @click="auditPayment = null">×</button>
+        </div>
+        <div class="ha-modal-body">
+          <div class="ha-audit-payment-info">
+            <strong>{{ auditPayment.amount }}</strong> • {{ auditPayment.payment_date }}
+          </div>
+          <div class="ha-form-group">
+            <label class="ha-form-label">Payee</label>
+            <select v-model="auditPayeeId" class="ha-form-input">
+              <option value="">Unassigned</option>
+              <option v-for="p in payeeUsers" :key="p.id" :value="p.id">{{ p.name }}</option>
+            </select>
+          </div>
+        </div>
+        <div class="ha-modal-footer">
+          <button type="button" class="ha-btn ha-btn-gray" @click="auditPayment = null">Cancel</button>
+          <button type="button" class="ha-btn ha-btn-primary" @click="savePayeeAudit">Save</button>
+        </div>
+      </div>
+    </div>
     <div class="ha-card-header">
       <span class="ha-card-icon">💳</span>
       <span>Payments Audit</span>
@@ -27,12 +52,12 @@
             <span>{{ bill.month_range }}</span>
             <span class="ha-bill-total">{{ bill.bill_total }}</span>
           </div>
-          <div v-for="(pay, i) in bill.payments" :key="pay.id" class="ha-payment-row" draggable @dragstart="onDragStart($event, pay)">
+          <div v-for="(pay, i) in bill.payments" :key="pay.id" class="ha-payment-row ha-payment-clickable" draggable @dragstart="onDragStart($event, pay)" @click="openPayeeAudit(pay)">
             <span class="ha-drag">⋮⋮</span>
             <span class="ha-pay-amount">{{ pay.amount }}</span>
             <span class="ha-pay-date">{{ pay.payment_date }}</span>
             <span v-if="pay.payee_name" class="ha-payee">{{ pay.payee_name }}</span>
-            <select :value="pay.bill_id ?? ''" @change="onChangeBill(pay.id, $event)">
+            <select :value="pay.bill_id ?? ''" @change="onChangeBill(pay.id, $event)" @click.stop>
               <option v-for="b in allBills" :key="b.id" :value="b.id">{{ b.month_range }}</option>
               <option value="">Unlinked</option>
             </select>
@@ -40,10 +65,10 @@
         </div>
         <div v-if="orphanPayments.length" class="ha-orphan-block">
           <div class="ha-orphan-header">⚠️ Unlinked Payments</div>
-          <div v-for="pay in orphanPayments" :key="pay.id" class="ha-payment-row">
+          <div v-for="pay in orphanPayments" :key="pay.id" class="ha-payment-row ha-payment-clickable" @click="openPayeeAudit(pay)">
             <span class="ha-pay-amount">{{ pay.amount }}</span>
             <span class="ha-pay-date">{{ pay.payment_date }}</span>
-            <select :value="pay.bill_id ?? ''" @change="onChangeBill(pay.id, $event)">
+            <select :value="pay.bill_id ?? ''" @change="onChangeBill(pay.id, $event)" @click.stop>
               <option v-for="b in allBills" :key="b.id" :value="b.id">{{ b.month_range }}</option>
               <option value="">Unlinked</option>
             </select>
@@ -60,14 +85,18 @@
 import { ref, computed, onMounted } from 'vue'
 import { getApiBase } from '../../lib/api-base'
 
-interface Payment { id: number; payment_date: string; amount: string; description: string; bill_id: number | null; bill_month: string | null; bill_cycle: string | null; payee_name: string | null; payee_status: string }
+interface Payment { id: number; payment_date: string; amount: string; description: string; bill_id: number | null; bill_month: string | null; bill_cycle: string | null; payee_name: string | null; payee_user_id: number | null; payee_status: string }
 interface Bill { id: number; bill_cycle_date: string; month_range: string; bill_total: string; payments: Payment[] }
+interface PayeeUser { id: number; name: string }
 
 const bills = ref<Bill[]>([])
 const orphanPayments = ref<Payment[]>([])
 const allBills = ref<{ id: number; month_range: string }[]>([])
+const payeeUsers = ref<PayeeUser[]>([])
 const isLoading = ref(false)
 const showWipeConfirm = ref(false)
+const auditPayment = ref<Payment | null>(null)
+const auditPayeeId = ref<number | string>('')
 const message = ref<{ type: 'success' | 'error'; text: string } | null>(null)
 
 const totalPayments = computed(() => {
@@ -79,15 +108,50 @@ const totalPayments = computed(() => {
 async function loadData() {
   isLoading.value = true
   try {
-    const res = await fetch(`${getApiBase()}/bills-with-payments`)
-    if (res.ok) {
-      const d = await res.json()
+    const [payRes, billsRes] = await Promise.all([
+      fetch(`${getApiBase()}/payee-users`),
+      fetch(`${getApiBase()}/bills-with-payments`),
+    ])
+    if (payRes.ok) {
+      const payData = await payRes.json()
+      payeeUsers.value = payData.users || payData || []
+    }
+    if (billsRes.ok) {
+      const d = await billsRes.json()
       bills.value = d.bills || []
       orphanPayments.value = d.orphan_payments || []
       allBills.value = (d.bills || []).map((b: Bill) => ({ id: b.id, month_range: b.month_range }))
     }
   } catch (e) { console.error(e) }
   finally { isLoading.value = false }
+}
+
+function openPayeeAudit(pay: Payment) {
+  auditPayment.value = pay
+  auditPayeeId.value = pay.payee_user_id ?? ''
+}
+
+async function savePayeeAudit() {
+  if (!auditPayment.value) return
+  const paymentId = auditPayment.value.id
+  const userId = auditPayeeId.value
+  try {
+    if (userId === '' || userId === null) {
+      const res = await fetch(`${getApiBase()}/payments/${paymentId}/attribution`, { method: 'DELETE' })
+      if (res.ok) { await loadData(); message.value = { type: 'success', text: 'Payee cleared' }; auditPayment.value = null }
+      else message.value = { type: 'error', text: 'Failed to clear payee' }
+    } else {
+      const res = await fetch(`${getApiBase()}/payments/attribute`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ payment_id: paymentId, user_id: Number(userId), method: 'manual' }),
+      })
+      if (res.ok) { await loadData(); message.value = { type: 'success', text: 'Payee updated' }; auditPayment.value = null }
+      else message.value = { type: 'error', text: 'Failed to update payee' }
+    }
+  } catch {
+    message.value = { type: 'error', text: 'Failed' }
+  }
 }
 
 async function handleWipe() {
@@ -137,4 +201,16 @@ onMounted(loadData)
 .ha-message { margin-top: 1rem; padding: 0.75rem; border-radius: 4px; }
 .ha-message.success { background: #e8f5e9; color: #2e7d32; }
 .ha-message.error { background: #ffebee; color: #c62828; }
+.ha-payment-clickable { cursor: pointer; }
+.ha-payment-clickable:hover { background: #f5f5f5; }
+.ha-modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 1rem; }
+.ha-modal { background: white; border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.2); max-width: 360px; width: 100%; overflow: hidden; display: flex; flex-direction: column; }
+.ha-modal-header { display: flex; justify-content: space-between; align-items: center; padding: 1rem 1.25rem; border-bottom: 1px solid #e0e0e0; font-weight: 600; }
+.ha-modal-close { background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #666; padding: 0 0.25rem; line-height: 1; }
+.ha-modal-close:hover { color: #333; }
+.ha-modal-body { padding: 1.25rem; }
+.ha-modal-footer { display: flex; justify-content: flex-end; gap: 0.5rem; padding: 1rem 1.25rem; border-top: 1px solid #e0e0e0; }
+.ha-audit-payment-info { margin-bottom: 1rem; font-size: 0.95rem; }
+.ha-btn-primary { background: #1976d2; color: white; }
+.ha-btn-primary:hover { background: #1565c0; }
 </style>

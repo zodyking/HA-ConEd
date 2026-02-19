@@ -22,8 +22,10 @@ logger = logging.getLogger(__name__)
 class MQTTClient:
     """MQTT client for publishing sensor data to Home Assistant"""
     
+    DISCOVERY_PREFIX = "homeassistant"
+    
     def __init__(self, mqtt_url: str, username: Optional[str] = None, password: Optional[str] = None,
-                 base_topic: str = "coned", qos: int = 1, retain: bool = True):
+                 base_topic: str = "coned", qos: int = 1, retain: bool = True, discovery: bool = True):
         """
         Initialize MQTT client
         
@@ -44,6 +46,7 @@ class MQTTClient:
         self.base_topic = base_topic
         self.qos = qos
         self.retain = retain
+        self.discovery = discovery
         self.client = None
         self.connected = False
         self._connect_lock = asyncio.Lock()
@@ -93,6 +96,15 @@ class MQTTClient:
         if rc == 0:
             self.connected = True
             logger.info(f"MQTT connected to {self.host}:{self.port}")
+            # Schedule discovery publish after connect (paho is sync, use thread)
+            if self.discovery:
+                try:
+                    import threading
+                    t = threading.Thread(target=self._publish_discovery_sync)
+                    t.daemon = True
+                    t.start()
+                except Exception as e:
+                    logger.warning(f"Failed to schedule MQTT discovery: {e}")
         else:
             self.connected = False
             logger.error(f"MQTT connection failed with code {rc}")
@@ -146,6 +158,121 @@ class MQTTClient:
         if not self.connected:
             return await self.connect()
         return True
+
+    def _publish_discovery_sync(self):
+        """Publish MQTT discovery configs (sync, called from connect callback)"""
+        if not self.enabled or not self.client or not self.connected or not self.discovery:
+            return
+        import time
+        time.sleep(0.3)  # Brief delay so connection is fully ready
+        bt = self.base_topic
+        dp = self.DISCOVERY_PREFIX
+        device = {
+            "identifiers": ["coned_scraper"],
+            "name": "Con Edison",
+            "manufacturer": "HA-ConEd",
+            "model": "Con Edison",
+        }
+        # Match legacy YAML: state_topic for value, json_attributes_topic for full data
+        json_attrs = "{{ value_json.data | tojson }}"
+        configs = [
+            {
+                "topic": f"{dp}/sensor/coned_account_balance/config",
+                "payload": {
+                    "name": "ConEd Account Balance",
+                    "unique_id": "coned_account_balance",
+                    "state_topic": f"{bt}/account_balance",
+                    "unit_of_measurement": "USD",
+                    "device_class": "monetary",
+                    "json_attributes_topic": f"{bt}/account_balance_json",
+                    "json_attributes_template": json_attrs,
+                    "device": device,
+                },
+            },
+            {
+                "topic": f"{dp}/sensor/coned_latest_bill/config",
+                "payload": {
+                    "name": "ConEd Latest Bill",
+                    "unique_id": "coned_latest_bill",
+                    "state_topic": f"{bt}/latest_bill",
+                    "unit_of_measurement": "USD",
+                    "device_class": "monetary",
+                    "json_attributes_topic": f"{bt}/latest_bill_json",
+                    "json_attributes_template": json_attrs,
+                    "device": device,
+                },
+            },
+            {
+                "topic": f"{dp}/sensor/coned_previous_bill/config",
+                "payload": {
+                    "name": "ConEd Previous Bill",
+                    "unique_id": "coned_previous_bill",
+                    "state_topic": f"{bt}/previous_bill",
+                    "unit_of_measurement": "USD",
+                    "device_class": "monetary",
+                    "json_attributes_topic": f"{bt}/previous_bill_json",
+                    "json_attributes_template": json_attrs,
+                    "device": device,
+                },
+            },
+            {
+                "topic": f"{dp}/sensor/coned_last_payment/config",
+                "payload": {
+                    "name": "ConEd Last Payment",
+                    "unique_id": "coned_last_payment",
+                    "state_topic": f"{bt}/last_payment",
+                    "unit_of_measurement": "USD",
+                    "device_class": "monetary",
+                    "json_attributes_topic": f"{bt}/last_payment_json",
+                    "json_attributes_template": json_attrs,
+                    "device": device,
+                },
+            },
+            {
+                "topic": f"{dp}/sensor/coned_bill_pdf_url/config",
+                "payload": {
+                    "name": "ConEd Bill PDF URL",
+                    "unique_id": "coned_bill_pdf_url",
+                    "state_topic": f"{bt}/bill_pdf_url",
+                    "value_template": "{{ value }}",
+                    "device": device,
+                },
+            },
+            {
+                "topic": f"{dp}/sensor/coned_payee_summary/config",
+                "payload": {
+                    "name": "ConEd Payee Summary",
+                    "unique_id": "coned_payee_summary",
+                    "state_topic": f"{bt}/payee_summary",
+                    "value_template": "{{ value_json.data.bill_balance | default(0) }}",
+                    "device_class": "monetary",
+                    "unit_of_measurement": "USD",
+                    "json_attributes_topic": f"{bt}/payee_summary",
+                    "json_attributes_template": "{{ value_json.data | tojson }}",
+                    "device": device,
+                },
+            },
+        ]
+        try:
+            for cfg in configs:
+                self.client.publish(
+                    cfg["topic"],
+                    json.dumps(cfg["payload"]),
+                    qos=self.qos,
+                    retain=True,
+                )
+                logger.info(f"MQTT discovery published: {cfg['topic']}")
+        except Exception as e:
+            logger.warning(f"MQTT discovery publish failed: {e}")
+
+    async def publish_discovery(self):
+        """Publish Home Assistant MQTT discovery configs to auto-register sensors."""
+        if not self.enabled or not self.discovery:
+            return
+        if not await self.ensure_connected():
+            return
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, self._publish_discovery_sync)
     
     def _extract_numeric(self, value: str) -> str:
         """Extract numeric value from string (e.g., '$123.45' -> '123.45')"""
@@ -338,7 +465,8 @@ class MQTTClient:
 _mqtt_client: Optional[MQTTClient] = None
 
 def init_mqtt_client(mqtt_url: str = "", username: str = "", password: str = "",
-                     base_topic: str = "coned", qos: int = 1, retain: bool = True) -> Optional[MQTTClient]:
+                     base_topic: str = "coned", qos: int = 1, retain: bool = True,
+                     discovery: bool = True) -> Optional[MQTTClient]:
     """Initialize MQTT client from configuration"""
     global _mqtt_client
     
@@ -354,7 +482,8 @@ def init_mqtt_client(mqtt_url: str = "", username: str = "", password: str = "",
             password.strip() if password else None,
             base_topic.strip() if base_topic else "coned",
             qos,
-            retain
+            retain,
+            discovery,
         )
         logger.info(f"MQTT client initialized for {mqtt_url}")
         return _mqtt_client

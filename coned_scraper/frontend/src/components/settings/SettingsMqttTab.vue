@@ -6,7 +6,7 @@
     </div>
     <div class="ha-card-content">
       <div class="info-text" style="margin-bottom: 1.5rem">
-        Configure MQTT to publish sensor data to Home Assistant. Topics: coned/account_balance, coned/latest_bill, etc.
+        Configure MQTT to publish sensor data to Home Assistant. With <strong>MQTT Discovery</strong> enabled, sensors like <code>sensor.coned_latest_bill</code> and <code>sensor.coned_account_balance</code> are auto-registered—no manual configuration.yaml needed.
       </div>
       <form @submit.prevent="handleSave">
         <div class="ha-form-group">
@@ -42,6 +42,13 @@
           </label>
           <div class="info-text">Retained messages persist on the broker</div>
         </div>
+        <div class="ha-form-group">
+          <label class="ha-check-label">
+            <input v-model="mqttDiscovery" type="checkbox" />
+            <span>MQTT Discovery (auto-register sensors)</span>
+          </label>
+          <div class="info-text">Publish discovery configs so Home Assistant creates sensors (e.g. sensor.coned_latest_bill) automatically</div>
+        </div>
         <button type="submit" class="ha-button ha-button-primary" :disabled="isLoading">{{ isLoading ? 'Saving...' : 'Save MQTT Config' }}</button>
       </form>
       <div v-if="message" :class="['ha-message', message.type]">{{ message.text }}</div>
@@ -59,6 +66,7 @@ const mqttPassword = ref('')
 const mqttBaseTopic = ref('coned')
 const mqttQos = ref(1)
 const mqttRetain = ref(true)
+const mqttDiscovery = ref(true)
 const isLoading = ref(false)
 const message = ref<{ type: 'success' | 'error'; text: string } | null>(null)
 
@@ -73,6 +81,7 @@ async function loadMqttConfig() {
       mqttBaseTopic.value = data.mqtt_base_topic || 'coned'
       mqttQos.value = data.mqtt_qos ?? 1
       mqttRetain.value = data.mqtt_retain !== undefined ? data.mqtt_retain : true
+      mqttDiscovery.value = data.mqtt_discovery !== undefined ? data.mqtt_discovery : true
     }
   } catch (e) {
     console.error(e)
@@ -93,6 +102,7 @@ async function handleSave() {
         mqtt_base_topic: mqttBaseTopic.value.trim() || 'coned',
         mqtt_qos: mqttQos.value,
         mqtt_retain: mqttRetain.value,
+        mqtt_discovery: mqttDiscovery.value,
       }),
     })
     if (res.ok) {
@@ -116,6 +126,7 @@ onMounted(loadMqttConfig)
 .ha-input-mono { font-family: monospace; font-size: 0.9rem; }
 .hint { font-size: 0.85rem; font-weight: normal; margin-left: 0.5rem; color: #666; }
 .ha-check-label { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; }
+code { font-family: monospace; font-size: 0.9em; background: #f0f0f0; padding: 0.1em 0.3em; border-radius: 3px; }
 .ha-check-label input { width: 18px; height: 18px; }
 .ha-message { margin-top: 1rem; padding: 0.75rem; border-radius: 4px; }
 .ha-message.success { background: #e8f5e9; color: #2e7d32; }

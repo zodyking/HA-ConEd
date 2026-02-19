@@ -1,6 +1,6 @@
-# ConEd Scraper
+# Con Edison
 
-Automated ConEd billing data scraper with MQTT and web UI. Built with Vue 3, Vite, and Python FastAPI.
+Con Edison account integration for Home Assistant. Syncs bills, payments, and balance; exposes MQTT sensors; supports payee tracking for shared accounts.
 
 ## Deployment Options
 
@@ -14,7 +14,7 @@ Automated ConEd billing data scraper with MQTT and web UI. Built with Vue 3, Vit
 ### Home Assistant Addon
 
 1. Add repository: `https://github.com/zodyking/HA-ConEd`
-2. Install **ConEd Scraper** addon
+2. Install **Con Edison** addon
 3. Start and open the panel from the sidebar
 
 ### Dokploy
@@ -30,16 +30,18 @@ Automated ConEd billing data scraper with MQTT and web UI. Built with Vue 3, Vit
 # Python backend (port 8000)
 cd python-service && run.bat   # or ./run.sh
 
-# Next.js frontend (port 3000)
+# Vue frontend (port 3000)
 cd frontend && npm install && npm run dev
 ```
 
 ## Features
 
-- Automated scraping with configurable schedule
-- MQTT integration for Home Assistant
-- Encrypted credential storage
-- Real-time logs and account ledger
+- **Bill history & ledger** — View bills, payments, PDF bills
+- **Payee tracking** — Assign payments to roommates/households; audit and reconcile shared bills
+- **MQTT sensors** — Balance, latest bill, last payment, payee summaries; auto-discovery so no YAML config needed
+- **Automated scraping** — Configurable schedule or manual runs
+- **IMAP integration** — Match payments to payees from Con Edison confirmation emails
+- **Encrypted credential storage**
 
 ## Structure
 
@@ -47,8 +49,8 @@ cd frontend && npm install && npm run dev
 ├── config.yaml, build.yaml, Dockerfile   # HA addon
 ├── docker-compose.yml, Dockerfile.web    # Docker / Dokploy
 ├── rootfs/                               # S6 overlay (addon)
-├── frontend/                              # Vue 3 + Vite frontend
-└── python-service/                      # Python FastAPI + Playwright
+├── frontend/                             # Vue 3 + Vite frontend
+└── python-service/                       # Python FastAPI + Playwright
 ```
 
 ## Links

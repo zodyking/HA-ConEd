@@ -3,7 +3,7 @@
     <div class="ha-header">
       <div class="ha-header-content">
         <div class="ha-logo-container">
-          <img :src="logoUrl" alt="ConEd Logo" width="100" height="20" />
+          <img :src="logoUrl" alt="Con Edison" width="100" height="20" />
         </div>
         <nav class="ha-nav">
           <button

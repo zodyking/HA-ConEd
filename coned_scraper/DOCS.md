@@ -1,13 +1,13 @@
-# ConEd Scraper - Home Assistant Addon
+# Con Edison - Home Assistant Addon
 
-Automated ConEd billing data scraper with MQTT and web UI. Access the panel directly from your Home Assistant sidebar.
+Con Edison account integration for Home Assistant. Syncs bills, payments, and balance; exposes MQTT sensors; supports payee tracking for shared accounts. Access the panel directly from your Home Assistant sidebar.
 
 ## Installation
 
 1. Add this repository to your Home Assistant add-on store (if using a custom repository).
-2. Install the "ConEd Scraper" addon.
+2. Install the "Con Edison" addon.
 3. Start the addon.
-4. Open the ConEd Scraper panel from the Home Assistant sidebar.
+4. Open the Con Edison panel from the Home Assistant sidebar.
 
 ## Configuration
 
@@ -24,8 +24,8 @@ Controls the verbosity of addon logs. Default: `info`
 
 ## First-Time Setup
 
-1. Open the ConEd Scraper panel from the sidebar.
-2. Go to **Settings** and enter your ConEd credentials:
+1. Open the Con Edison panel from the sidebar.
+2. Go to **Settings** and enter your Con Edison credentials:
    - ConEd username
    - ConEd password
    - TOTP secret (from Google Authenticator)
@@ -38,7 +38,9 @@ All addon data (credentials, MQTT config, schedule, database) is stored in the a
 
 ## MQTT Integration with Home Assistant
 
-Configure MQTT in the Settings tab. The addon publishes to MQTT topics for `account_balance`, `latest_bill`, `last_payment`, `previous_bill`, and payee summaries. Add MQTT sensors in Home Assistant to consume this data.
+Configure MQTT in the Settings tab. The addon publishes to MQTT topics for `account_balance`, `latest_bill`, `last_payment`, `previous_bill`, and payee summaries.
+
+**MQTT Discovery (enabled by default):** When enabled, the addon publishes Home Assistant MQTT discovery configs so sensors are **auto-registered**—no manual `configuration.yaml` needed. After configuring MQTT and running a scrape, sensors such as `sensor.coned_latest_bill`, `sensor.coned_account_balance`, `sensor.coned_last_payment`, etc. appear automatically under Settings → Devices & services → MQTT. You can disable discovery in MQTT Settings if you prefer manual YAML configuration.
 
 ## Ingress
 

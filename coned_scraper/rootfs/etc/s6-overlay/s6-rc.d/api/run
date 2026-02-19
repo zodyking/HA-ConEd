@@ -4,7 +4,7 @@
 # ConEd Scraper - Python API (FastAPI + Playwright)
 # ==============================================================================
 
-bashio::log.info "Starting ConEd Scraper API..."
+bashio::log.info "Starting Con Edison API..."
 
 export PLAYWRIGHT_HEADLESS=true
 export PYTHONUNBUFFERED=1

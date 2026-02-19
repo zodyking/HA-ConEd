@@ -46,7 +46,8 @@
 
     <!-- Ledger Content -->
     <div v-else class="ha-ledger">
-      <!-- Account Summary Card -->
+      <!-- Account Summary Card (sticky wrapper covers gap, solid bg hides scrolling content) -->
+      <div class="ha-sticky-summary-wrap">
       <div class="ha-card ha-card-summary">
         <div class="ha-card-header">
           <span class="ha-card-icon">💰</span>
@@ -87,6 +88,7 @@
             </button>
           </div>
         </div>
+      </div>
       </div>
 
       <!-- Bill History Ledger -->
