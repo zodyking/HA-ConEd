@@ -77,10 +77,10 @@ DEFAULT_TTS_CONFIG = {
     "language": "en",
     "prefix": DEFAULT_TTS_PREFIX,
     "wait_for_idle": True,
+    "tts_service": "tts.google_translate_say",
     "messages": {
-        "new_bill": "New bill is available for {month_range}.",
-        "payment_received": "Payment of {amount} was received.",
-        "balance_alert": "Account balance is {balance}.",
+        "new_bill": "Your new Con Edison bill for {month_range} is now available.",
+        "payment_received": "Good news — your payment of {amount} has been received. Your account balance is now {balance}.",
     },
 }
 
@@ -1806,12 +1806,14 @@ def load_tts_config() -> dict:
         data = json.loads(TTS_CONFIG_FILE.read_text())
         merged = DEFAULT_TTS_CONFIG.copy()
         merged.update(data)
+        merged.setdefault("tts_service", "tts.google_translate_say")
         if "messages" not in data or not data["messages"]:
             merged["messages"] = DEFAULT_TTS_CONFIG["messages"].copy()
         else:
             for k, v in DEFAULT_TTS_CONFIG["messages"].items():
                 merged["messages"].setdefault(k, v)
             merged["messages"].pop("scrape_complete", None)
+            merged["messages"].pop("balance_alert", None)
         return merged
     except Exception as e:
         add_log("warning", f"Failed to load TTS config: {str(e)}")
@@ -1830,6 +1832,7 @@ class TTSConfigModel(BaseModel):
     language: Optional[str] = None
     prefix: Optional[str] = None
     wait_for_idle: Optional[bool] = None
+    tts_service: Optional[str] = None
     messages: Optional[dict] = None
 
 
@@ -1865,7 +1868,7 @@ def build_tts_message(config: dict, key: str, **kwargs) -> str:
 
 @app.post("/api/tts/test")
 async def test_tts():
-    """Send a test TTS message via MQTT (requires HA automation to handle)"""
+    """Send test TTS: direct HA API when addon, else MQTT fallback"""
     config = load_tts_config()
     if not config.get("enabled"):
         raise HTTPException(status_code=400, detail="TTS is not enabled")
@@ -1873,20 +1876,31 @@ async def test_tts():
     if not media_player:
         raise HTTPException(status_code=400, detail="Media player not configured")
     full_msg = f"{config.get('prefix', DEFAULT_TTS_PREFIX)}, Con Edison test message."
-    try:
-        from mqtt_client import get_mqtt_client
-        mqtt_client = get_mqtt_client()
-        if mqtt_client and mqtt_client.enabled:
-            await mqtt_client.publish_tts_request(
-                message=full_msg,
-                media_player=media_player,
-                volume=config.get("volume", 0.7),
-                wait_for_idle=config.get("wait_for_idle", True),
-            )
-            return {"success": True, "message": "TTS request sent. Ensure HA automation is set up."}
-        raise HTTPException(status_code=400, detail="MQTT not configured")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    volume = config.get("volume", 0.7)
+    wait_for_idle = config.get("wait_for_idle", True)
+    tts_service = config.get("tts_service", "tts.google_translate_say")
+
+    if os.environ.get("SUPERVISOR_TOKEN"):
+        from ha_tts import send_tts
+        success, err = await send_tts(
+            message=full_msg,
+            media_player=media_player,
+            volume=volume,
+            wait_for_idle=wait_for_idle,
+            tts_service=tts_service,
+        )
+        if success:
+            return {"success": True, "message": "TTS sent via Home Assistant."}
+        raise HTTPException(status_code=500, detail=err or "TTS failed")
+
+    from mqtt_client import get_mqtt_client
+    mqtt_client = get_mqtt_client()
+    if mqtt_client and mqtt_client.enabled:
+        await mqtt_client.publish_tts_request(
+            message=full_msg, media_player=media_player, volume=volume, wait_for_idle=wait_for_idle
+        )
+        return {"success": True, "message": "TTS request sent via MQTT. Add HA automation if not using addon."}
+    raise HTTPException(status_code=400, detail="Not in HA addon and MQTT not configured")
 
 
 # ========== SPA Static Files & Fallback ==========

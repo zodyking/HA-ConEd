@@ -40,9 +40,11 @@ All addon data (credentials, MQTT config, schedule, database) is stored in the a
 
 Configure TTS (text-to-speech) in **Settings → TTS Alerts**. Messages use format `(prefix), (message)` like [Home-Energy](https://github.com/zodyking/Home-Energy).
 
-**Media player idle:** When "Wait for media player idle" is enabled, TTS is only played when the media player state is `idle`. Otherwise the addon queues the request and your HA automation waits until idle before playing. Add the automation from the TTS settings page (expand "Home Assistant Automation") to your `configuration.yaml` or create it via the UI.
+**Direct HA API:** When running as a Home Assistant addon, TTS is sent directly via the HA REST API — no automations needed. The addon uses `homeassistant_api` to call `tts.*` and `media_player.*` services.
 
-**MQTT topic:** `coned/tts/request` — JSON payload: `message`, `media_player`, `volume`, `wait_for_idle`, `timestamp`.
+**Media player idle:** When "Wait for media player idle" is enabled, the addon checks the media player state and waits (up to 5 minutes) until it is `idle` before playing, so TTS doesn’t interrupt music or other playback.
+
+**MQTT fallback:** When running outside the addon (e.g. dev), TTS requests are published to `coned/tts/request` and require an HA automation to handle them.
 
 ## MQTT Integration with Home Assistant
 

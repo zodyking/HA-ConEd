@@ -7,7 +7,7 @@
     <div class="ha-card-content">
       <p class="ha-tts-intro">
         Configure text-to-speech announcements for Con Edison events. Messages use format:
-        <strong>(prefix), (message)</strong>. TTS is sent via MQTT—add the automation below to your Home Assistant.
+        <strong>(prefix), (message)</strong>. When running as a Home Assistant addon, TTS is sent directly via the HA API (no automation needed). Outside HA, use MQTT + automation.
       </p>
 
       <div class="ha-accordion">
@@ -71,12 +71,23 @@
               <div class="ha-form-hint">Prepended to every message: (prefix), (message)</div>
             </div>
             <div class="ha-form-group">
+              <label for="tts-service" class="ha-form-label">TTS Service</label>
+              <input
+                id="tts-service"
+                v-model="ttsService"
+                type="text"
+                class="ha-form-input ha-input-mono"
+                placeholder="tts.google_translate_say"
+              />
+              <div class="ha-form-hint">e.g. tts.google_translate_say, tts.cloud_say, tts.amazon_polly_say</div>
+            </div>
+            <div class="ha-form-group">
               <label class="ha-check-label">
                 <input v-model="waitForIdle" type="checkbox" />
                 <span>Wait for media player idle</span>
               </label>
               <div class="ha-form-hint">
-                Only play when media player state is idle; otherwise wait. Requires HA automation.
+                Only play when media player state is idle; otherwise wait up to 5 minutes.
               </div>
             </div>
             <button type="button" class="ha-button ha-button-primary" :disabled="isLoading" @click="handleSave">
@@ -131,9 +142,9 @@
       <div v-if="message" :class="['ha-message', message.type]">{{ message.text }}</div>
 
       <details class="ha-tts-docs">
-        <summary>Home Assistant Automation (wait for idle)</summary>
+        <summary>MQTT Fallback — Automation (when not using addon)</summary>
+        <p class="ha-form-hint">Only needed when running outside the HA addon (e.g. dev). The addon uses the HA API directly.</p>
         <pre class="ha-automation-yaml">{{ automationYaml }}</pre>
-        <p class="ha-form-hint">Add this automation to your <code>configuration.yaml</code> or create via UI. Replace <code>media_player.your_speaker</code> with your entity.</p>
       </details>
     </div>
   </div>
@@ -148,12 +159,12 @@ const enabled = ref(false)
 const mediaPlayer = ref('')
 const volume = ref(0.7)
 const language = ref('en')
+const ttsService = ref('tts.google_translate_say')
 const prefix = ref('Message from Con Edison.')
 const waitForIdle = ref(true)
 const messages = ref<Record<string, string>>({
-  new_bill: 'New bill is available for {month_range}.',
-  payment_received: 'Payment of {amount} was received.',
-  balance_alert: 'Account balance is {balance}.',
+  new_bill: 'Your new Con Edison bill for {month_range} is now available.',
+  payment_received: 'Good news — your payment of {amount} has been received. Your account balance is now {balance}.',
 })
 const isLoading = ref(false)
 const testLoading = ref(false)
@@ -162,9 +173,8 @@ const message = ref<{ type: 'success' | 'error'; text: string } | null>(null)
 const messageEntries = computed(() => Object.keys(messages.value))
 
 const placeholders: Record<string, string> = {
-  new_bill: 'New bill is available for {month_range}.',
-  payment_received: 'Payment of {amount} was received.',
-  balance_alert: 'Account balance is {balance}.',
+  new_bill: 'Your new Con Edison bill for {month_range} is now available.',
+  payment_received: 'Good news — your payment of {amount} has been received. Your account balance is now {balance}.',
 }
 
 const automationYaml = `# ConEd TTS - waits for media player idle before playing
@@ -215,6 +225,7 @@ async function loadConfig() {
       mediaPlayer.value = data.media_player ?? ''
       volume.value = typeof data.volume === 'number' ? data.volume : 0.7
       language.value = data.language ?? 'en'
+      ttsService.value = data.tts_service ?? 'tts.google_translate_say'
       prefix.value = data.prefix ?? 'Message from Con Edison.'
       waitForIdle.value = data.wait_for_idle ?? true
       if (data.messages && typeof data.messages === 'object') {
@@ -239,6 +250,7 @@ async function handleSave() {
         volume: volume.value,
         language: language.value,
         prefix: prefix.value,
+        tts_service: ttsService.value.trim() || 'tts.google_translate_say',
         wait_for_idle: waitForIdle.value,
         messages: messages.value,
       }),
