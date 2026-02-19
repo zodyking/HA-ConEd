@@ -1,0 +1,4 @@
+# https://developers.home-assistant.io/docs/add-ons/repository#repository-configuration
+name: HA ConEd Scraper
+url: https://github.com/zodyking/HA-ConEd
+maintainer: zodyking

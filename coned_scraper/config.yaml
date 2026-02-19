@@ -3,7 +3,7 @@ name: ConEd Scraper
 version: dev
 slug: coned_scraper
 description: Automated ConEd billing data scraper with webhooks and web UI
-url: https://github.com/zodyking/conedison
+url: https://github.com/zodyking/HA-ConEd
 ingress: true
 ingress_port: 3000
 panel_icon: mdi:flash

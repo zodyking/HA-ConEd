@@ -20,7 +20,7 @@ Automated ConEd billing data scraper with webhooks and web UI. Built with Next.j
 ### Dokploy
 
 1. Create project → Docker Compose
-2. Connect `https://github.com/zodyking/conedison`, compose file: `coned-scraper/docker-compose.yml`
+2. Connect `https://github.com/zodyking/conedison`, compose file: `coned_scraper/docker-compose.yml`
 3. Deploy, attach domain to `web` service
 4. Configure credentials and webhooks in Settings
 
