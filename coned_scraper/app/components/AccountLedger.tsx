@@ -3,11 +3,10 @@
 import { useState, useEffect, useCallback } from 'react'
 import dynamic from 'next/dynamic'
 import { formatDate, formatTimestamp } from '../lib/timezone'
+import { getApiBase } from '../lib/api-base'
 
 // Dynamically import PDF viewer to avoid SSR issues
 const PdfViewer = dynamic(() => import('./PdfViewer'), { ssr: false })
-
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api'
 
 // Types for database-driven ledger data
 interface Payment {
@@ -257,15 +256,15 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
 
   const loadLedgerData = useCallback(async () => {
     try {
-      // Fetch from the new database-driven endpoint
-      const response = await fetch(`${API_BASE_URL}/ledger`)
+      const api = getApiBase()
+      const response = await fetch(`${api}/ledger`)
       if (response.ok) {
         const data = await response.json()
         setLedgerData(data)
         setApiError(null)
       } else {
         // Fallback to legacy endpoint if /ledger fails
-        const legacyResponse = await fetch(`${API_BASE_URL}/scraped-data?limit=1`)
+        const legacyResponse = await fetch(`${api}/scraped-data?limit=1`)
         if (legacyResponse.ok) {
           const legacyData = await legacyResponse.json()
           if (legacyData.data?.[0]) {
@@ -287,7 +286,7 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
       }
       
       // Also get screenshot from legacy data
-      const screenshotRes = await fetch(`${API_BASE_URL}/scraped-data?limit=1`)
+      const screenshotRes = await fetch(`${api}/scraped-data?limit=1`)
       if (screenshotRes.ok) {
         const screenshotData = await screenshotRes.json()
         if (screenshotData.data?.[0]?.screenshot_path) {
@@ -303,7 +302,7 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
 
   const checkPdfExists = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/latest-bill-pdf/status`)
+      const res = await fetch(`${getApiBase()}/latest-bill-pdf/status`)
       if (res.ok) {
         const data = await res.json()
         setPdfExists(data.exists)
@@ -316,7 +315,7 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
   // Load ALL bill summaries at once (efficient - calculated in single pass on backend)
   const loadAllBillSummaries = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/bills/all-summaries`)
+      const res = await fetch(`${getApiBase()}/bills/all-summaries`)
       console.log('All summaries response status:', res.status)
       if (res.ok) {
         const data = await res.json()
@@ -468,7 +467,7 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
             ✕
           </button>
           <img
-            src={`${API_BASE_URL}/screenshot/${screenshotPath.split('/').pop() || screenshotPath}`}
+            src={`${getApiBase()}/screenshot/${screenshotPath.split('/').pop() || screenshotPath}`}
             alt="Account Balance Screenshot"
             style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: '4px' }}
             onClick={(e) => e.stopPropagation()}
@@ -479,7 +478,7 @@ export default function AccountLedger({ onNavigate }: { onNavigate?: (tab: 'cons
       {/* PDF Bill Modal */}
       {showPdfModal && pdfExists && (
         <PdfViewer
-          url={`${API_BASE_URL}/bill-document`}
+          url={`${getApiBase()}/bill-document`}
           onClose={() => setShowPdfModal(false)}
         />
       )}

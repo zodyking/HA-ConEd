@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { formatDate, formatTime, formatTimestamp } from '../lib/timezone'
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api'
+import { getApiBase } from '../lib/api-base'
 
 interface LogEntry {
   id: number
@@ -26,7 +26,7 @@ export default function Dashboard() {
       let response: Response | null = null
       
       try {
-        response = await fetch(`${API_BASE_URL}/logs?limit=100`, {
+        response = await fetch(`${getApiBase()}/logs?limit=100`, {
           method: 'GET',
           headers: {
             'Content-Type': 'application/json',
@@ -61,7 +61,7 @@ export default function Dashboard() {
   const loadLivePreview = useCallback(async () => {
     try {
       const timestamp = new Date().getTime()
-      const url = `${API_BASE_URL}/live-preview?t=${timestamp}`
+      const url = `${getApiBase()}/live-preview?t=${timestamp}`
       const response = await fetch(url)
       
       if (response.ok && response.headers.get('content-type')?.startsWith('image/')) {
@@ -142,7 +142,7 @@ export default function Dashboard() {
     
     try {
       // Clear logs on the backend as well
-      await fetch(`${API_BASE_URL}/logs`, {
+      await fetch(`${getApiBase()}/logs`, {
         method: 'DELETE',
       }).catch(() => {
         // Ignore errors if endpoint doesn't exist or fails
@@ -167,7 +167,7 @@ export default function Dashboard() {
         }
       }
       
-      const response = await safeFetch(`${API_BASE_URL}/scrape`, {
+      const response = await safeFetch(`${getApiBase()}/scrape`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

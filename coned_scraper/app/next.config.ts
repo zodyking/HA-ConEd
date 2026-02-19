@@ -7,6 +7,7 @@ const nextConfig: NextConfig = {
   compress: true,
   poweredByHeader: false,
   reactStrictMode: true,
+  trailingSlash: true,
 
   images: {
     formats: ['image/avif', 'image/webp'],

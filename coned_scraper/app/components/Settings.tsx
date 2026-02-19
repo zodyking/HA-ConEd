@@ -5,7 +5,7 @@ import { useState, useEffect } from 'react'
 import { formatTimestamp as formatTZ } from '../lib/timezone'
 import Dashboard from './Dashboard'
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api'
+import { getApiBase } from '../lib/api-base'
 
 interface Credentials {
   username: string
@@ -77,7 +77,7 @@ export default function Settings() {
 
     const updateTOTP = async () => {
       try {
-        const response = await fetch(`${API_BASE_URL}/totp`)
+        const response = await fetch(`${getApiBase()}/totp`)
         if (response.ok) {
           const data: TOTPResponse = await response.json()
           setCurrentTOTP(data.code)
@@ -111,7 +111,7 @@ export default function Settings() {
 
   const verifyPassword = async (pwd: string) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/app-settings/verify-password`, {
+      const response = await fetch(`${getApiBase()}/app-settings/verify-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password: pwd })
@@ -144,7 +144,7 @@ export default function Settings() {
 
   const loadSettings = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/settings`)
+      const response = await fetch(`${getApiBase()}/settings`)
       if (response.ok) {
         const data: Credentials = await response.json()
         setUsername(data.username || '')
@@ -168,7 +168,7 @@ export default function Settings() {
     setMessage(null)
 
     try {
-      const response = await fetch(`${API_BASE_URL}/settings`, {
+      const response = await fetch(`${getApiBase()}/settings`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -183,7 +183,7 @@ export default function Settings() {
       if (response.ok) {
         setMessage({ type: 'success', text: 'Settings saved successfully!' })
         if (totpSecret) {
-          const totpResponse = await fetch(`${API_BASE_URL}/totp`)
+          const totpResponse = await fetch(`${getApiBase()}/totp`)
           if (totpResponse.ok) {
             const totpData: TOTPResponse = await totpResponse.json()
             setCurrentTOTP(totpData.code)
@@ -537,7 +537,7 @@ function MQTTTab() {
 
   const loadMqttConfig = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/mqtt-config`)
+      const response = await fetch(`${getApiBase()}/mqtt-config`)
       if (response.ok) {
         const data = await response.json()
         setMqttUrl(data.mqtt_url || '')
@@ -558,7 +558,7 @@ function MQTTTab() {
     setMessage(null)
 
     try {
-      const response = await fetch(`${API_BASE_URL}/mqtt-config`, {
+      const response = await fetch(`${getApiBase()}/mqtt-config`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -832,7 +832,7 @@ function AppSettingsTab() {
 
   useEffect(() => {
     // Load app base URL
-    fetch(`${API_BASE_URL}/app-settings`)
+    fetch(`${getApiBase()}/app-settings`)
       .then(res => res.json())
       .then(data => {
         setAppBaseUrl(data.app_base_url || '')
@@ -845,7 +845,7 @@ function AppSettingsTab() {
   
   const checkPdfStatus = async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/latest-bill-pdf/status`)
+      const res = await fetch(`${getApiBase()}/latest-bill-pdf/status`)
       if (res.ok) {
         const data = await res.json()
         setPdfStatus(data)
@@ -865,7 +865,7 @@ function AppSettingsTab() {
     setPdfMessage(null)
     
     try {
-      const res = await fetch(`${API_BASE_URL}/latest-bill-pdf/download`, {
+      const res = await fetch(`${getApiBase()}/latest-bill-pdf/download`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: pdfUrl.trim() })
@@ -892,7 +892,7 @@ function AppSettingsTab() {
     setPdfMessage(null)
     
     try {
-      const res = await fetch(`${API_BASE_URL}/latest-bill-pdf`, { method: 'DELETE' })
+      const res = await fetch(`${getApiBase()}/latest-bill-pdf`, { method: 'DELETE' })
       if (res.ok) {
         setPdfMessage({ type: 'success', text: 'PDF deleted' })
         await checkPdfStatus()
@@ -909,7 +909,7 @@ function AppSettingsTab() {
     setPdfMessage(null)
     
     try {
-      const res = await fetch(`${API_BASE_URL}/latest-bill-pdf/send-mqtt`, { method: 'POST' })
+      const res = await fetch(`${getApiBase()}/latest-bill-pdf/send-mqtt`, { method: 'POST' })
       const data = await res.json()
       if (res.ok) {
         setPdfMessage({ type: 'success', text: data.message || 'PDF URL sent to MQTT' })
@@ -928,10 +928,10 @@ function AppSettingsTab() {
     setMessage(null)
     
     try {
-      const currentSettings = await fetch(`${API_BASE_URL}/app-settings`)
+      const currentSettings = await fetch(`${getApiBase()}/app-settings`)
       const currentData = await currentSettings.json()
       
-      const res = await fetch(`${API_BASE_URL}/app-settings`, {
+      const res = await fetch(`${getApiBase()}/app-settings`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -981,10 +981,10 @@ function AppSettingsTab() {
 
     try {
       // First, get current settings to preserve time_offset_hours
-      const currentSettings = await fetch(`${API_BASE_URL}/app-settings`)
+      const currentSettings = await fetch(`${getApiBase()}/app-settings`)
       const currentData = await currentSettings.json()
       
-      const response = await fetch(`${API_BASE_URL}/app-settings`, {
+      const response = await fetch(`${getApiBase()}/app-settings`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1069,7 +1069,7 @@ function AppSettingsTab() {
                 </span>
                 <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                   <a
-                    href={`${API_BASE_URL}/bill-document`}
+                    href={`${getApiBase()}/bill-document`}
                     target="_blank"
                     rel="noopener noreferrer"
                     style={{
@@ -1266,7 +1266,7 @@ function WebhooksTab() {
 
   const loadWebhooks = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/webhooks`)
+      const response = await fetch(`${getApiBase()}/webhooks`)
       if (response.ok) {
         const data = await response.json()
         setLatestBillUrl(data.latest_bill || '')
@@ -1292,7 +1292,7 @@ function WebhooksTab() {
         last_payment: lastPaymentUrl.trim()
       }
 
-      const response = await fetch(`${API_BASE_URL}/webhooks`, {
+      const response = await fetch(`${getApiBase()}/webhooks`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1334,7 +1334,7 @@ function WebhooksTab() {
     setMessage(null)
 
     try {
-      const response = await fetch(`${API_BASE_URL}/webhooks/test`, {
+      const response = await fetch(`${getApiBase()}/webhooks/test`, {
         method: 'POST'
       })
 
@@ -1508,7 +1508,7 @@ function AutomatedScrapeTab() {
 
   const loadSchedule = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/automated-schedule`)
+      const response = await fetch(`${getApiBase()}/automated-schedule`)
       if (response.ok) {
         const data = await response.json()
         setStatus(data)
@@ -1527,7 +1527,7 @@ function AutomatedScrapeTab() {
 
   const loadScrapeHistory = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/scrape-history?limit=20`)
+      const response = await fetch(`${getApiBase()}/scrape-history?limit=20`)
       if (response.ok) {
         const data = await response.json()
         setScrapeHistory(data.history || [])
@@ -1551,7 +1551,7 @@ function AutomatedScrapeTab() {
         return
       }
 
-      const response = await fetch(`${API_BASE_URL}/automated-schedule`, {
+      const response = await fetch(`${getApiBase()}/automated-schedule`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1812,7 +1812,7 @@ function PayeesTab() {
 
   const loadUsers = async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/payee-users`)
+      const res = await fetch(`${getApiBase()}/payee-users`)
       if (res.ok) {
         const data = await res.json()
         setUsers(data.users || [])
@@ -1824,7 +1824,7 @@ function PayeesTab() {
 
   const loadUnverifiedPayments = async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/payments/unverified`)
+      const res = await fetch(`${getApiBase()}/payments/unverified`)
       if (res.ok) {
         const data = await res.json()
         setUnverifiedPayments(data.payments || [])
@@ -1836,7 +1836,7 @@ function PayeesTab() {
 
   const loadUserPayments = async (userId: number) => {
     try {
-      const res = await fetch(`${API_BASE_URL}/payee-users/${userId}/payments`)
+      const res = await fetch(`${getApiBase()}/payee-users/${userId}/payments`)
       if (res.ok) {
         const data = await res.json()
         setUserPayments(prev => ({ ...prev, [userId]: data.payments || [] }))
@@ -1862,7 +1862,7 @@ function PayeesTab() {
     setMessage(null)
     
     try {
-      const res = await fetch(`${API_BASE_URL}/payee-users`, {
+      const res = await fetch(`${getApiBase()}/payee-users`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: newUserName.trim(), is_default: users.length === 0 })
@@ -1887,7 +1887,7 @@ function PayeesTab() {
     if (!confirm(`Delete user "${userName}"? This will unlink all their payments.`)) return
     
     try {
-      const res = await fetch(`${API_BASE_URL}/payee-users/${userId}`, { method: 'DELETE' })
+      const res = await fetch(`${getApiBase()}/payee-users/${userId}`, { method: 'DELETE' })
       if (res.ok) {
         await loadUsers()
         setMessage({ type: 'success', text: `Deleted user: ${userName}` })
@@ -1899,7 +1899,7 @@ function PayeesTab() {
 
   const handleSetDefault = async (userId: number) => {
     try {
-      await fetch(`${API_BASE_URL}/payee-users/${userId}`, {
+      await fetch(`${getApiBase()}/payee-users/${userId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ is_default: true })
@@ -1918,7 +1918,7 @@ function PayeesTab() {
     }
     
     try {
-      const res = await fetch(`${API_BASE_URL}/user-cards`, {
+      const res = await fetch(`${getApiBase()}/user-cards`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: userId, card_last_four: cardNum.slice(-4) })
@@ -1939,7 +1939,7 @@ function PayeesTab() {
 
   const handleAttributePayment = async (paymentId: number, userId: number) => {
     try {
-      const res = await fetch(`${API_BASE_URL}/payments/attribute`, {
+      const res = await fetch(`${getApiBase()}/payments/attribute`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ payment_id: paymentId, user_id: userId, method: 'manual' })
@@ -1970,7 +1970,7 @@ function PayeesTab() {
     setIsLoading(true)
     console.log('Saving responsibilities:', responsibilities)
     try {
-      const res = await fetch(`${API_BASE_URL}/payee-users/responsibilities`, {
+      const res = await fetch(`${getApiBase()}/payee-users/responsibilities`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ responsibilities })
@@ -2413,7 +2413,7 @@ function PaymentsTab() {
 
   const loadPayeeUsers = async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/payee-users`)
+      const res = await fetch(`${getApiBase()}/payee-users`)
       if (res.ok) {
         const data = await res.json()
         setPayeeUsers(data.users || [])
@@ -2426,7 +2426,7 @@ function PaymentsTab() {
   const loadData = async () => {
     setIsLoading(true)
     try {
-      const res = await fetch(`${API_BASE_URL}/bills-with-payments`)
+      const res = await fetch(`${getApiBase()}/bills-with-payments`)
       if (res.ok) {
         const data = await res.json()
         setBills(data.bills || [])
@@ -2442,7 +2442,7 @@ function PaymentsTab() {
 
   const handleWipeDatabase = async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/data/wipe`, { method: 'DELETE' })
+      const res = await fetch(`${getApiBase()}/data/wipe`, { method: 'DELETE' })
       if (res.ok) {
         const data = await res.json()
         setMessage({ type: 'success', text: `Wiped ${data.bills_deleted} bills and ${data.payments_deleted} payments` })
@@ -2478,7 +2478,7 @@ function PaymentsTab() {
     if (!draggedPayment) return
 
     try {
-      const res = await fetch(`${API_BASE_URL}/payments/${draggedPayment.id}/order`, {
+      const res = await fetch(`${getApiBase()}/payments/${draggedPayment.id}/order`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ bill_id: targetBillId, order: targetIndex + 1 })
@@ -2501,7 +2501,7 @@ function PaymentsTab() {
 
   const handleChangeBill = async (paymentId: number, billId: number | null) => {
     try {
-      const res = await fetch(`${API_BASE_URL}/payments/${paymentId}/bill`, {
+      const res = await fetch(`${getApiBase()}/payments/${paymentId}/bill`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ bill_id: billId })
@@ -2520,7 +2520,7 @@ function PaymentsTab() {
 
   const handleClearManualAudit = async (paymentId: number) => {
     try {
-      const res = await fetch(`${API_BASE_URL}/payments/${paymentId}/manual-audit`, {
+      const res = await fetch(`${getApiBase()}/payments/${paymentId}/manual-audit`, {
         method: 'DELETE'
       })
       
@@ -2538,7 +2538,7 @@ function PaymentsTab() {
   const handleAssignPayee = async (paymentId: number, userId: number | null) => {
     try {
       if (userId) {
-        const res = await fetch(`${API_BASE_URL}/payments/attribute`, {
+        const res = await fetch(`${getApiBase()}/payments/attribute`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ payment_id: paymentId, user_id: userId, method: 'manual' })
@@ -2550,7 +2550,7 @@ function PaymentsTab() {
         }
       } else {
         // Unassign
-        const res = await fetch(`${API_BASE_URL}/payments/${paymentId}/attribution`, { method: 'DELETE' })
+        const res = await fetch(`${getApiBase()}/payments/${paymentId}/attribution`, { method: 'DELETE' })
         if (res.ok) {
           setMessage({ type: 'success', text: 'Payment unassigned' })
           await loadData()
@@ -2963,7 +2963,7 @@ function IMAPTab() {
 
   const loadConfig = async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/imap-config`)
+      const res = await fetch(`${getApiBase()}/imap-config`)
       if (res.ok) {
         const data = await res.json()
         setConfig({
@@ -2990,7 +2990,7 @@ function IMAPTab() {
     setMessage(null)
     
     try {
-      const res = await fetch(`${API_BASE_URL}/imap-config`, {
+      const res = await fetch(`${getApiBase()}/imap-config`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(config)
@@ -3014,7 +3014,7 @@ function IMAPTab() {
     setMessage(null)
     
     try {
-      const res = await fetch(`${API_BASE_URL}/imap-config/test`, {
+      const res = await fetch(`${getApiBase()}/imap-config/test`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(config)
@@ -3038,7 +3038,7 @@ function IMAPTab() {
     setMessage(null)
     
     try {
-      const res = await fetch(`${API_BASE_URL}/imap-config/sync`, {
+      const res = await fetch(`${getApiBase()}/imap-config/sync`, {
         method: 'POST'
       })
       
@@ -3060,7 +3060,7 @@ function IMAPTab() {
     setIsLoading(true)
     setMessage(null)
     try {
-      const res = await fetch(`${API_BASE_URL}/imap-config/preview`, { method: 'POST' })
+      const res = await fetch(`${getApiBase()}/imap-config/preview`, { method: 'POST' })
       if (res.ok) {
         const data = await res.json()
         if (data.success) {
