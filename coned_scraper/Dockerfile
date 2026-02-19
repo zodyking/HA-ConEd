@@ -30,7 +30,7 @@ WORKDIR /app
 
 # Copy Python service and install dependencies (Playwright needs glibc/manylinux - Debian provides it)
 COPY python-service/requirements.txt /app/python-service/
-RUN pip3 install --no-cache-dir -r /app/python-service/requirements.txt
+RUN pip3 install --break-system-packages --no-cache-dir -r /app/python-service/requirements.txt
 
 # Install Playwright Chromium and system dependencies
 RUN python3 -m playwright install chromium && python3 -m playwright install-deps chromium
