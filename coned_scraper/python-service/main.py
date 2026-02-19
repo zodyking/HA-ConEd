@@ -2040,6 +2040,7 @@ class TTSBillSummaryConfigModel(BaseModel):
     sensor_avg_daily: Optional[str] = None
     sensor_estimate_min: Optional[str] = None
     sensor_estimate_max: Optional[str] = None
+    sensor_kwh_cost: Optional[str] = None
 
 
 @app.get("/api/tts-bill-summary-config")
@@ -2062,6 +2063,7 @@ class BillSummaryPreviewRequest(BaseModel):
     sensor_avg_daily: Optional[str] = None
     sensor_estimate_min: Optional[str] = None
     sensor_estimate_max: Optional[str] = None
+    sensor_kwh_cost: Optional[str] = None
 
 
 @app.post("/api/tts/bill-summary/preview")
@@ -2077,6 +2079,8 @@ async def preview_bill_summary_tts(body: Optional[BillSummaryPreviewRequest] = N
             cfg["sensor_estimate_min"] = body.sensor_estimate_min
         if body.sensor_estimate_max is not None:
             cfg["sensor_estimate_max"] = body.sensor_estimate_max
+        if body.sensor_kwh_cost is not None:
+            cfg["sensor_kwh_cost"] = body.sensor_kwh_cost
     tts_cfg = load_tts_config()
     from tts_bill_summary import build_bill_summary_message
     msg = await build_bill_summary_message(cfg, tts_cfg)

@@ -273,6 +273,11 @@
                         <label class="ha-form-label">Bill estimate sensor (max)</label>
                         <input v-model="billSummarySensorEstMax" type="text" class="ha-form-input" list="ha-sensor-datalist" placeholder="sensor.bill_estimate_high" autocomplete="off" />
                       </div>
+                      <div class="ha-form-group">
+                        <label class="ha-form-label">kWh cost sensor ($/kWh)</label>
+                        <input v-model="billSummarySensorKwhCost" type="text" class="ha-form-input" list="ha-sensor-datalist" placeholder="input_number.kwh_cost" autocomplete="off" />
+                        <div class="info-text">Converts estimate sensors (kWh) to dollar amounts. Usually a helper like input_number.</div>
+                      </div>
                       <div class="ha-tts-buttons ha-tts-buttons-sm">
                         <button type="submit" class="ha-button ha-button-primary" :disabled="billSummarySaving">{{ billSummarySaving ? 'Saving...' : 'Save Bill Summary Config' }}</button>
                         <button type="button" class="ha-button ha-button-secondary" :disabled="billSummaryPreviewLoading" @click="handleBillSummaryPreview">{{ billSummaryPreviewLoading ? 'Loading...' : 'Preview Message' }}</button>
@@ -357,6 +362,7 @@ const billSummarySensorCurrent = ref('')
 const billSummarySensorAvg = ref('')
 const billSummarySensorEstMin = ref('')
 const billSummarySensorEstMax = ref('')
+const billSummarySensorKwhCost = ref('')
 const billSummarySaving = ref(false)
 const billSummaryPreviewLoading = ref(false)
 const billSummaryPreview = ref('')
@@ -621,6 +627,7 @@ async function loadBillSummaryConfig() {
       billSummarySensorAvg.value = (d.sensor_avg_daily ?? '').trim()
       billSummarySensorEstMin.value = (d.sensor_estimate_min ?? '').trim()
       billSummarySensorEstMax.value = (d.sensor_estimate_max ?? '').trim()
+      billSummarySensorKwhCost.value = (d.sensor_kwh_cost ?? '').trim()
     }
   } catch (e) { console.error(e) }
 }
@@ -642,6 +649,7 @@ async function handleBillSummarySave() {
         sensor_avg_daily: billSummarySensorAvg.value.trim(),
         sensor_estimate_min: billSummarySensorEstMin.value.trim(),
         sensor_estimate_max: billSummarySensorEstMax.value.trim(),
+        sensor_kwh_cost: billSummarySensorKwhCost.value.trim(),
       }),
     })
     if (res.ok) ttsMessage.value = { type: 'success', text: 'Bill summary config saved.' }
@@ -665,6 +673,7 @@ async function handleBillSummaryPreview() {
         sensor_avg_daily: billSummarySensorAvg.value.trim(),
         sensor_estimate_min: billSummarySensorEstMin.value.trim(),
         sensor_estimate_max: billSummarySensorEstMax.value.trim(),
+        sensor_kwh_cost: billSummarySensorKwhCost.value.trim(),
       }),
     })
     const d = await res.json().catch(() => ({}))

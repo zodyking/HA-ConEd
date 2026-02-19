@@ -21,10 +21,11 @@ DEFAULT_BILL_SUMMARY_CONFIG = {
     "end_hour": 10,
     "frequency_hours": 1,  # Play every N hours
     "minute_of_hour": 0,   # Play at minute X (0-59)
-    "sensor_current_usage": "",   # "You used X so far this cycle"
-    "sensor_avg_daily": "",
-    "sensor_estimate_min": "",
-    "sensor_estimate_max": "",
+    "sensor_current_usage": "",   # "You used X so far this cycle" (kWh)
+    "sensor_avg_daily": "",       # kWh per day
+    "sensor_estimate_min": "",    # kWh - will convert to $ via kwh_cost
+    "sensor_estimate_max": "",    # kWh - will convert to $ via kwh_cost
+    "sensor_kwh_cost": "",        # $ per kWh (helper, e.g. input_number)
     "last_played_slot": None,  # YYYY-MM-DD-HH to avoid replay same slot
 }
 
@@ -53,6 +54,26 @@ def _parse_amount(val) -> float:
     if isinstance(val, (int, float)):
         return float(val)
     return parse_amount(str(val)) or 0.0
+
+
+def _parse_float(val) -> Optional[float]:
+    """Parse string to float for kWh-style values. Returns None if not numeric."""
+    if val is None:
+        return None
+    try:
+        s = str(val).replace(",", "").strip()
+        return float(s) if s else None
+    except (ValueError, TypeError):
+        return None
+
+
+def _format_kwh(val) -> str:
+    """Format value as 'X kilowatt hours' if numeric, else return as-is."""
+    n = _parse_float(val)
+    if n is not None:
+        s = f"{n:.1f}" if n != int(n) else str(int(n))
+        return f"{s} kilowatt hours"
+    return str(val) if val else "unknown"
 
 
 async def _get_ha_sensor_values(entity_ids: list) -> Dict[str, str]:
@@ -89,20 +110,73 @@ def _format_currency(val: float) -> str:
 
 
 def _bill_message(bill_amt: float) -> str:
-    if bill_amt <= 350:
+    """Dynamic feedback based on bill amount: 0-150 excellent, 150-250 good, 250-350 moderate, 350+ high."""
+    if bill_amt <= 0:
         return ""
+    if bill_amt <= 150:
+        return " Your bill is in an excellent range."
+    if bill_amt <= 250:
+        return " Your bill is in a good range."
+    if bill_amt <= 350:
+        return " Your bill is on the higher side. Consider small reductions in usage."
     return (
-        " Your bill was higher than expected. Consider reducing usage: "
-        "turn off heaters and air conditioning when leaving home for extended periods."
+        " Your bill was much higher than expected. Reduce usage: "
+        "turn off heaters and air conditioning when leaving home, and cut back on high-use appliances."
     )
 
 
 def _estimate_message(est_min: float, est_max: float) -> str:
-    if est_min <= 350 and est_max <= 350:
+    """Dynamic feedback based on projected bill estimates."""
+    est_mid = (est_min + est_max) / 2 if (est_min or est_max) else 0
+    if est_mid <= 0:
         return ""
+    if est_mid <= 200:
+        return " Your projected bill looks good."
+    if est_mid <= 300:
+        return " Your projected bill is moderate. Small cuts can lower the final amount."
+    if est_mid <= 400:
+        return (
+            " Your projected bill is running high. "
+            "Reduce electric use now to bring the final bill down."
+        )
     return (
-        " Current usage patterns suggest your bill could be high. "
-        "You can still reduce your electric use this cycle to lower the final bill."
+        " Your projected bill is way too high. "
+        "Turn off heaters and AC when away, avoid peak-hour usage, and cut non-essential loads."
+    )
+
+
+def _daily_usage_message(avg_daily: float) -> str:
+    """0-14 really efficient, 15-22 good, 22-30 too high, 30+ way too high."""
+    if avg_daily <= 0:
+        return ""
+    if avg_daily < 15:
+        return " Your daily usage is really efficient."
+    if avg_daily <= 22:
+        return " Your daily usage is in a good range."
+    if avg_daily <= 30:
+        return (
+            " Your daily usage is running too high. "
+            "Consider reducing appliance use during peak hours."
+        )
+    return (
+        " Your daily usage is way too high. "
+        "Turn off heaters and AC when away, and reduce appliance use."
+    )
+
+
+def _current_usage_message(current_kwh: float, typical_cycle: float = 300) -> str:
+    """Feedback on cycle-to-date usage. typical_cycle ~mid-cycle expectation for context."""
+    if current_kwh <= 0:
+        return ""
+    if current_kwh <= 100:
+        return " You're off to an efficient start this cycle."
+    if current_kwh <= 200:
+        return " Your cycle usage is on track."
+    if current_kwh <= 350:
+        return " Your cycle usage is running high. Try to reduce going forward."
+    return (
+        " Your cycle usage is very high. "
+        "Focus on reducing consumption for the rest of the billing period."
     )
 
 
@@ -137,24 +211,41 @@ async def build_bill_summary_message(bill_summary_config: dict, tts_config: dict
         config.get("sensor_avg_daily"),
         config.get("sensor_estimate_min"),
         config.get("sensor_estimate_max"),
+        config.get("sensor_kwh_cost"),
     ]
     sensor_ids = [s for s in sensor_ids if s and isinstance(s, str)]
     sensor_vals = await _get_ha_sensor_values(sensor_ids) if sensor_ids else {}
 
-    current_usage = "unknown"
+    current_usage_raw = "unknown"
     if config.get("sensor_current_usage"):
-        current_usage = sensor_vals.get(config["sensor_current_usage"], "unknown")
+        current_usage_raw = sensor_vals.get(config["sensor_current_usage"], "unknown")
+    current_usage = _format_kwh(current_usage_raw)
 
-    avg_daily = "unknown"
+    avg_daily_raw = "unknown"
     if config.get("sensor_avg_daily"):
-        avg_daily = sensor_vals.get(config["sensor_avg_daily"], "unknown")
+        avg_daily_raw = sensor_vals.get(config["sensor_avg_daily"], "unknown")
+    avg_daily = _format_kwh(avg_daily_raw)
 
-    est_min_val = _parse_amount(sensor_vals.get(config.get("sensor_estimate_min", ""), "0"))
-    est_max_val = _parse_amount(sensor_vals.get(config.get("sensor_estimate_max", ""), "0"))
+    # Estimates: kWh from sensors, convert to $ via kwh_cost
+    est_min_kwh = _parse_amount(sensor_vals.get(config.get("sensor_estimate_min", ""), "0"))
+    est_max_kwh = _parse_amount(sensor_vals.get(config.get("sensor_estimate_max", ""), "0"))
+    kwh_cost_raw = sensor_vals.get(config.get("sensor_kwh_cost", ""), "0") if config.get("sensor_kwh_cost") else "0"
+    kwh_cost = _parse_amount(str(kwh_cost_raw)) if kwh_cost_raw else 0.0
 
-    est_str = f"{_format_currency(est_min_val)} to {_format_currency(est_max_val)}"
-    if not config.get("sensor_estimate_min") and not config.get("sensor_estimate_max"):
-        est_str = "not available"
+    if kwh_cost and kwh_cost > 0 and (config.get("sensor_estimate_min") or config.get("sensor_estimate_max")):
+        est_min_val = est_min_kwh * kwh_cost
+        est_max_val = est_max_kwh * kwh_cost
+        est_str = f"{_format_currency(est_min_val)} to {_format_currency(est_max_val)}"
+    else:
+        est_min_val = 0.0
+        est_max_val = 0.0
+        if config.get("sensor_estimate_min") or config.get("sensor_estimate_max"):
+            est_str = "not available (add kWh cost sensor to convert to dollars)"
+        else:
+            est_str = "not available"
+
+    avg_daily_num = _parse_float(avg_daily_raw) or 0.0
+    current_usage_num = _parse_float(current_usage_raw) or 0.0
 
     # Build message parts
     parts = [
@@ -162,13 +253,17 @@ async def build_bill_summary_message(bill_summary_config: dict, tts_config: dict
     ]
     if config.get("sensor_current_usage"):
         parts.append(f" You have used {current_usage} so far this billing cycle.")
+        parts.append(_current_usage_message(current_usage_num))
     parts.append(_bill_message(bill_amt))
     parts.append(
         f" Your average daily power consumption is {avg_daily}. "
-        f"Based on current usage patterns, we estimate your bill will be {est_str} "
+    )
+    parts.append(_daily_usage_message(avg_daily_num))
+    parts.append(
+        f" Based on current usage patterns, we estimate your bill will be {est_str} "
         "by the end of the billing cycle."
     )
-    parts.append(_estimate_message(est_min_val, est_max_val))
+    parts.append(_estimate_message(est_min_val, est_max_val) if (est_min_val or est_max_val) else "")
 
     msg = "".join(parts).strip()
     return f"{prefix} {msg}".strip()
