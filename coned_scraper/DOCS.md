@@ -36,9 +36,17 @@ Controls the verbosity of addon logs. Default: `info`
 
 All addon data (credentials, MQTT config, schedule, database) is stored in the addon configuration directory and persists across restarts.
 
+## TTS Alerts
+
+Configure TTS (text-to-speech) in **Settings → TTS Alerts**. Messages use format `(prefix), (message)` like [Home-Energy](https://github.com/zodyking/Home-Energy).
+
+**Media player idle:** When "Wait for media player idle" is enabled, TTS is only played when the media player state is `idle`. Otherwise the addon queues the request and your HA automation waits until idle before playing. Add the automation from the TTS settings page (expand "Home Assistant Automation") to your `configuration.yaml` or create it via the UI.
+
+**MQTT topic:** `coned/tts/request` — JSON payload: `message`, `media_player`, `volume`, `wait_for_idle`, `timestamp`.
+
 ## MQTT Integration with Home Assistant
 
-Configure MQTT in the Settings tab. The addon publishes to MQTT topics for `account_balance`, `latest_bill`, `last_payment`, `previous_bill`, and payee summaries.
+Configure MQTT in the Settings tab. The addon publishes to MQTT topics for `account_balance`, `latest_bill`, `last_payment`, `previous_bill`, `tts/request`, and payee summaries.
 
 **MQTT Discovery (enabled by default):** When enabled, the addon publishes Home Assistant MQTT discovery configs so sensors are **auto-registered**—no manual `configuration.yaml` needed. After configuring MQTT and running a scrape, sensors such as `sensor.coned_latest_bill`, `sensor.coned_account_balance`, `sensor.coned_last_payment`, etc. appear automatically under Settings → Devices & services → MQTT. You can disable discovery in MQTT Settings if you prefer manual YAML configuration.
 

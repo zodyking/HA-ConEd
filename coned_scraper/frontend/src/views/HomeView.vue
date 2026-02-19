@@ -26,6 +26,8 @@
       </div>
     </div>
 
+    <div class="ha-header-bar"></div>
+
     <div :class="['ha-content', { 'ha-content-ledger': activeTab === 'account-ledger' }]">
       <AccountLedger
         v-if="activeTab === 'account-ledger'"

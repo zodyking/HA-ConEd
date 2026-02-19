@@ -72,8 +72,8 @@
         <SettingsAutomatedTab v-else-if="currentPage === 'automated'" />
         <SettingsMqttTab v-else-if="currentPage === 'mqtt'" />
         <SettingsAppTab v-else-if="currentPage === 'app-settings'" />
-        <SettingsPayeesTab v-else-if="currentPage === 'payees'" />
-        <SettingsPaymentsTab v-else-if="currentPage === 'payments'" />
+        <SettingsPayeesPaymentsTab v-else-if="currentPage === 'payees-payments'" />
+        <SettingsTtsTab v-else-if="currentPage === 'tts'" />
         <SettingsImapTab v-else-if="currentPage === 'imap'" />
       </template>
     </template>
@@ -88,8 +88,8 @@ import SettingsCredentialsTab from './settings/SettingsCredentialsTab.vue'
 import SettingsAutomatedTab from './settings/SettingsAutomatedTab.vue'
 import SettingsMqttTab from './settings/SettingsMqttTab.vue'
 import SettingsAppTab from './settings/SettingsAppTab.vue'
-import SettingsPayeesTab from './settings/SettingsPayeesTab.vue'
-import SettingsPaymentsTab from './settings/SettingsPaymentsTab.vue'
+import SettingsPayeesPaymentsTab from './settings/SettingsPayeesPaymentsTab.vue'
+import SettingsTtsTab from './settings/SettingsTtsTab.vue'
 import SettingsImapTab from './settings/SettingsImapTab.vue'
 
 type Page =
@@ -99,8 +99,8 @@ type Page =
   | 'automated'
   | 'mqtt'
   | 'app-settings'
-  | 'payees'
-  | 'payments'
+  | 'payees-payments'
+  | 'tts'
   | 'imap'
 
 const currentPage = ref<Page>('menu')
@@ -114,8 +114,8 @@ const menuItems = [
   { id: 'credentials' as Page, icon: '🔐', label: 'Credentials', description: 'Con Edison login credentials' },
   { id: 'automated' as Page, icon: '⏰', label: 'Automated Scrape', description: 'Schedule automatic data scraping' },
   { id: 'mqtt' as Page, icon: '📡', label: 'MQTT', description: 'Home Assistant MQTT integration' },
-  { id: 'payees' as Page, icon: '👥', label: 'Payees', description: 'Manage users and responsibility %' },
-  { id: 'payments' as Page, icon: '💳', label: 'Payments', description: 'Audit and manage payments' },
+  { id: 'payees-payments' as Page, icon: '👥', label: 'Payees & Payments', description: 'Users, bill split, cards, and payment audit' },
+  { id: 'tts' as Page, icon: '🔊', label: 'TTS Alerts', description: 'Media player, TTS messages, and wait-for-idle' },
   { id: 'imap' as Page, icon: '📧', label: 'Email / IMAP', description: 'Email parsing for auto-payment detection' },
   { id: 'app-settings' as Page, icon: '⚙️', label: 'App Settings', description: 'Password and app configuration' },
 ]
