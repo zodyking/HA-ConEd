@@ -124,58 +124,64 @@ def _format_currency(val: float) -> str:
 
 
 def _bill_message(bill_amt: float, good: float, moderate: float, high: float) -> str:
-    """Feedback based on configurable bill thresholds."""
+    """Feedback based on configurable bill thresholds. Full sentences for TTS clarity."""
     if bill_amt <= 0:
         return ""
     if bill_amt <= good:
-        return " Bill looks good."
+        return " Your bill is in a good range."
     if bill_amt <= moderate:
-        return " Bill is moderate."
+        return " Your bill is moderate."
     if bill_amt <= high:
-        return " Bill is high. Reduce usage."
-    return " Bill is very high. Cut heaters, AC, and appliances when away."
+        return " Your bill is high. Consider reducing usage."
+    return (
+        " Your bill is very high. "
+        "Try cutting back on heaters, air conditioning, and appliances when you're away."
+    )
 
 
 def _estimate_message(est_min: float, est_max: float, good: float, moderate: float, high: float) -> str:
-    """Feedback based on configurable estimate thresholds."""
+    """Feedback based on configurable estimate thresholds. Full sentences for TTS."""
     est_mid = (est_min + est_max) / 2 if (est_min or est_max) else 0
     if est_mid <= 0:
         return ""
     if est_mid <= good:
-        return " Projection looks good."
+        return " Your projected bill looks good."
     if est_mid <= moderate:
-        return " Projection moderate."
+        return " Your projected bill is moderate."
     if est_mid <= high:
-        return " Projection high. Reduce use."
-    return " Projection very high. Cut use now."
+        return " Your projected bill is high. Reduce use to bring it down."
+    return (
+        " Your projected bill is very high. "
+        "Cut back on electric use now to lower the final amount."
+    )
 
 
 def _daily_usage_message(avg_daily: float, good: float, high: float, very_high: float) -> str:
-    """Feedback based on configurable daily kWh thresholds."""
+    """Feedback based on configurable daily kWh thresholds. Full sentences for TTS."""
     if avg_daily <= 0:
         return ""
     if avg_daily < good:
-        return " Daily use efficient."
+        return " Your daily usage is efficient."
     if avg_daily <= high:
-        return " Daily use okay."
+        return " Your daily usage is okay."
     if avg_daily <= very_high:
-        return " Daily use high."
-    return " Daily use very high."
+        return " Your daily usage is running high."
+    return " Your daily usage is very high."
 
 
 def _current_usage_message(
     current_kwh: float, efficient: float, high: float, very_high: float
 ) -> str:
-    """Feedback based on configurable cycle kWh thresholds."""
+    """Feedback based on configurable cycle kWh thresholds. Full sentences for TTS."""
     if current_kwh <= 0:
         return ""
     if current_kwh <= efficient:
-        return " Cycle efficient so far."
+        return " You're off to an efficient start this cycle."
     if current_kwh <= high:
-        return " Cycle on track."
+        return " Your cycle usage is on track."
     if current_kwh <= very_high:
-        return " Cycle high."
-    return " Cycle very high."
+        return " Your cycle usage is running high."
+    return " Your cycle usage is very high."
 
 
 async def build_bill_summary_message(bill_summary_config: dict, tts_config: dict) -> Optional[str]:
@@ -260,22 +266,26 @@ async def build_bill_summary_message(bill_summary_config: dict, tts_config: dict
     cycle_high = float(t.get("threshold_cycle_kwh_high", 200))
     cycle_vhigh = float(t.get("threshold_cycle_kwh_very_high", 350))
 
-    # Concise message: bill, balance, usage stats, estimate, short commentary
-    parts = [f"Bill {bill_str}, balance {balance_str}."]
+    # Build message for TTS: complete sentences, clear structure for listening
+    parts = [
+        f"Your latest bill was {bill_str}. Your current balance is {balance_str}.",
+    ]
     parts.append(_bill_message(bill_amt, bill_good, bill_mod, bill_high))
 
     if config.get("sensor_current_usage"):
-        parts.append(f" Used {current_usage} this cycle.")
+        parts.append(f" You've used {current_usage} so far this billing cycle.")
         parts.append(_current_usage_message(current_usage_num, cycle_eff, cycle_high, cycle_vhigh))
 
-    parts.append(f" Avg {avg_daily} per day.")
+    parts.append(f" Your average is {avg_daily} per day.")
     parts.append(_daily_usage_message(avg_daily_num, daily_good, daily_high, daily_vhigh))
 
-    parts.append(f" Estimate: {est_str} by end of cycle.")
+    parts.append(
+        f" Based on current usage, we estimate your bill will be {est_str} by the end of the billing cycle."
+    )
     if est_min_val or est_max_val:
         parts.append(_estimate_message(est_min_val, est_max_val, est_good, est_mod, est_high))
 
-    msg = "".join(p for p in parts if p).strip()
+    msg = " ".join(p.strip() for p in parts if p).strip()
     return f"{prefix} {msg}".strip()
 
 
