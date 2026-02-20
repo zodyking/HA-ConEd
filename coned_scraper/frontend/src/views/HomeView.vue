@@ -26,7 +26,7 @@
       </div>
     </div>
 
-    <div class="ha-header-bar"></div>
+    <div class="ha-header-bar" aria-hidden="true"></div>
 
     <div :class="['ha-content', { 'ha-content-ledger': activeTab === 'account-ledger' }]">
       <AccountLedger

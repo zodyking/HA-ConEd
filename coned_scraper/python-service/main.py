@@ -2036,12 +2036,24 @@ class TTSBillSummaryConfigModel(BaseModel):
     end_hour: Optional[int] = None
     frequency_hours: Optional[int] = None
     minute_of_hour: Optional[int] = None
-    timezone_offset_hours: Optional[int] = None  # Local = UTC + offset (e.g. -5 for EST)
     sensor_current_usage: Optional[str] = None
     sensor_avg_daily: Optional[str] = None
     sensor_estimate_min: Optional[str] = None
     sensor_estimate_max: Optional[str] = None
     sensor_kwh_cost: Optional[str] = None
+    # Message threshold controls
+    threshold_bill_good: Optional[float] = None
+    threshold_bill_moderate: Optional[float] = None
+    threshold_bill_high: Optional[float] = None
+    threshold_estimate_good: Optional[float] = None
+    threshold_estimate_moderate: Optional[float] = None
+    threshold_estimate_high: Optional[float] = None
+    threshold_daily_kwh_good: Optional[float] = None
+    threshold_daily_kwh_high: Optional[float] = None
+    threshold_daily_kwh_very_high: Optional[float] = None
+    threshold_cycle_kwh_efficient: Optional[float] = None
+    threshold_cycle_kwh_high: Optional[float] = None
+    threshold_cycle_kwh_very_high: Optional[float] = None
 
 
 @app.get("/api/tts-bill-summary-config")

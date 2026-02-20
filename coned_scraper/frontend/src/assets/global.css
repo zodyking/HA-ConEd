@@ -1,3 +1,24 @@
+/* Design tokens */
+:root {
+  --ha-primary: #03a9f4;
+  --ha-primary-dark: #0288d1;
+  --ha-surface: #ffffff;
+  --ha-surface-alt: #f8f9fa;
+  --ha-surface-elevated: #ffffff;
+  --ha-border: #e8eaed;
+  --ha-border-light: #f0f0f0;
+  --ha-text: #202124;
+  --ha-text-secondary: #5f6368;
+  --ha-text-muted: #80868b;
+  --ha-radius: 8px;
+  --ha-radius-sm: 6px;
+  --ha-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  --ha-shadow-hover: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --ha-space: 8px;
+  --ha-space-lg: 16px;
+  --ha-space-xl: 24px;
+}
+
 * {
   box-sizing: border-box;
   padding: 0;
@@ -11,22 +32,20 @@ body {
   overflow-y: hidden;
   height: 100vh;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background: #f5f5f5;
+  background: var(--ha-surface-alt);
+  color: var(--ha-text);
 }
 
 body {
-  background: #f5f5f5;
   height: 100vh;
-  color: #212121;
   display: flex;
   flex-direction: column;
 }
 
-/* Home Assistant Addon Container */
+/* Container */
 .ha-container {
   display: flex;
   flex-direction: column;
@@ -35,110 +54,111 @@ body {
   overflow: hidden;
 }
 
-/* Header - Home Assistant Style */
+/* Header */
 .ha-header {
-  background: #03a9f4;
+  background: var(--ha-primary);
   color: white;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  box-shadow: var(--ha-shadow);
   z-index: 1000;
   flex-shrink: 0;
 }
 
 .ha-header-content {
-  max-width: 1400px;
+  max-width: 1280px;
   margin: 0 auto;
-  padding: 0.5rem 1rem;
+  padding: var(--ha-space-lg) var(--ha-space-xl);
   display: flex;
   justify-content: space-between;
   align-items: center;
   flex-wrap: wrap;
-  gap: 0.75rem;
+  gap: var(--ha-space-lg);
 }
 
 .ha-logo-container {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
 }
 
 .ha-logo-container img {
-  height: 20px;
+  height: 22px;
   width: auto;
   filter: brightness(0) invert(1);
+  opacity: 0.95;
 }
 
 .ha-title {
-  font-size: 1.1rem;
-  font-weight: 500;
+  font-size: 1rem;
+  font-weight: 600;
   margin: 0;
   color: white;
+  letter-spacing: -0.01em;
 }
 
-/* Navigation - Home Assistant Style */
+/* Nav */
 .ha-nav {
   display: flex;
-  gap: 0.5rem;
+  gap: var(--ha-space);
   flex-wrap: wrap;
 }
 
 .ha-nav-button {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.15);
   color: white;
   border: none;
-  padding: 0.4rem 0.75rem;
-  border-radius: 4px;
+  padding: 0.5rem 1rem;
+  border-radius: var(--ha-radius-sm);
   cursor: pointer;
-  font-size: 0.8rem;
+  font-size: 0.875rem;
   font-weight: 500;
-  transition: background 0.2s;
-  display: flex;
+  transition: background 0.2s, box-shadow 0.2s;
+  display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
-  min-height: 36px;
+  gap: 0.5rem;
+  min-height: 40px;
   touch-action: manipulation;
 }
 
 .ha-nav-button:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.25);
 }
 
 .ha-nav-button.active {
-  background: rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.3);
   font-weight: 600;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.3);
 }
 
 .ha-nav-icon {
-  font-size: 1.1rem;
+  font-size: 1rem;
+  opacity: 0.9;
 }
 
-/* Header bar: solid white block between nav and content, proper spacing */
+/* Header bar - clean edge below header */
 .ha-header-bar {
   flex-shrink: 0;
-  background: #fff;
-  min-height: 0.5rem;
-  padding: 1rem 0;
-  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.06);
+  min-height: 1px;
+  background: var(--ha-surface-alt);
+  border-top: 1px solid rgba(0, 0, 0, 0.04);
 }
 
-/* Content Area */
+/* Content */
 .ha-content {
   flex: 1;
   overflow-y: auto;
-  padding: 1rem 1.25rem;
-  max-width: 1400px;
+  padding: var(--ha-space-xl);
+  max-width: 1280px;
   width: 100%;
   margin: 0 auto;
   min-height: 0;
 }
 
-/* Dashboard Grid */
+/* Dashboard */
 .ha-dashboard {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: var(--ha-space-lg);
   height: 100%;
   min-height: 0;
-  padding: 1rem;
 }
 
 .ha-panels-grid {
@@ -147,7 +167,7 @@ body {
   display: grid;
   grid-template-columns: 1fr 1fr;
   grid-template-rows: 1fr;
-  gap: 1rem;
+  gap: var(--ha-space-lg);
 }
 
 .ha-panels-grid > .ha-card {
@@ -162,52 +182,51 @@ body {
   }
 }
 
-/* Cards - Home Assistant Style */
+/* Cards */
 .ha-card {
-  background: white;
-  border-radius: 6px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  background: var(--ha-surface);
+  border-radius: var(--ha-radius);
+  box-shadow: var(--ha-shadow);
+  border: 1px solid var(--ha-border-light);
   overflow: hidden;
-  transition: box-shadow 0.2s;
+  transition: box-shadow 0.2s, border-color 0.2s;
   display: flex;
   flex-direction: column;
   min-height: 0;
 }
 
-.ha-card-status {
-  flex-shrink: 0;
-}
-
-.ha-card-logs {
-  flex: 1;
-  min-height: 0;
-}
-
 .ha-card:hover {
-  box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+  box-shadow: var(--ha-shadow-hover);
+  border-color: var(--ha-border);
 }
+
+.ha-card-status { flex-shrink: 0; }
+.ha-card-logs { flex: 1; min-height: 0; }
 
 .ha-card-header {
-  background: #f5f5f5;
-  padding: 0.5rem 0.75rem;
-  border-bottom: 1px solid #e0e0e0;
+  background: var(--ha-surface-alt);
+  padding: var(--ha-space-lg) var(--ha-space-xl);
+  border-bottom: 1px solid var(--ha-border);
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  font-weight: 500;
-  font-size: 0.8rem;
+  gap: 0.625rem;
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--ha-text);
+  letter-spacing: -0.01em;
 }
 
 .ha-card-icon {
-  font-size: 1rem;
+  font-size: 1.125rem;
+  opacity: 0.85;
 }
 
 .ha-card-content {
-  padding: 0.75rem;
+  padding: var(--ha-space-xl);
 }
 
 .ha-card-error {
-  border-left: 4px solid #f44336;
+  border-left: 4px solid #e53935;
 }
 
 .ha-card-error .ha-card-header {
@@ -266,36 +285,37 @@ body {
   font-size: 0.85rem;
 }
 
-/* Buttons - Home Assistant Style */
+/* Buttons */
 .ha-button {
   padding: 0.5rem 1rem;
   border: none;
-  border-radius: 4px;
-  font-size: 0.8rem;
+  border-radius: var(--ha-radius-sm);
+  font-size: 0.875rem;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s;
   display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
-  min-height: 36px;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 40px;
   touch-action: manipulation;
 }
 
 .ha-button-primary {
-  background: #03a9f4;
+  background: var(--ha-primary);
   color: white;
 }
 
 .ha-button-primary:hover:not(:disabled) {
-  background: #0288d1;
-  box-shadow: 0 2px 4px rgba(3, 169, 244, 0.3);
+  background: var(--ha-primary-dark);
+  box-shadow: 0 2px 8px rgba(3, 169, 244, 0.35);
 }
 
 .ha-button:disabled {
-  background: #bdbdbd;
+  background: #9e9e9e;
   cursor: not-allowed;
-  opacity: 0.6;
+  opacity: 0.65;
 }
 
 .ha-loader-inline {
@@ -323,25 +343,25 @@ body {
 }
 
 .ha-log-container {
-  background: #1e1e1e;
-  color: #d4d4d4;
-  font-family: 'Courier New', monospace;
-  font-size: 0.75rem;
-  padding: 0.5rem;
-  border-radius: 4px;
+  background: #1a1e24;
+  color: #e4e6eb;
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-size: 0.8125rem;
+  padding: 1rem;
   flex: 1;
   overflow-y: auto;
   min-height: 0;
+  line-height: 1.45;
 }
 
 .ha-preview-container {
-  background: #1a1a1a;
+  background: #161a1e;
   flex: 1;
   min-height: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 1rem;
+  padding: var(--ha-space-xl);
   overflow: hidden;
 }
 
@@ -386,10 +406,10 @@ body {
 
 .ha-empty-state {
   text-align: center;
-  color: #858585;
-  padding: 1rem;
-  font-style: italic;
-  font-size: 0.8rem;
+  color: var(--ha-text-muted);
+  padding: var(--ha-space-xl);
+  font-size: 0.875rem;
+  line-height: 1.5;
 }
 
 /* Ledger: summary at top, then ledger - whole page scrolls */
@@ -514,33 +534,43 @@ body {
   color: #2e7d32;
 }
 
-/* Settings Styles */
+/* Forms */
 .ha-form-group {
-  margin-bottom: 1rem;
+  margin-bottom: var(--ha-space-lg);
+}
+
+.ha-form-group:last-child {
+  margin-bottom: 0;
 }
 
 .ha-form-label {
   display: block;
-  margin-bottom: 0.4rem;
-  color: #555;
+  margin-bottom: 0.5rem;
+  color: var(--ha-text-secondary);
   font-weight: 500;
-  font-size: 0.8rem;
+  font-size: 0.8125rem;
 }
 
 .ha-form-input {
   width: 100%;
-  padding: 0.6rem;
-  border: 2px solid #e0e0e0;
-  border-radius: 4px;
-  font-size: 14px;
-  transition: border-color 0.2s;
+  padding: 0.625rem 0.75rem;
+  border: 1px solid var(--ha-border);
+  border-radius: var(--ha-radius-sm);
+  font-size: 0.9375rem;
+  background: var(--ha-surface);
+  transition: border-color 0.2s, box-shadow 0.2s;
   -webkit-appearance: none;
   appearance: none;
 }
 
+.ha-form-input:hover {
+  border-color: var(--ha-text-muted);
+}
+
 .ha-form-input:focus {
   outline: none;
-  border-color: #03a9f4;
+  border-color: var(--ha-primary);
+  box-shadow: 0 0 0 3px rgba(3, 169, 244, 0.15);
 }
 
 .password-input-wrapper {
@@ -578,80 +608,83 @@ body {
 }
 
 .info-text {
-  color: #666;
-  font-size: 0.75rem;
-  margin-top: 0.4rem;
+  color: var(--ha-text-muted);
+  font-size: 0.8125rem;
+  margin-top: 0.5rem;
+  line-height: 1.4;
 }
 
 .form-group {
-  margin-bottom: 1rem;
+  margin-bottom: var(--ha-space-lg);
 }
 
 .ha-settings {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: var(--ha-space-lg);
   min-height: 0;
 }
+
 .ha-settings .ha-settings-page {
   flex: 1 1 auto;
 }
+
 .ha-settings .ha-settings-page > .ha-card {
   flex-shrink: 0;
 }
 
 .ha-totp-display {
-  background: #f5f5f5;
-  border: 1px solid #e0e0e0;
-  padding: 1rem;
-  border-radius: 4px;
+  background: var(--ha-surface-alt);
+  border: 1px solid var(--ha-border);
+  padding: var(--ha-space-xl);
+  border-radius: var(--ha-radius);
   text-align: center;
-  margin-top: 0.75rem;
+  margin-top: var(--ha-space-lg);
 }
 
 .ha-totp-code {
-  font-size: 1.8rem;
-  font-weight: bold;
-  color: #03a9f4;
-  font-family: 'Courier New', monospace;
-  letter-spacing: 0.2rem;
-  margin: 0.4rem 0;
+  font-size: 1.75rem;
+  font-weight: 600;
+  color: var(--ha-primary);
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  letter-spacing: 0.25em;
+  margin: 0.5rem 0;
 }
 
 .ha-totp-time {
-  color: #666;
-  font-size: 0.8rem;
-  margin-top: 0.4rem;
+  color: var(--ha-text-secondary);
+  font-size: 0.8125rem;
+  margin-top: 0.5rem;
 }
 
 .ha-tabs {
   display: flex;
-  border-bottom: 2px solid #e0e0e0;
-  margin-bottom: 0.75rem;
-  gap: 0.5rem;
+  border-bottom: 1px solid var(--ha-border);
+  margin-bottom: var(--ha-space-lg);
+  gap: 0;
 }
 
 .ha-tab {
-  padding: 0.5rem 1rem;
+  padding: 0.625rem 1.25rem;
   background: none;
   border: none;
   cursor: pointer;
-  color: #666;
-  font-size: 0.8rem;
+  color: var(--ha-text-secondary);
+  font-size: 0.875rem;
+  font-weight: 500;
   border-bottom: 2px solid transparent;
-  margin-bottom: -2px;
-  transition: all 0.2s;
-  min-height: 36px;
+  margin-bottom: -1px;
+  transition: color 0.2s, border-color 0.2s;
+  min-height: 40px;
 }
 
 .ha-tab:hover {
-  color: #333;
+  color: var(--ha-text);
 }
 
 .ha-tab.active {
-  color: #03a9f4;
-  border-bottom-color: #03a9f4;
-  font-weight: 500;
+  color: var(--ha-primary);
+  border-bottom-color: var(--ha-primary);
 }
 
 /* Mobile Responsive */
@@ -750,7 +783,7 @@ body {
 .ha-nav-button:focus-visible,
 .ha-tab:focus-visible,
 .ha-form-input:focus-visible {
-  outline: 2px solid #03a9f4;
+  outline: 2px solid var(--ha-primary);
   outline-offset: 2px;
 }
 

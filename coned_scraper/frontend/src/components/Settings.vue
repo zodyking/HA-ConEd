@@ -253,12 +253,6 @@
                           <label class="ha-form-label">Minute of hour (0–59)</label>
                           <input v-model.number="billSummaryMinuteOfHour" type="number" class="ha-form-input" min="0" max="59" />
                         </div>
-                        <div>
-                          <label class="ha-form-label">Timezone</label>
-                          <div v-if="billSummaryHaTimezone" class="info-text" style="margin-bottom: 4px;">Using {{ billSummaryHaTimezone }} from Home Assistant</div>
-                          <input v-model.number="billSummaryTimezoneOffset" type="number" class="ha-form-input" min="-12" max="14" placeholder="-5" />
-                          <div class="info-text">Fallback when HA timezone unavailable. Set e.g. -5 for Eastern, -8 for Pacific.</div>
-                        </div>
                       </div>
                       <datalist id="ha-sensor-datalist">
                         <option v-for="e in haSensorEntities" :key="e" :value="e" />
@@ -283,6 +277,24 @@
                         <label class="ha-form-label">kWh cost sensor ($/kWh)</label>
                         <input v-model="billSummarySensorKwhCost" type="text" class="ha-form-input" list="ha-sensor-datalist" placeholder="input_number.kwh_cost" autocomplete="off" />
                         <div class="info-text">Converts estimate sensors (kWh) to dollar amounts. Usually a helper like input_number.</div>
+                      </div>
+                      <div class="ha-form-group ha-form-group-thresholds">
+                        <label class="ha-form-label">Message thresholds</label>
+                        <p class="info-text" style="margin-bottom: 0.75rem;">Control when commentary phrases appear based on bill, estimate, and usage values.</p>
+                        <div class="ha-form-row ha-form-row-wrap">
+                          <div><label class="ha-form-label-sm">Bill $ good</label><input v-model.number="billSummaryThresholdBillGood" type="number" class="ha-form-input ha-form-input-sm" min="0" step="10" /></div>
+                          <div><label class="ha-form-label-sm">Bill $ moderate</label><input v-model.number="billSummaryThresholdBillModerate" type="number" class="ha-form-input ha-form-input-sm" min="0" step="10" /></div>
+                          <div><label class="ha-form-label-sm">Bill $ high</label><input v-model.number="billSummaryThresholdBillHigh" type="number" class="ha-form-input ha-form-input-sm" min="0" step="10" /></div>
+                          <div><label class="ha-form-label-sm">Estimate $ good</label><input v-model.number="billSummaryThresholdEstimateGood" type="number" class="ha-form-input ha-form-input-sm" min="0" step="10" /></div>
+                          <div><label class="ha-form-label-sm">Estimate $ moderate</label><input v-model.number="billSummaryThresholdEstimateModerate" type="number" class="ha-form-input ha-form-input-sm" min="0" step="10" /></div>
+                          <div><label class="ha-form-label-sm">Estimate $ high</label><input v-model.number="billSummaryThresholdEstimateHigh" type="number" class="ha-form-input ha-form-input-sm" min="0" step="10" /></div>
+                          <div><label class="ha-form-label-sm">Daily kWh good</label><input v-model.number="billSummaryThresholdDailyGood" type="number" class="ha-form-input ha-form-input-sm" min="0" step="1" /></div>
+                          <div><label class="ha-form-label-sm">Daily kWh high</label><input v-model.number="billSummaryThresholdDailyHigh" type="number" class="ha-form-input ha-form-input-sm" min="0" step="1" /></div>
+                          <div><label class="ha-form-label-sm">Daily kWh very high</label><input v-model.number="billSummaryThresholdDailyVeryHigh" type="number" class="ha-form-input ha-form-input-sm" min="0" step="1" /></div>
+                          <div><label class="ha-form-label-sm">Cycle kWh efficient</label><input v-model.number="billSummaryThresholdCycleEfficient" type="number" class="ha-form-input ha-form-input-sm" min="0" step="10" /></div>
+                          <div><label class="ha-form-label-sm">Cycle kWh high</label><input v-model.number="billSummaryThresholdCycleHigh" type="number" class="ha-form-input ha-form-input-sm" min="0" step="10" /></div>
+                          <div><label class="ha-form-label-sm">Cycle kWh very high</label><input v-model.number="billSummaryThresholdCycleVeryHigh" type="number" class="ha-form-input ha-form-input-sm" min="0" step="10" /></div>
+                        </div>
                       </div>
                       <div class="ha-tts-buttons ha-tts-buttons-sm">
                         <button type="submit" class="ha-button ha-button-primary" :disabled="billSummarySaving">{{ billSummarySaving ? 'Saving...' : 'Save Bill Summary Config' }}</button>
@@ -365,13 +377,23 @@ const billSummaryEndHour12 = ref(10)
 const billSummaryEndAmPm = ref<'am' | 'pm'>('am')
 const billSummaryFrequencyHours = ref(1)
 const billSummaryMinuteOfHour = ref(0)
-const billSummaryTimezoneOffset = ref(0)
-const billSummaryHaTimezone = ref('')
 const billSummarySensorCurrent = ref('')
 const billSummarySensorAvg = ref('')
 const billSummarySensorEstMin = ref('')
 const billSummarySensorEstMax = ref('')
 const billSummarySensorKwhCost = ref('')
+const billSummaryThresholdBillGood = ref(150)
+const billSummaryThresholdBillModerate = ref(250)
+const billSummaryThresholdBillHigh = ref(350)
+const billSummaryThresholdEstimateGood = ref(200)
+const billSummaryThresholdEstimateModerate = ref(300)
+const billSummaryThresholdEstimateHigh = ref(400)
+const billSummaryThresholdDailyGood = ref(15)
+const billSummaryThresholdDailyHigh = ref(22)
+const billSummaryThresholdDailyVeryHigh = ref(30)
+const billSummaryThresholdCycleEfficient = ref(100)
+const billSummaryThresholdCycleHigh = ref(200)
+const billSummaryThresholdCycleVeryHigh = ref(350)
 const billSummarySaving = ref(false)
 const billSummaryPreviewLoading = ref(false)
 const billSummaryTestLoading = ref(false)
@@ -633,13 +655,23 @@ async function loadBillSummaryConfig() {
       billSummaryEndAmPm.value = end12.ampm
       billSummaryFrequencyHours.value = typeof d.frequency_hours === 'number' ? Math.max(1, d.frequency_hours) : 1
       billSummaryMinuteOfHour.value = typeof d.minute_of_hour === 'number' ? Math.max(0, Math.min(59, d.minute_of_hour)) : 0
-      billSummaryTimezoneOffset.value = typeof d.timezone_offset_hours === 'number' ? d.timezone_offset_hours : 0
-      billSummaryHaTimezone.value = (d.ha_timezone ?? '').toString()
       billSummarySensorCurrent.value = (d.sensor_current_usage ?? '').trim()
       billSummarySensorAvg.value = (d.sensor_avg_daily ?? '').trim()
       billSummarySensorEstMin.value = (d.sensor_estimate_min ?? '').trim()
       billSummarySensorEstMax.value = (d.sensor_estimate_max ?? '').trim()
       billSummarySensorKwhCost.value = (d.sensor_kwh_cost ?? '').trim()
+      billSummaryThresholdBillGood.value = typeof d.threshold_bill_good === 'number' ? d.threshold_bill_good : 150
+      billSummaryThresholdBillModerate.value = typeof d.threshold_bill_moderate === 'number' ? d.threshold_bill_moderate : 250
+      billSummaryThresholdBillHigh.value = typeof d.threshold_bill_high === 'number' ? d.threshold_bill_high : 350
+      billSummaryThresholdEstimateGood.value = typeof d.threshold_estimate_good === 'number' ? d.threshold_estimate_good : 200
+      billSummaryThresholdEstimateModerate.value = typeof d.threshold_estimate_moderate === 'number' ? d.threshold_estimate_moderate : 300
+      billSummaryThresholdEstimateHigh.value = typeof d.threshold_estimate_high === 'number' ? d.threshold_estimate_high : 400
+      billSummaryThresholdDailyGood.value = typeof d.threshold_daily_kwh_good === 'number' ? d.threshold_daily_kwh_good : 15
+      billSummaryThresholdDailyHigh.value = typeof d.threshold_daily_kwh_high === 'number' ? d.threshold_daily_kwh_high : 22
+      billSummaryThresholdDailyVeryHigh.value = typeof d.threshold_daily_kwh_very_high === 'number' ? d.threshold_daily_kwh_very_high : 30
+      billSummaryThresholdCycleEfficient.value = typeof d.threshold_cycle_kwh_efficient === 'number' ? d.threshold_cycle_kwh_efficient : 100
+      billSummaryThresholdCycleHigh.value = typeof d.threshold_cycle_kwh_high === 'number' ? d.threshold_cycle_kwh_high : 200
+      billSummaryThresholdCycleVeryHigh.value = typeof d.threshold_cycle_kwh_very_high === 'number' ? d.threshold_cycle_kwh_very_high : 350
     }
   } catch (e) { console.error(e) }
 }
@@ -657,12 +689,23 @@ async function handleBillSummarySave() {
         end_hour: hour12To24(billSummaryEndHour12.value, billSummaryEndAmPm.value),
         frequency_hours: Math.max(1, Math.min(24, billSummaryFrequencyHours.value)),
         minute_of_hour: Math.max(0, Math.min(59, billSummaryMinuteOfHour.value)),
-        timezone_offset_hours: Math.max(-12, Math.min(14, billSummaryTimezoneOffset.value)),
         sensor_current_usage: billSummarySensorCurrent.value.trim(),
         sensor_avg_daily: billSummarySensorAvg.value.trim(),
         sensor_estimate_min: billSummarySensorEstMin.value.trim(),
         sensor_estimate_max: billSummarySensorEstMax.value.trim(),
         sensor_kwh_cost: billSummarySensorKwhCost.value.trim(),
+        threshold_bill_good: billSummaryThresholdBillGood.value,
+        threshold_bill_moderate: billSummaryThresholdBillModerate.value,
+        threshold_bill_high: billSummaryThresholdBillHigh.value,
+        threshold_estimate_good: billSummaryThresholdEstimateGood.value,
+        threshold_estimate_moderate: billSummaryThresholdEstimateModerate.value,
+        threshold_estimate_high: billSummaryThresholdEstimateHigh.value,
+        threshold_daily_kwh_good: billSummaryThresholdDailyGood.value,
+        threshold_daily_kwh_high: billSummaryThresholdDailyHigh.value,
+        threshold_daily_kwh_very_high: billSummaryThresholdDailyVeryHigh.value,
+        threshold_cycle_kwh_efficient: billSummaryThresholdCycleEfficient.value,
+        threshold_cycle_kwh_high: billSummaryThresholdCycleHigh.value,
+        threshold_cycle_kwh_very_high: billSummaryThresholdCycleVeryHigh.value,
       }),
     })
     if (res.ok) ttsMessage.value = { type: 'success', text: 'Bill summary config saved.' }
@@ -801,13 +844,20 @@ async function handleTtsTestForPlayer(idx: number) {
 .ha-lock-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 1000;
 }
-.ha-lock-card { max-width: 360px; margin: 1rem; }
+.ha-lock-card {
+  max-width: 380px;
+  margin: 1.5rem;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+  border-radius: 12px;
+  overflow: hidden;
+}
 .ha-pin-row {
   display: flex;
   gap: 0.75rem;
@@ -820,16 +870,16 @@ async function handleTtsTestForPlayer(idx: number) {
   font-size: 1.5rem;
   font-weight: 600;
   text-align: center;
-  border: 2px solid #e0e0e0;
-  border-radius: 12px;
-  background: #fafafa;
-  color: #212121;
+  border: 1px solid var(--ha-border);
+  border-radius: 10px;
+  background: var(--ha-surface);
+  color: var(--ha-text);
   transition: border-color 0.2s, box-shadow 0.2s;
 }
 .ha-pin-input:focus {
   outline: none;
-  border-color: #03a9f4;
-  box-shadow: 0 0 0 3px rgba(3, 169, 244, 0.2);
+  border-color: var(--ha-primary);
+  box-shadow: 0 0 0 3px rgba(3, 169, 244, 0.18);
 }
 .ha-pin-input.error {
   border-color: #d32f2f;
@@ -847,72 +897,84 @@ async function handleTtsTestForPlayer(idx: number) {
 .ha-form-actions { display: flex; gap: 0.5rem; }
 .ha-button-gray { flex: 1; background: #757575 !important; color: white; }
 .ha-form-actions .ha-button-primary { flex: 1; }
-.ha-settings-menu { padding: 0.5rem; }
-.ha-settings-title { margin: 0 0 1rem 0; font-size: 1.3rem; font-weight: 600; }
+.ha-settings-menu { padding: 0; }
+.ha-settings-title { margin: 0 0 1.25rem 0; font-size: 1.25rem; font-weight: 600; letter-spacing: -0.02em; }
 .ha-menu-list { display: flex; flex-direction: column; gap: 0.5rem; }
 .ha-menu-item {
   display: flex;
   align-items: center;
   gap: 1rem;
-  padding: 1rem;
-  background: #fff;
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  background: var(--ha-surface);
+  border: 1px solid var(--ha-border);
+  border-radius: var(--ha-radius);
   cursor: pointer;
   text-align: left;
-  transition: all 0.15s ease;
+  transition: all 0.2s ease;
 }
-.ha-menu-item:hover { background: #f5f5f5; border-color: #03a9f4; }
-.ha-menu-icon { font-size: 1.5rem; }
-.ha-menu-text { flex: 1; }
-.ha-menu-label { font-weight: 600; font-size: 1rem; }
-.ha-menu-desc { font-size: 0.8rem; color: #666; }
-.ha-menu-arrow { margin-left: auto; color: #999; }
+.ha-menu-item:hover {
+  background: var(--ha-surface-alt);
+  border-color: var(--ha-primary);
+  box-shadow: 0 2px 8px rgba(3, 169, 244, 0.1);
+}
+.ha-menu-icon { font-size: 1.375rem; opacity: 0.9; }
+.ha-menu-text { flex: 1; min-width: 0; }
+.ha-menu-label { font-weight: 600; font-size: 0.9375rem; }
+.ha-menu-desc { font-size: 0.8125rem; color: var(--ha-text-secondary); margin-top: 0.15rem; }
+.ha-menu-arrow { margin-left: auto; color: var(--ha-text-muted); font-size: 1.25rem; }
 .ha-settings-page {
   display: block;
   min-height: 0;
 }
 .ha-back-btn {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 0.5rem;
   background: none;
   border: none;
-  color: #03a9f4;
+  color: var(--ha-primary);
   cursor: pointer;
   padding: 0.5rem 0;
-  font-size: 0.9rem;
-  margin-bottom: 1rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  margin-bottom: 1.25rem;
+  transition: color 0.2s, opacity 0.2s;
 }
+.ha-back-btn:hover { opacity: 0.85; }
 
 .ha-tts-card { min-height: 200px; }
-.ha-tts-intro { margin-bottom: 1.25rem; color: #555; font-size: 0.95rem; }
-.ha-tts-form { display: flex; flex-direction: column; gap: 1rem; }
+.ha-tts-intro { margin-bottom: 1.5rem; color: var(--ha-text-secondary); font-size: 0.9375rem; line-height: 1.5; }
+.ha-tts-form { display: flex; flex-direction: column; gap: 1.25rem; }
 .ha-form-input-mt { margin-top: 0.5rem; }
-.ha-check-label { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; }
-.ha-check-label input { width: 18px; height: 18px; }
+.ha-check-label { display: flex; align-items: center; gap: 0.625rem; cursor: pointer; font-size: 0.9375rem; }
+.ha-check-label input { width: 18px; height: 18px; accent-color: var(--ha-primary); }
 .ha-tts-details {
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
+  border: 1px solid var(--ha-border);
+  border-radius: var(--ha-radius);
   overflow: hidden;
-  background: #fafafa;
+  background: var(--ha-surface);
 }
 .ha-tts-details summary {
-  padding: 0.75rem 1rem;
+  padding: 1rem 1.25rem;
   font-weight: 600;
+  font-size: 0.9375rem;
   cursor: pointer;
   user-select: none;
+  background: var(--ha-surface-alt);
+  transition: background 0.2s;
 }
-.ha-tts-details[open] summary { border-bottom: 1px solid #e0e0e0; }
-.ha-tts-details-content { padding: 1rem; }
+.ha-tts-details summary:hover { background: #f0f2f5; }
+.ha-tts-details[open] summary { border-bottom: 1px solid var(--ha-border); }
+.ha-tts-details-content { padding: 1.25rem; }
 .ha-tts-mp-card {
-  padding: 1rem;
-  background: white;
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
-  margin-bottom: 0.75rem;
+  padding: 1.25rem;
+  background: var(--ha-surface-alt);
+  border: 1px solid var(--ha-border);
+  border-radius: var(--ha-radius);
+  margin-bottom: 1rem;
 }
 .ha-tts-mp-card:last-of-type { margin-bottom: 0; }
+.ha-tts-mp-card + .ha-button-secondary { margin-top: 0.25rem; }
 .ha-tts-mp-header {
   display: flex;
   justify-content: space-between;
@@ -933,10 +995,24 @@ async function handleTtsTestForPlayer(idx: number) {
 .ha-tts-mp-status.state-unavailable,
 .ha-tts-mp-status.state-off,
 .ha-tts-mp-status.state-unknown { background: #f5f5f5; color: #757575; }
-.ha-btn-sm { padding: 0.25rem 0.5rem; font-size: 1rem; line-height: 1; border: none; border-radius: 4px; cursor: pointer; }
-.ha-btn-red { background: #f44336; color: white; }
-.ha-btn-red:hover { background: #d32f2f; }
-.ha-button-secondary { background: #9e9e9e !important; color: white !important; }
+.ha-btn-sm {
+  padding: 0.3rem 0.6rem;
+  font-size: 0.875rem;
+  line-height: 1;
+  border: none;
+  border-radius: var(--ha-radius-sm);
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+.ha-btn-red { background: #e53935; color: white; }
+.ha-btn-red:hover { background: #c62828; }
+.ha-button-secondary {
+  background: var(--ha-text-muted) !important;
+  color: white !important;
+}
+.ha-button-secondary:hover:not(:disabled) {
+  background: var(--ha-text-secondary) !important;
+}
 .ha-volume-slider {
   width: 100%;
   height: 8px;
@@ -952,7 +1028,12 @@ async function handleTtsTestForPlayer(idx: number) {
 .ha-btn-test { background: #ff9800 !important; color: white !important; }
 .ha-btn-test:disabled { opacity: 0.6; cursor: not-allowed; }
 .ha-btn-test-sm { font-size: 0.85rem; padding: 0.4rem 0.75rem; margin-top: 0.5rem; }
-.ha-message { margin-top: 1rem; padding: 0.75rem; border-radius: 4px; }
+.ha-message {
+  margin-top: 1.25rem;
+  padding: 1rem 1.25rem;
+  border-radius: var(--ha-radius-sm);
+  font-size: 0.9rem;
+}
 .ha-message.success { background: #e8f5e9; color: #2e7d32; }
 .ha-message.error { background: #ffebee; color: #c62828; }
 
@@ -983,22 +1064,37 @@ async function handleTtsTestForPlayer(idx: number) {
 
 /* Bill Summary */
 .ha-check-row { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; }
-.ha-check-inline { display: flex; align-items: center; gap: 0.35rem; cursor: pointer; font-size: 0.9rem; }
-.ha-check-inline input { width: 16px; height: 16px; }
-.ha-form-row { display: flex; gap: 1rem; flex-wrap: wrap; }
+.ha-check-inline { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; font-size: 0.875rem; }
+.ha-check-inline input { width: 16px; height: 16px; accent-color: var(--ha-primary); }
+.ha-form-row { display: flex; gap: 1.25rem; flex-wrap: wrap; }
+.ha-form-group-thresholds {
+  padding: 1.25rem;
+  background: var(--ha-surface-alt);
+  border: 1px solid var(--ha-border);
+  border-radius: var(--ha-radius);
+}
+.ha-form-row-wrap {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 1rem;
+}
+.ha-form-row-wrap > div { display: flex; flex-direction: column; gap: 0.35rem; }
+.ha-form-label-sm { font-size: 0.75rem; color: var(--ha-text-secondary); font-weight: 500; }
+.ha-form-input-sm { width: 100%; max-width: 5rem; padding: 0.5rem 0.625rem; font-size: 0.875rem; }
 .ha-time-row { display: flex; gap: 0.5rem; }
-.ha-time-row select { min-width: 4rem; }
-.ha-form-row > div { flex: 1; min-width: 120px; }
-.ha-tts-buttons-sm { margin-top: 0.5rem; }
+.ha-time-row select { min-width: 4.5rem; }
+.ha-form-row > div { flex: 1; min-width: 100px; }
+.ha-tts-buttons-sm { margin-top: 0.75rem; display: flex; flex-wrap: wrap; gap: 0.5rem; }
 .ha-tts-preview-box {
-  margin-top: 1rem;
-  padding: 1rem;
-  background: #f5f5f5;
-  border-radius: 8px;
-  font-size: 0.9rem;
-  line-height: 1.5;
+  margin-top: 1.25rem;
+  padding: 1.25rem;
+  background: var(--ha-surface-alt);
+  border: 1px solid var(--ha-border);
+  border-radius: var(--ha-radius);
+  font-size: 0.875rem;
+  line-height: 1.55;
   white-space: pre-wrap;
-  max-height: 200px;
+  max-height: 220px;
   overflow-y: auto;
 }
 </style>

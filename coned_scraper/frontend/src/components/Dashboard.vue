@@ -243,18 +243,19 @@ onUnmounted(() => {
 
 <style scoped>
 .ha-status-padding {
-  padding: 0.5rem 0.75rem !important;
+  padding: 1rem 1.25rem !important;
 }
 .ha-preview-img {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
-  border: 1px solid #333;
-  border-radius: 4px;
+  border: 1px solid var(--ha-border);
+  border-radius: var(--ha-radius-sm);
 }
 .ha-preview-empty {
   text-align: center;
-  color: #888;
+  color: var(--ha-text-muted);
+  font-size: 0.9rem;
 }
 .ha-preview-loader {
   width: 40px;

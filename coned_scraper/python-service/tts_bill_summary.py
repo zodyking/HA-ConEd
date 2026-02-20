@@ -22,13 +22,25 @@ DEFAULT_BILL_SUMMARY_CONFIG = {
     "end_hour": 10,
     "frequency_hours": 1,  # Play every N hours
     "minute_of_hour": 0,   # Play at minute X (0-59)
-    "sensor_current_usage": "",   # "You used X so far this cycle" (kWh)
-    "sensor_avg_daily": "",       # kWh per day
-    "sensor_estimate_min": "",    # kWh - will convert to $ via kwh_cost
-    "sensor_estimate_max": "",    # kWh - will convert to $ via kwh_cost
-    "sensor_kwh_cost": "",        # $ per kWh (helper, e.g. input_number)
-    "timezone_offset_hours": 0,  # Local = UTC + this (e.g. -5 for EST)
-    "last_played_slot": None,  # YYYY-MM-DD-HH to avoid replay same slot
+    "sensor_current_usage": "",
+    "sensor_avg_daily": "",
+    "sensor_estimate_min": "",
+    "sensor_estimate_max": "",
+    "sensor_kwh_cost": "",
+    "last_played_slot": None,
+    # Thresholds for message commentary (configurable)
+    "threshold_bill_good": 150,
+    "threshold_bill_moderate": 250,
+    "threshold_bill_high": 350,
+    "threshold_estimate_good": 200,
+    "threshold_estimate_moderate": 300,
+    "threshold_estimate_high": 400,
+    "threshold_daily_kwh_good": 15,
+    "threshold_daily_kwh_high": 22,
+    "threshold_daily_kwh_very_high": 30,
+    "threshold_cycle_kwh_efficient": 100,
+    "threshold_cycle_kwh_high": 200,
+    "threshold_cycle_kwh_very_high": 350,
 }
 
 
@@ -111,75 +123,59 @@ def _format_currency(val: float) -> str:
     return f"${val:,.2f}" if val is not None else "$0.00"
 
 
-def _bill_message(bill_amt: float) -> str:
-    """Dynamic feedback based on bill amount: 0-150 excellent, 150-250 good, 250-350 moderate, 350+ high."""
+def _bill_message(bill_amt: float, good: float, moderate: float, high: float) -> str:
+    """Feedback based on configurable bill thresholds."""
     if bill_amt <= 0:
         return ""
-    if bill_amt <= 150:
-        return " Your bill is in an excellent range."
-    if bill_amt <= 250:
-        return " Your bill is in a good range."
-    if bill_amt <= 350:
-        return " Your bill is on the higher side. Consider small reductions in usage."
-    return (
-        " Your bill was much higher than expected. Reduce usage: "
-        "turn off heaters and air conditioning when leaving home, and cut back on high-use appliances."
-    )
+    if bill_amt <= good:
+        return " Bill looks good."
+    if bill_amt <= moderate:
+        return " Bill is moderate."
+    if bill_amt <= high:
+        return " Bill is high. Reduce usage."
+    return " Bill is very high. Cut heaters, AC, and appliances when away."
 
 
-def _estimate_message(est_min: float, est_max: float) -> str:
-    """Dynamic feedback based on projected bill estimates."""
+def _estimate_message(est_min: float, est_max: float, good: float, moderate: float, high: float) -> str:
+    """Feedback based on configurable estimate thresholds."""
     est_mid = (est_min + est_max) / 2 if (est_min or est_max) else 0
     if est_mid <= 0:
         return ""
-    if est_mid <= 200:
-        return " Your projected bill looks good."
-    if est_mid <= 300:
-        return " Your projected bill is moderate. Small cuts can lower the final amount."
-    if est_mid <= 400:
-        return (
-            " Your projected bill is running high. "
-            "Reduce electric use now to bring the final bill down."
-        )
-    return (
-        " Your projected bill is way too high. "
-        "Turn off heaters and AC when away, avoid peak-hour usage, and cut non-essential loads."
-    )
+    if est_mid <= good:
+        return " Projection looks good."
+    if est_mid <= moderate:
+        return " Projection moderate."
+    if est_mid <= high:
+        return " Projection high. Reduce use."
+    return " Projection very high. Cut use now."
 
 
-def _daily_usage_message(avg_daily: float) -> str:
-    """0-14 really efficient, 15-22 good, 22-30 too high, 30+ way too high."""
+def _daily_usage_message(avg_daily: float, good: float, high: float, very_high: float) -> str:
+    """Feedback based on configurable daily kWh thresholds."""
     if avg_daily <= 0:
         return ""
-    if avg_daily < 15:
-        return " Your daily usage is really efficient."
-    if avg_daily <= 22:
-        return " Your daily usage is in a good range."
-    if avg_daily <= 30:
-        return (
-            " Your daily usage is running too high. "
-            "Consider reducing appliance use during peak hours."
-        )
-    return (
-        " Your daily usage is way too high. "
-        "Turn off heaters and AC when away, and reduce appliance use."
-    )
+    if avg_daily < good:
+        return " Daily use efficient."
+    if avg_daily <= high:
+        return " Daily use okay."
+    if avg_daily <= very_high:
+        return " Daily use high."
+    return " Daily use very high."
 
 
-def _current_usage_message(current_kwh: float, typical_cycle: float = 300) -> str:
-    """Feedback on cycle-to-date usage. typical_cycle ~mid-cycle expectation for context."""
+def _current_usage_message(
+    current_kwh: float, efficient: float, high: float, very_high: float
+) -> str:
+    """Feedback based on configurable cycle kWh thresholds."""
     if current_kwh <= 0:
         return ""
-    if current_kwh <= 100:
-        return " You're off to an efficient start this cycle."
-    if current_kwh <= 200:
-        return " Your cycle usage is on track."
-    if current_kwh <= 350:
-        return " Your cycle usage is running high. Try to reduce going forward."
-    return (
-        " Your cycle usage is very high. "
-        "Focus on reducing consumption for the rest of the billing period."
-    )
+    if current_kwh <= efficient:
+        return " Cycle efficient so far."
+    if current_kwh <= high:
+        return " Cycle on track."
+    if current_kwh <= very_high:
+        return " Cycle high."
+    return " Cycle very high."
 
 
 async def build_bill_summary_message(bill_summary_config: dict, tts_config: dict) -> Optional[str]:
@@ -249,26 +245,37 @@ async def build_bill_summary_message(bill_summary_config: dict, tts_config: dict
     avg_daily_num = _parse_float(avg_daily_raw) or 0.0
     current_usage_num = _parse_float(current_usage_raw) or 0.0
 
-    # Build message parts: report each value, then its commentary, before moving to the next topic
-    parts = [
-        f"Your latest Con Edison bill was {bill_str} and your current account balance is {balance_str}."
-    ]
-    parts.append(_bill_message(bill_amt))
+    # Thresholds from config
+    t = config
+    bill_good = float(t.get("threshold_bill_good", 150))
+    bill_mod = float(t.get("threshold_bill_moderate", 250))
+    bill_high = float(t.get("threshold_bill_high", 350))
+    est_good = float(t.get("threshold_estimate_good", 200))
+    est_mod = float(t.get("threshold_estimate_moderate", 300))
+    est_high = float(t.get("threshold_estimate_high", 400))
+    daily_good = float(t.get("threshold_daily_kwh_good", 15))
+    daily_high = float(t.get("threshold_daily_kwh_high", 22))
+    daily_vhigh = float(t.get("threshold_daily_kwh_very_high", 30))
+    cycle_eff = float(t.get("threshold_cycle_kwh_efficient", 100))
+    cycle_high = float(t.get("threshold_cycle_kwh_high", 200))
+    cycle_vhigh = float(t.get("threshold_cycle_kwh_very_high", 350))
+
+    # Concise message: bill, balance, usage stats, estimate, short commentary
+    parts = [f"Bill {bill_str}, balance {balance_str}."]
+    parts.append(_bill_message(bill_amt, bill_good, bill_mod, bill_high))
 
     if config.get("sensor_current_usage"):
-        parts.append(f" You have used {current_usage} so far this billing cycle.")
-        parts.append(_current_usage_message(current_usage_num))
+        parts.append(f" Used {current_usage} this cycle.")
+        parts.append(_current_usage_message(current_usage_num, cycle_eff, cycle_high, cycle_vhigh))
 
-    parts.append(f" Your average daily power consumption is {avg_daily}.")
-    parts.append(_daily_usage_message(avg_daily_num))
+    parts.append(f" Avg {avg_daily} per day.")
+    parts.append(_daily_usage_message(avg_daily_num, daily_good, daily_high, daily_vhigh))
 
-    parts.append(
-        f" Based on current usage patterns, we estimate your bill will be {est_str} "
-        "by the end of the billing cycle."
-    )
-    parts.append(_estimate_message(est_min_val, est_max_val) if (est_min_val or est_max_val) else "")
+    parts.append(f" Estimate: {est_str} by end of cycle.")
+    if est_min_val or est_max_val:
+        parts.append(_estimate_message(est_min_val, est_max_val, est_good, est_mod, est_high))
 
-    msg = "".join(parts).strip()
+    msg = "".join(p for p in parts if p).strip()
     return f"{prefix} {msg}".strip()
 
 
@@ -312,36 +319,55 @@ async def _get_ha_timezone() -> Optional[str]:
     return None
 
 
-async def _get_local_now(cfg: dict):
-    """Get current time in user's local zone. Uses HA timezone when available, else timezone_offset_hours."""
+async def _get_local_now(_cfg: dict):
+    """Get current time in user's local zone. Uses HA timezone only (no fallback)."""
     now_utc = datetime.now(timezone.utc)
     tz_str = await _get_ha_timezone()
     if tz_str:
         return now_utc.astimezone(ZoneInfo(tz_str))
-    offset = int(cfg.get("timezone_offset_hours", 0))
-    return now_utc + timedelta(hours=offset)
+    return now_utc  # Fallback: UTC when HA timezone unavailable
 
 
-async def _maybe_trigger_bill_summary():
-    """Check if we're in the time window and day, then queue bill summary TTS."""
+def _compute_next_slot(now: datetime, cfg: dict) -> Optional[datetime]:
+    """Compute next valid run time. Returns None if no valid slot in next 8 days."""
+    start_h = int(cfg.get("start_hour", 8))
+    end_h = int(cfg.get("end_hour", 10))
+    freq_h = max(1, int(cfg.get("frequency_hours", 1)))
+    min_of_hour = max(0, min(59, int(cfg.get("minute_of_hour", 0))))
+    days_set = set(cfg.get("days_of_week") or [0, 1, 2, 3, 4, 5, 6])
+    slot_hours = list(range(start_h, end_h, freq_h))
+    if not slot_hours:
+        return None
+    for day_offset in range(8):
+        d = now.date() + timedelta(days=day_offset)
+        if d.weekday() not in days_set:
+            continue
+        for sh in slot_hours:
+            slot = datetime(d.year, d.month, d.day, sh, min_of_hour, 0, 0, tzinfo=now.tzinfo)
+            if slot > now:
+                return slot
+    return None
+
+
+async def _maybe_trigger_bill_summary() -> bool:
+    """Check if we're in the time window and day, then queue bill summary TTS. Returns True if triggered."""
     cfg = load_bill_summary_config()
     if not cfg.get("enabled"):
-        return
+        return False
 
     from main import load_tts_config
     tts_cfg = load_tts_config()
     if not tts_cfg.get("enabled"):
-        return
+        return False
     media_players = tts_cfg.get("media_players") or []
     media_players = [p for p in media_players if isinstance(p, dict) and (p.get("entity_id") or "").strip()]
     if not media_players:
-        return
+        return False
     tts_engine = (tts_cfg.get("tts_engine") or "").strip()
     if not tts_engine:
-        return
+        return False
 
     now = await _get_local_now(cfg)
-    # Python: weekday() 0=Monday, 6=Sunday
     day = now.weekday()
     hour = now.hour
     minute = now.minute
@@ -352,27 +378,26 @@ async def _maybe_trigger_bill_summary():
     days = cfg.get("days_of_week") or [0, 1, 2, 3, 4, 5, 6]
 
     if day not in days:
-        return
+        return False
 
-    # Valid slot hours: start, start+freq, start+2*freq, ... < end
     slot_hours = []
     h = start_h
     while h < end_h:
         slot_hours.append(h)
         h += freq_h
     if hour not in slot_hours:
-        return
+        return False
     if minute < min_of_hour:
-        return
+        return False
 
     slot_str = now.strftime("%Y-%m-%d-%H")
     if cfg.get("last_played_slot") == slot_str:
-        return
+        return False
 
     try:
         msg = await build_bill_summary_message(cfg, tts_cfg)
         if not msg:
-            return
+            return False
 
         from tts_queue import enqueue_tts
         await enqueue_tts(
@@ -387,26 +412,47 @@ async def _maybe_trigger_bill_summary():
         save_bill_summary_config(cfg)
         from main import add_log
         add_log("info", "Queued scheduled bill summary TTS")
+        return True
     except Exception as e:
         logger.exception("Bill summary TTS failed")
         from main import add_log
         add_log("error", f"Bill summary TTS error: {e}")
+        return False
 
 
 _bill_summary_task = None
 
 
 def start_bill_summary_scheduler():
-    """Start the bill summary check loop. Polls every 30s for accurate trigger timing."""
+    """Start the bill summary scheduler. Sleeps until next slot for reliable timing (like cron)."""
     global _bill_summary_task
 
     async def _loop():
         while True:
             try:
-                await _maybe_trigger_bill_summary()
+                cfg = load_bill_summary_config()
+                if not cfg.get("enabled"):
+                    await asyncio.sleep(60)
+                    continue
+                now = await _get_local_now(cfg)
+                next_slot = _compute_next_slot(now, cfg)
+                if next_slot:
+                    wait_secs = (next_slot - now).total_seconds()
+                    # Wake 20s before slot, then poll every 5s until we pass it
+                    if wait_secs > 25:
+                        await asyncio.sleep(min(55, wait_secs - 20))
+                        continue
+                    if wait_secs > 5:
+                        await asyncio.sleep(5)
+                        continue
+                triggered = await _maybe_trigger_bill_summary()
+                # After trigger, wait at least 60s to avoid double-check
+                await asyncio.sleep(60 if triggered else 30)
+            except asyncio.CancelledError:
+                break
             except Exception as e:
                 logger.exception("Bill summary scheduler error")
-            await asyncio.sleep(30)
+                await asyncio.sleep(60)
 
     _bill_summary_task = asyncio.create_task(_loop())
-    logger.info("TTS bill summary scheduler started")
+    logger.info("TTS bill summary scheduler started (cron-style)")
