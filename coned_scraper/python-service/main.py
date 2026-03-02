@@ -142,7 +142,7 @@ def load_schedule() -> dict:
             "next_run": data.get("next_run")
         }
     except Exception as e:
-        await db.add_log("error", f"Failed to load schedule: {str(e)}")
+        logging.error(f"Failed to load schedule: {str(e)}")
         return {"enabled": False, "frequency": 3600, "last_scrape_end": None, "next_run": None}
 
 def save_schedule(enabled: bool, frequency: int, last_scrape_end: str = None, next_run: str = None):
@@ -158,7 +158,7 @@ def save_schedule(enabled: bool, frequency: int, last_scrape_end: str = None, ne
         "updated_at": utc_now_iso()
     }
     SCHEDULE_FILE.write_text(json.dumps(schedule))
-    await db.add_log("info", f"Schedule saved: enabled={enabled}, frequency={frequency}s")
+    logging.info(f"Schedule saved: enabled={enabled}, frequency={frequency}s")
 
 def update_last_scrape_time():
     """Update last_scrape_end and calculate next_run after a successful scrape"""
@@ -220,7 +220,7 @@ async def run_scheduled_scrape():
                         await mqtt_client.publish_previous_bill(bills[1], timestamp)
                     
                     # Smart last payment detection for MQTT only
-                    should_pub, last_payment, reason = should_publish_last_payment()
+                    should_pub, last_payment, reason = await should_publish_last_payment()
                     if should_pub and last_payment:
                         await db.add_log("info", f"Publishing last_payment to MQTT: {reason}")
                         await mqtt_client.publish_last_payment(last_payment, timestamp)
@@ -256,7 +256,7 @@ async def run_scheduled_scrape():
             
             # Check for new payment TTS trigger
             try:
-                tts_payment_trigger, tts_payment_data, tts_payment_reason = should_trigger_payment_tts()
+                tts_payment_trigger, tts_payment_data, tts_payment_reason = await should_trigger_payment_tts()
                 if tts_payment_trigger and tts_payment_data:
                     await db.add_log("info", f"Triggering payment TTS: {tts_payment_reason}")
                     from tts_scheduler import trigger_payment_received_tts
@@ -271,7 +271,7 @@ async def run_scheduled_scrape():
             
             # Check for new bill TTS trigger
             try:
-                tts_bill_trigger, tts_bill_data, tts_bill_reason = should_trigger_new_bill_tts()
+                tts_bill_trigger, tts_bill_data, tts_bill_reason = await should_trigger_new_bill_tts()
                 if tts_bill_trigger and tts_bill_data:
                     await db.add_log("info", f"Triggering new bill TTS: {tts_bill_reason}")
                     from tts_scheduler import trigger_new_bill_tts
@@ -543,7 +543,7 @@ def load_mqtt_config() -> dict:
             "mqtt_discovery": data.get("mqtt_discovery", True),
         }
     except Exception as e:
-        await db.add_log("warning", f"Failed to load MQTT config: {str(e)}")
+        logging.warning(f"Failed to load MQTT config: {str(e)}")
         return {}
 
 def load_last_payment_state() -> dict:
@@ -554,7 +554,7 @@ def load_last_payment_state() -> dict:
     try:
         return json.loads(LAST_PAYMENT_STATE_FILE.read_text())
     except Exception as e:
-        await db.add_log("warning", f"Failed to load last payment state: {str(e)}")
+        logging.warning(f"Failed to load last payment state: {str(e)}")
         return {"bill_id": None, "payment_count": 0, "last_payment_id": None, "last_payment_amount": None}
 
 def save_last_payment_state(state: dict):
@@ -562,9 +562,9 @@ def save_last_payment_state(state: dict):
     try:
         LAST_PAYMENT_STATE_FILE.write_text(json.dumps(state))
     except Exception as e:
-        await db.add_log("warning", f"Failed to save last payment state: {str(e)}")
+        logging.warning(f"Failed to save last payment state: {str(e)}")
 
-def should_publish_last_payment() -> tuple:
+async def should_publish_last_payment() -> tuple:
     """
     Check if we should publish last_payment to MQTT.
     Returns (should_publish: bool, last_payment_data: dict or None, reason: str)
@@ -670,7 +670,7 @@ def load_tts_payment_state() -> dict:
     try:
         return json.loads(TTS_PAYMENT_STATE_FILE.read_text())
     except Exception as e:
-        await db.add_log("warning", f"Failed to load TTS payment state: {str(e)}")
+        logging.warning(f"Failed to load TTS payment state: {str(e)}")
         return {"bill_id": None, "payment_count": 0, "last_payment_id": None}
 
 def save_tts_payment_state(state: dict):
@@ -678,7 +678,7 @@ def save_tts_payment_state(state: dict):
     try:
         TTS_PAYMENT_STATE_FILE.write_text(json.dumps(state))
     except Exception as e:
-        await db.add_log("warning", f"Failed to save TTS payment state: {str(e)}")
+        logging.warning(f"Failed to save TTS payment state: {str(e)}")
 
 def load_tts_bill_state() -> dict:
     """Load the last known bill state for TTS trigger detection"""
@@ -687,7 +687,7 @@ def load_tts_bill_state() -> dict:
     try:
         return json.loads(TTS_BILL_STATE_FILE.read_text())
     except Exception as e:
-        await db.add_log("warning", f"Failed to load TTS bill state: {str(e)}")
+        logging.warning(f"Failed to load TTS bill state: {str(e)}")
         return {"latest_bill_id": None, "bill_total": None}
 
 def save_tts_bill_state(state: dict):
@@ -695,9 +695,9 @@ def save_tts_bill_state(state: dict):
     try:
         TTS_BILL_STATE_FILE.write_text(json.dumps(state))
     except Exception as e:
-        await db.add_log("warning", f"Failed to save TTS bill state: {str(e)}")
+        logging.warning(f"Failed to save TTS bill state: {str(e)}")
 
-def should_trigger_payment_tts() -> tuple:
+async def should_trigger_payment_tts() -> tuple:
     """
     Check if we should trigger TTS for a new payment.
     Independent of MQTT - uses its own state file.
@@ -771,7 +771,7 @@ def should_trigger_payment_tts() -> tuple:
     
     return should_trigger, latest_payment if should_trigger else None, reason
 
-def should_trigger_new_bill_tts() -> tuple:
+async def should_trigger_new_bill_tts() -> tuple:
     """
     Check if we should trigger TTS for a new bill.
     Independent of MQTT - uses its own state file.
@@ -856,7 +856,7 @@ def load_app_settings() -> dict:
             "settings_password": decrypt_data(data.get("settings_password", encrypt_data("0000"))) if data.get("settings_password") else "0000",
         }
     except Exception as e:
-        await db.add_log("warning", f"Failed to load app settings: {str(e)}")
+        logging.warning(f"Failed to load app settings: {str(e)}")
         return {"time_offset_hours": 0.0, "settings_password": "0000"}
 
 def verify_settings_password(password: str) -> bool:
@@ -1053,7 +1053,7 @@ async def start_scraper():
                         await mqtt_client.publish_previous_bill(bills[1], timestamp)
                     
                     # Smart last payment detection for MQTT only
-                    should_pub, last_payment, reason = should_publish_last_payment()
+                    should_pub, last_payment, reason = await should_publish_last_payment()
                     if should_pub and last_payment:
                         await db.add_log("info", f"Publishing last_payment to MQTT: {reason}")
                         await mqtt_client.publish_last_payment(last_payment, timestamp)
@@ -1089,7 +1089,7 @@ async def start_scraper():
             
             # Check for new payment TTS trigger
             try:
-                tts_payment_trigger, tts_payment_data, tts_payment_reason = should_trigger_payment_tts()
+                tts_payment_trigger, tts_payment_data, tts_payment_reason = await should_trigger_payment_tts()
                 if tts_payment_trigger and tts_payment_data:
                     await db.add_log("info", f"Triggering payment TTS: {tts_payment_reason}")
                     from tts_scheduler import trigger_payment_received_tts
@@ -1104,7 +1104,7 @@ async def start_scraper():
             
             # Check for new bill TTS trigger
             try:
-                tts_bill_trigger, tts_bill_data, tts_bill_reason = should_trigger_new_bill_tts()
+                tts_bill_trigger, tts_bill_data, tts_bill_reason = await should_trigger_new_bill_tts()
                 if tts_bill_trigger and tts_bill_data:
                     await db.add_log("info", f"Triggering new bill TTS: {tts_bill_reason}")
                     from tts_scheduler import trigger_new_bill_tts
@@ -2222,7 +2222,7 @@ async def update_payment_order_endpoint(payment_id: int, data: UpdatePaymentOrde
                 from mqtt_client import get_mqtt_client
                 mqtt_client = get_mqtt_client()
                 if mqtt_client:
-                    should_pub, last_payment, reason = should_publish_last_payment()
+                    should_pub, last_payment, reason = await should_publish_last_payment()
                     if should_pub and last_payment:
                         await db.add_log("info", f"Manual audit triggered MQTT publish: {reason}")
                         await mqtt_client.publish_last_payment(last_payment, utc_now_iso())
@@ -2696,7 +2696,7 @@ async def get_realtime_usage(hours: int = 24, refresh: bool = False):
 
 
 # ========== TTS Configuration ==========
-def load_tts_config() -> dict:
+async def load_tts_config() -> dict:
     """Load TTS configuration from database (persists across reinstalls)"""
     # Using db module for database operations
     
@@ -2713,7 +2713,7 @@ def load_tts_config() -> dict:
             pass
     
     if data is None:
-        save_tts_config(DEFAULT_TTS_CONFIG.copy())
+        await save_tts_config(DEFAULT_TTS_CONFIG.copy())
         return DEFAULT_TTS_CONFIG.copy()
     
     try:
@@ -2729,11 +2729,11 @@ def load_tts_config() -> dict:
             merged["messages"].pop("balance_alert", None)
         return merged
     except Exception as e:
-        await db.add_log("warning", f"Failed to load TTS config: {str(e)}")
+        logging.warning(f"Failed to load TTS config: {str(e)}")
         return DEFAULT_TTS_CONFIG.copy()
 
 
-def save_tts_config(config: dict):
+async def save_tts_config(config: dict):
     """Save TTS configuration to database"""
     # Using db module for database operations
     await db.save_tts_config_db(config)
@@ -2758,17 +2758,17 @@ class TTSConfigModel(BaseModel):
 @app.get("/api/tts-config")
 async def get_tts_config():
     """Get TTS configuration"""
-    return load_tts_config()
+    return await load_tts_config()
 
 
 @app.post("/api/tts-config")
 async def save_tts_config_endpoint(config: TTSConfigModel):
     """Save TTS configuration"""
-    current = load_tts_config()
+    current = await load_tts_config()
     updates = config.model_dump(exclude_none=True)
     for k, v in updates.items():
         current[k] = v
-    save_tts_config(current)
+    await save_tts_config(current)
     return {"success": True}
 
 
@@ -2788,7 +2788,7 @@ def build_tts_message(config: dict, key: str, **kwargs) -> str:
 @app.post("/api/tts/test")
 async def test_tts():
     """Send test TTS: direct HA API when addon, else MQTT fallback"""
-    config = load_tts_config()
+    config = await load_tts_config()
     if not config.get("enabled"):
         raise HTTPException(status_code=400, detail="TTS is not enabled")
     media_player = (config.get("media_player") or "").strip()
@@ -2871,7 +2871,7 @@ async def trigger_bill_summary_tts():
     from tts_scheduler import get_scheduler
     
     # Use main config loader to ensure consistency
-    tts_config = load_tts_config()
+    tts_config = await load_tts_config()
 
     if not tts_config.get("enabled"):
         raise HTTPException(status_code=400, detail="TTS is not enabled. Enable it in Event TTS Alerts.")

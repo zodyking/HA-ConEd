@@ -132,7 +132,7 @@ class TTSScheduler:
         - days_of_week: Active days
         """
         schedule_config = self.load_schedule_config()
-        tts_config = self.load_tts_config()
+        tts_config = await self.load_tts_config()
         
         if not schedule_config.get("enabled"):
             return
@@ -384,7 +384,7 @@ def get_scheduler() -> TTSScheduler:
 async def trigger_new_bill_tts(bill_month_range: str, bill_total: str, due_date: str = ""):
     """Trigger TTS for a new bill."""
     scheduler = get_scheduler()
-    tts_config = scheduler.load_tts_config()
+    tts_config = await scheduler.load_tts_config()
     
     if not tts_config.get("enabled"):
         return
@@ -427,7 +427,7 @@ async def trigger_new_bill_tts(bill_month_range: str, bill_total: str, due_date:
 async def trigger_payment_received_tts(amount: str, balance: str, payee_name: str = ""):
     """Trigger TTS for a payment received."""
     scheduler = get_scheduler()
-    tts_config = scheduler.load_tts_config()
+    tts_config = await scheduler.load_tts_config()
     
     if not tts_config.get("enabled"):
         return
