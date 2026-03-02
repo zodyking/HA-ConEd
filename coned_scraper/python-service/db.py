@@ -35,8 +35,13 @@ def utc_now_iso() -> str:
 async def connect():
     """Connect to the database"""
     if not db.is_connected():
-        await db.connect()
-        logger.info("Connected to PostgreSQL database")
+        try:
+            logger.info("Connecting to PostgreSQL database...")
+            await db.connect()
+            logger.info("SUCCESS: Connected to PostgreSQL database")
+        except Exception as e:
+            logger.error(f"FAILED to connect to PostgreSQL: {e}")
+            raise
 
 async def disconnect():
     """Disconnect from the database"""

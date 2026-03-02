@@ -6,10 +6,14 @@
 
 exec 2>&1
 
+bashio::log.info "============================================"
+bashio::log.info "POSTGRESQL SERVICE STARTING"
+bashio::log.info "============================================"
+
 DATA_DIR="/config/postgres/data"
 PGUSER="postgres"
 
-bashio::log.info "Starting PostgreSQL service..."
+bashio::log.info "PostgreSQL data directory: $DATA_DIR"
 
 # Ensure data directory exists with correct ownership
 mkdir -p "$DATA_DIR"
