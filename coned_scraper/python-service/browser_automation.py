@@ -63,10 +63,16 @@ async def take_live_preview(page, step_name: str = ""):
         logger.debug(f"Failed to take live preview: {str(e)}")
         # Don't raise - preview failures shouldn't stop scraping
 
-async def perform_login(username: str, password: str, totp_code: str):
+async def perform_login(username: str, password: str, totp_code: str, test_only: bool = False):
     """
     Perform ConEd login automation using headless browser.
     Types all values character by character, never pastes.
+    
+    Args:
+        username: ConEd account email
+        password: ConEd account password
+        totp_code: Current TOTP code
+        test_only: If True, return immediately after verifying login success (don't scrape data)
     """
     import time
     from pathlib import Path
@@ -389,6 +395,17 @@ async def perform_login(username: str, password: str, totp_code: str):
             
             logger.info(f"Login process completed. Final URL: {current_url}")
             await db.add_log("success", f"Login process completed. Final URL: {current_url}")
+            
+            # If test_only mode, return immediately after verifying login success
+            if test_only:
+                await browser.close()
+                await db.add_log("info", "Test mode: Browser closed after login verification")
+                return {
+                    "success": is_success,
+                    "url": current_url,
+                    "message": "Login verification completed" if is_success else "Login verification failed",
+                    "error": None if is_success else "Could not verify successful login"
+                }
             
             # Scrape data after successful login
             scraped_data = {}

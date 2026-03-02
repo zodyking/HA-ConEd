@@ -944,6 +944,40 @@ async def get_settings():
         await db.add_log("error", f"Failed to get settings: {str(e)}")
         return {"username": "", "password": "", "totp_secret": ""}
 
+@app.post("/api/test-login")
+async def test_login():
+    """Test ConEd login credentials without performing full scrape"""
+    from browser_automation import perform_login
+    
+    credentials = load_credentials()
+    if not credentials:
+        raise HTTPException(status_code=404, detail="No credentials found. Please save credentials first.")
+    
+    await db.add_log("info", "Testing ConEd login credentials...")
+    
+    username = credentials["username"]
+    password = credentials["password"]
+    totp = pyotp.TOTP(credentials["totp_secret"])
+    totp_code = totp.now()
+    
+    try:
+        result = await perform_login(username, password, totp_code, test_only=True)
+        success = result.get('success', False)
+        
+        if success:
+            await db.add_log("success", "Login test successful")
+            return {"success": True, "message": "Login successful! Credentials are valid."}
+        else:
+            error_msg = result.get('error', 'Login failed')
+            await db.add_log("error", f"Login test failed: {error_msg}")
+            raise HTTPException(status_code=400, detail=error_msg)
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_msg = f"Login test error: {str(e)}"
+        await db.add_log("error", error_msg)
+        raise HTTPException(status_code=500, detail=error_msg)
+
 @app.post("/api/scrape")
 async def start_scraper():
     """Start scraper automation"""
