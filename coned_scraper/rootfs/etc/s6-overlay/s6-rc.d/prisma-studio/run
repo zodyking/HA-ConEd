@@ -17,4 +17,4 @@ until PGPASSWORD=coned psql -h localhost -p 5432 -U coned -d coned -t -c "SELECT
 done
 sleep 2
 bashio::log.info "PostgreSQL is ready, starting Prisma Studio on port 5555..."
-exec prisma studio --port 5555 --browser none --schema=prisma/schema.prisma
+exec prisma studio --port 5555 --browser none
