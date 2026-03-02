@@ -16,6 +16,10 @@ arch:
   - amd64
 map:
   - addon_config:rw
+ports:
+  5555/tcp: 5555
+ports_description:
+  5555/tcp: "Prisma Studio (Database UI)"
 options:
   log_level: info
 schema:

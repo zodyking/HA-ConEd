@@ -426,7 +426,8 @@ def match_payments_to_emails(email_data: List[Dict[str, Any]]) -> Dict[str, Any]
     
     Returns stats about matches made
     """
-    from database import get_unverified_payments, attribute_payment, get_user_by_card, get_default_payee
+    import db
+    import asyncio
     
     stats = {
         'emails_processed': len(email_data),
@@ -437,7 +438,9 @@ def match_payments_to_emails(email_data: List[Dict[str, Any]]) -> Dict[str, Any]
         'details': []
     }
     
-    unverified = get_unverified_payments(limit=100)
+    # Get async loop and run async function
+    loop = asyncio.get_event_loop()
+    unverified = loop.run_until_complete(db.get_unverified_payments())
     stats['payments_checked'] = len(unverified)
     
     logger.info(f"Processing {len(email_data)} emails against {len(unverified)} unverified payments")
@@ -459,14 +462,14 @@ def match_payments_to_emails(email_data: List[Dict[str, Any]]) -> Dict[str, Any]
                         
                         if card_last_four:
                             # Find user by card
-                            user = get_user_by_card(card_last_four)
+                            user = loop.run_until_complete(db.get_user_by_card(card_last_four))
                             if user:
-                                attribute_payment(
+                                loop.run_until_complete(db.attribute_payment(
                                     payment['id'],
                                     user['id'],
-                                    method='email_card',
+                                    verification_method='email_card',
                                     card_last_four=card_last_four
-                                )
+                                ))
                                 stats['matched_by_card'] += 1
                                 stats['details'].append({
                                     'payment_id': payment['id'],
@@ -486,14 +489,14 @@ def match_payments_to_emails(email_data: List[Dict[str, Any]]) -> Dict[str, Any]
         
         if not matched:
             # No card match - try default payee
-            default_payee = get_default_payee()
+            default_payee = loop.run_until_complete(db.get_default_payee())
             if default_payee:
-                attribute_payment(
+                loop.run_until_complete(db.attribute_payment(
                     payment['id'],
                     default_payee['id'],
-                    method='default_rule',
+                    verification_method='default_rule',
                     card_last_four=None
-                )
+                ))
                 stats['matched_by_default'] += 1
                 stats['details'].append({
                     'payment_id': payment['id'],

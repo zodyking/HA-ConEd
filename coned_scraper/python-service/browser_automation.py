@@ -2,7 +2,7 @@ from playwright.async_api import async_playwright, TimeoutError as PlaywrightTim
 import asyncio
 import logging
 import time
-from database import add_log, save_scraped_data
+import db
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -35,11 +35,11 @@ async def type_text_slowly(page, selector: str, text: str, delay: int = 50):
         await page.keyboard.type(text, delay=delay)
         
         logger.info(f"Typed {len(text)} characters into {selector}")
-        add_log("info", f"Typed {len(text)} characters into {selector}")
+        await db.add_log("info", f"Typed {len(text)} characters into {selector}")
     except Exception as e:
         error_msg = f"Error typing into {selector}: {str(e)}"
         logger.error(error_msg)
-        add_log("error", error_msg)
+        await db.add_log("error", error_msg)
         raise
 
 async def take_live_preview(page, step_name: str = ""):
@@ -58,7 +58,7 @@ async def take_live_preview(page, step_name: str = ""):
         
         await page.screenshot(path=str(screenshot_path), full_page=False)
         if step_name:
-            add_log("debug", f"Live preview updated: {step_name}")
+            await db.add_log("debug", f"Live preview updated: {step_name}")
     except Exception as e:
         logger.debug(f"Failed to take live preview: {str(e)}")
         # Don't raise - preview failures shouldn't stop scraping
@@ -91,11 +91,11 @@ async def perform_login(username: str, password: str, totp_code: str):
         page = await context.new_page()
         
         try:
-            add_log("info", f"Starting ConEd scraper - Navigating to {coned_url}")
+            await db.add_log("info", f"Starting ConEd scraper - Navigating to {coned_url}")
             logger.info(f"Navigating to {coned_url}")
             await page.goto(coned_url, wait_until="networkidle", timeout=30000)
             await asyncio.sleep(2)  # Wait for page to fully load
-            add_log("info", "Page loaded successfully")
+            await db.add_log("info", "Page loaded successfully")
             await take_live_preview(page, "Page loaded")
             
             # Wait for and type username
@@ -124,10 +124,10 @@ async def perform_login(username: str, password: str, totp_code: str):
                 raise Exception("Could not find username field")
             
             logger.info(f"Found username field: {username_field}")
-            add_log("info", f"Found username field: {username_field}")
+            await db.add_log("info", f"Found username field: {username_field}")
             await type_text_slowly(page, username_field, username, delay=50)
             await asyncio.sleep(0.5)
-            add_log("success", "Username entered successfully")
+            await db.add_log("success", "Username entered successfully")
             await take_live_preview(page, "Username entered")
             
             # Wait for and type password
@@ -153,10 +153,10 @@ async def perform_login(username: str, password: str, totp_code: str):
                 raise Exception("Could not find password field")
             
             logger.info(f"Found password field: {password_field}")
-            add_log("info", f"Found password field: {password_field}")
+            await db.add_log("info", f"Found password field: {password_field}")
             await type_text_slowly(page, password_field, password, delay=50)
             await asyncio.sleep(0.5)
-            add_log("success", "Password entered successfully")
+            await db.add_log("success", "Password entered successfully")
             await take_live_preview(page, "Password entered")
             
             # Brief delay before submit to allow any blur/validation handlers to complete
@@ -188,9 +188,9 @@ async def perform_login(username: str, password: str, totp_code: str):
                 raise Exception("Could not find submit button")
             
             logger.info(f"Found submit button: {submit_button}")
-            add_log("info", f"Found submit button: {submit_button}")
+            await db.add_log("info", f"Found submit button: {submit_button}")
             await page.locator(submit_button).first.click()
-            add_log("info", "Login form submitted")
+            await db.add_log("info", "Login form submitted")
             await asyncio.sleep(3)  # Wait for potential redirect or TOTP field
             await take_live_preview(page, "Login form submitted")
             
@@ -240,10 +240,10 @@ async def perform_login(username: str, password: str, totp_code: str):
             
             if totp_field:
                 logger.info(f"Found TOTP field: {totp_field}")
-                add_log("info", f"Found TOTP field: {totp_field}")
+                await db.add_log("info", f"Found TOTP field: {totp_field}")
                 await type_text_slowly(page, totp_field, totp_code, delay=50)
                 await asyncio.sleep(0.5)
-                add_log("success", "TOTP code entered successfully")
+                await db.add_log("success", "TOTP code entered successfully")
                 await take_live_preview(page, "TOTP code entered")
                 
                 # Submit TOTP - wait for button to be visible and enabled
@@ -267,7 +267,7 @@ async def perform_login(username: str, password: str, totp_code: str):
                             is_disabled = await button.get_attribute("disabled")
                             if is_disabled is None:
                                 await button.click()
-                                add_log("info", f"Clicked TOTP submit button: {selector}")
+                                await db.add_log("info", f"Clicked TOTP submit button: {selector}")
                                 totp_submitted = True
                                 break
                     except Exception as e:
@@ -278,7 +278,7 @@ async def perform_login(username: str, password: str, totp_code: str):
                     # Try pressing Enter as fallback
                     try:
                         await page.keyboard.press("Enter")
-                        add_log("info", "Pressed Enter to submit TOTP")
+                        await db.add_log("info", "Pressed Enter to submit TOTP")
                         totp_submitted = True
                     except Exception as e:
                         logger.warning(f"Failed to submit TOTP via Enter: {str(e)}")
@@ -287,13 +287,13 @@ async def perform_login(username: str, password: str, totp_code: str):
                 if totp_submitted:
                     try:
                         # Wait for navigation to start and complete
-                        add_log("info", "Waiting for navigation after TOTP submission...")
+                        await db.add_log("info", "Waiting for navigation after TOTP submission...")
                         # Wait for DOM to be ready first
                         await page.wait_for_load_state("domcontentloaded", timeout=15000)
                         # Then wait for network to be idle
                         await page.wait_for_load_state("networkidle", timeout=15000)
                         await asyncio.sleep(2)  # Additional wait for dynamic content
-                        add_log("info", "Navigation completed after TOTP submission")
+                        await db.add_log("info", "Navigation completed after TOTP submission")
                         await take_live_preview(page, "After TOTP submission")
                     except Exception as e:
                         logger.debug(f"Navigation wait timeout (may be normal): {str(e)}")
@@ -307,7 +307,7 @@ async def perform_login(username: str, password: str, totp_code: str):
             # Check if login was successful
             # Wait for page to be stable before accessing content
             try:
-                add_log("info", "Waiting for page to stabilize before checking login status...")
+                await db.add_log("info", "Waiting for page to stabilize before checking login status...")
                 await page.wait_for_load_state("domcontentloaded", timeout=10000)
                 await page.wait_for_load_state("networkidle", timeout=10000)
                 await take_live_preview(page, "Page stabilized")
@@ -388,17 +388,17 @@ async def perform_login(username: str, password: str, totp_code: str):
                     pass
             
             logger.info(f"Login process completed. Final URL: {current_url}")
-            add_log("success", f"Login process completed. Final URL: {current_url}")
+            await db.add_log("success", f"Login process completed. Final URL: {current_url}")
             
             # Scrape data after successful login
             scraped_data = {}
             if is_success:
                 try:
-                    add_log("info", "Starting data scraping...")
+                    await db.add_log("info", "Starting data scraping...")
                     # Navigate to account page if not already there
                     account_url = "https://www.coned.com/en/accounts-billing/my-account"
                     if account_url not in current_url:
-                        add_log("info", f"Navigating to account page: {account_url}")
+                        await db.add_log("info", f"Navigating to account page: {account_url}")
                         await page.goto(account_url, wait_until="networkidle", timeout=30000)
                         await asyncio.sleep(3)  # Wait for page to load
                     
@@ -412,17 +412,17 @@ async def perform_login(username: str, password: str, totp_code: str):
                     # Just store the filename in scraped_data
                     scraped_data["screenshot_path"] = SCREENSHOT_FILENAME
                     
-                    add_log("success", f"Data scraping completed successfully")
+                    await db.add_log("success", f"Data scraping completed successfully")
                     
-                    save_scraped_data(scraped_data, "success", None, SCREENSHOT_FILENAME)
+                    await db.save_scraped_data(scraped_data, "success", None, SCREENSHOT_FILENAME)
                 except Exception as e:
                     error_msg = f"Data scraping failed: {str(e)}"
-                    add_log("error", error_msg)
+                    await db.add_log("error", error_msg)
                     logger.error(error_msg)
-                    save_scraped_data({}, "error", error_msg, None)
+                    await db.save_scraped_data({}, "error", error_msg, None)
             
             await browser.close()
-            add_log("info", "Browser closed")
+            await db.add_log("info", "Browser closed")
             
             return {
                 "success": is_success,
@@ -434,15 +434,15 @@ async def perform_login(username: str, password: str, totp_code: str):
         except PlaywrightTimeoutError as e:
             error_msg = f"Timeout error: {str(e)}"
             logger.error(error_msg)
-            add_log("error", error_msg)
-            save_scraped_data({}, "error", error_msg, None)
+            await db.add_log("error", error_msg)
+            await db.save_scraped_data({}, "error", error_msg, None)
             await browser.close()
             raise Exception(f"Login timeout: {str(e)}")
         except Exception as e:
             error_msg = f"Login error: {str(e)}"
             logger.error(error_msg)
-            add_log("error", error_msg)
-            save_scraped_data({}, "error", error_msg, None)
+            await db.add_log("error", error_msg)
+            await db.save_scraped_data({}, "error", error_msg, None)
             await browser.close()
             raise
 
@@ -461,12 +461,12 @@ async def scrape_account_data(page, context):
     
     try:
         # Wait for page to load
-        add_log("info", "Waiting for account page to load...")
+        await db.add_log("info", "Waiting for account page to load...")
         await page.wait_for_load_state("networkidle", timeout=15000)
         await asyncio.sleep(2)  # Additional wait for dynamic content
         
         # Scrape Account Balance
-        add_log("info", "Looking for Account Balance...")
+        await db.add_log("info", "Looking for Account Balance...")
         balance_selectors = [
             '.overview-bill-card__price.js-overview-bill-card-price.no-translate',
             '.overview-bill-card__price',
@@ -488,17 +488,17 @@ async def scrape_account_data(page, context):
                         # Clean up the balance text
                         balance_clean = balance_text.strip().replace('\n', ' ').replace('\t', ' ')
                         account_balance = balance_clean
-                        add_log("success", f"Found Account Balance: {account_balance}")
+                        await db.add_log("success", f"Found Account Balance: {account_balance}")
                         break
                 except:
                     # Element not found, try next selector
                     continue
             except Exception as e:
-                add_log("warning", f"Balance selector {selector} failed: {str(e)}")
+                await db.add_log("warning", f"Balance selector {selector} failed: {str(e)}")
                 continue
         
         if not account_balance:
-            add_log("warning", "Could not find Account Balance element")
+            await db.add_log("warning", "Could not find Account Balance element")
         else:
             scraped_data["account_balance"] = account_balance
             # Take screenshot right after finding account balance
@@ -508,13 +508,13 @@ async def scrape_account_data(page, context):
                 screenshot_dir.mkdir(parents=True, exist_ok=True)
                 screenshot_path = screenshot_dir / SCREENSHOT_FILENAME
                 await page.screenshot(path=str(screenshot_path), full_page=False)
-                add_log("info", f"Screenshot saved: {SCREENSHOT_FILENAME}")
+                await db.add_log("info", f"Screenshot saved: {SCREENSHOT_FILENAME}")
             except Exception as e:
-                add_log("warning", f"Failed to save screenshot: {str(e)}")
+                await db.add_log("warning", f"Failed to save screenshot: {str(e)}")
             
     except Exception as e:
         error_msg = f"Error during data scraping: {str(e)}"
-        add_log("error", error_msg)
+        await db.add_log("error", error_msg)
         logger.error(error_msg)
         scraped_data["error"] = str(e)
     
@@ -529,13 +529,13 @@ async def download_pdf_from_url(pdf_url: str) -> bool:
     from pathlib import Path
     
     try:
-        add_log("info", f"Downloading PDF from: {pdf_url[:80]}...")
+        await db.add_log("info", f"Downloading PDF from: {pdf_url[:80]}...")
         
         async with aiohttp.ClientSession() as session:
             async with session.get(pdf_url, timeout=aiohttp.ClientTimeout(total=60)) as response:
                 if response.status == 200:
                     content_type = response.headers.get('content-type', '')
-                    add_log("info", f"PDF response: status={response.status}, content-type={content_type}")
+                    await db.add_log("info", f"PDF response: status={response.status}, content-type={content_type}")
                     
                     # Read the PDF content
                     pdf_content = await response.read()
@@ -550,17 +550,17 @@ async def download_pdf_from_url(pdf_url: str) -> bool:
                         with open(pdf_path, 'wb') as f:
                             f.write(pdf_content)
                         
-                        add_log("success", f"PDF saved: {pdf_path} ({len(pdf_content)} bytes)")
+                        await db.add_log("success", f"PDF saved: {pdf_path} ({len(pdf_content)} bytes)")
                         return True
                     else:
-                        add_log("warning", f"PDF content too small: {len(pdf_content)} bytes")
+                        await db.add_log("warning", f"PDF content too small: {len(pdf_content)} bytes")
                         return False
                 else:
-                    add_log("warning", f"PDF download failed: HTTP {response.status}")
+                    await db.add_log("warning", f"PDF download failed: HTTP {response.status}")
                     return False
                     
     except Exception as e:
-        add_log("warning", f"Error downloading PDF: {str(e)}")
+        await db.add_log("warning", f"Error downloading PDF: {str(e)}")
         return False
 
 async def scrape_pdf_bill_url(page, context):
@@ -573,13 +573,13 @@ async def scrape_pdf_bill_url(page, context):
     pdf_url = None
     
     try:
-        add_log("info", "Looking for View Current Bill link...")
+        await db.add_log("info", "Looking for View Current Bill link...")
         
         # Make sure we're on the account page
         account_url = "https://www.coned.com/en/accounts-billing/my-account"
         current_url = page.url
         if account_url not in current_url:
-            add_log("info", f"Navigating to account page for PDF: {account_url}")
+            await db.add_log("info", f"Navigating to account page for PDF: {account_url}")
             await page.goto(account_url, wait_until="networkidle", timeout=30000)
             await asyncio.sleep(3)
         
@@ -603,32 +603,32 @@ async def scrape_pdf_bill_url(page, context):
                 element = page.locator(selector).first
                 count = await element.count()
                 if count > 0:
-                    add_log("info", f"Found element with selector: {selector}")
+                    await db.add_log("info", f"Found element with selector: {selector}")
                     
                     # Try to get href attribute directly
                     href = await element.get_attribute('href')
                     if href:
-                        add_log("info", f"Found href attribute: {href[:100]}...")
+                        await db.add_log("info", f"Found href attribute: {href[:100]}...")
                         
                         # Check if it's a valid PDF URL or needs to be made absolute
                         if href.startswith('http'):
                             pdf_url = href
-                            add_log("success", f"PDF URL extracted from href: {pdf_url[:100]}...")
+                            await db.add_log("success", f"PDF URL extracted from href: {pdf_url[:100]}...")
                             return pdf_url
                         elif href.startswith('/'):
                             # Relative URL - make it absolute
                             pdf_url = f"https://www.coned.com{href}"
-                            add_log("success", f"PDF URL (made absolute): {pdf_url[:100]}...")
+                            await db.add_log("success", f"PDF URL (made absolute): {pdf_url[:100]}...")
                             return pdf_url
                         elif 'javascript:' not in href.lower():
                             pdf_url = href
-                            add_log("success", f"PDF URL from href: {pdf_url[:100]}...")
+                            await db.add_log("success", f"PDF URL from href: {pdf_url[:100]}...")
                             return pdf_url
             except Exception as e:
-                add_log("debug", f"Selector {selector} failed: {str(e)}")
+                await db.add_log("debug", f"Selector {selector} failed: {str(e)}")
                 continue
         
-        add_log("info", "No direct href found, trying network interception approach...")
+        await db.add_log("info", "No direct href found, trying network interception approach...")
         
         # Second approach: Intercept network requests to capture the Azure Blob URL
         pdf_button_selectors = [
@@ -647,13 +647,13 @@ async def scrape_pdf_bill_url(page, context):
                 if count > 0:
                     await element.wait_for(state="visible", timeout=5000)
                     pdf_button = element
-                    add_log("info", f"Found clickable PDF button: {selector}")
+                    await db.add_log("info", f"Found clickable PDF button: {selector}")
                     break
             except:
                 continue
         
         if not pdf_button:
-            add_log("warning", "Could not find View Current Bill button")
+            await db.add_log("warning", "Could not find View Current Bill button")
             return None
         
         # Set up network request interception to capture the PDF URL
@@ -668,7 +668,7 @@ async def scrape_pdf_bill_url(page, context):
                 '.pdf' in url or
                 'viewbill' in url):
                 captured_pdf_url = request.url
-                add_log("success", f"Intercepted PDF URL: {request.url[:100]}...")
+                await db.add_log("success", f"Intercepted PDF URL: {request.url[:100]}...")
         
         async def handle_response(response):
             nonlocal captured_pdf_url
@@ -678,23 +678,23 @@ async def scrape_pdf_bill_url(page, context):
                 'cecony-bill' in url or 
                 '.pdf' in url):
                 captured_pdf_url = response.url
-                add_log("success", f"Captured PDF URL from response: {response.url[:100]}...")
+                await db.add_log("success", f"Captured PDF URL from response: {response.url[:100]}...")
         
         # Listen for network requests
         page.on("request", handle_request)
         page.on("response", handle_response)
         
         try:
-            add_log("info", "Clicking View Current Bill button (with network interception)...")
+            await db.add_log("info", "Clicking View Current Bill button (with network interception)...")
             
             # Try to click and handle the new tab
             try:
                 async with context.expect_page(timeout=15000) as new_page_info:
                     await pdf_button.click()
-                    add_log("info", "Button clicked, waiting for new tab...")
+                    await db.add_log("info", "Button clicked, waiting for new tab...")
                 
                 new_page = await new_page_info.value
-                add_log("info", f"New tab opened: {new_page.url}")
+                await db.add_log("info", f"New tab opened: {new_page.url}")
                 
                 # Also listen on the new page
                 new_page.on("request", handle_request)
@@ -719,12 +719,12 @@ async def scrape_pdf_bill_url(page, context):
                                 '.pdf' in url_lower or
                                 len(current_url) > 100):
                                 captured_pdf_url = current_url
-                                add_log("success", f"PDF URL from new tab: {current_url[:100]}...")
+                                await db.add_log("success", f"PDF URL from new tab: {current_url[:100]}...")
                                 break
                     except:
                         pass
                     
-                    add_log("info", f"Waiting for PDF URL ({elapsed}s)... Current: {new_page.url[:50] if new_page.url else 'blank'}")
+                    await db.add_log("info", f"Waiting for PDF URL ({elapsed}s)... Current: {new_page.url[:50] if new_page.url else 'blank'}")
                 
                 # Close the new tab
                 try:
@@ -733,17 +733,17 @@ async def scrape_pdf_bill_url(page, context):
                     pass
                     
             except Exception as e:
-                add_log("info", f"New tab approach failed: {str(e)}, checking if URL was captured via network...")
+                await db.add_log("info", f"New tab approach failed: {str(e)}, checking if URL was captured via network...")
                 # Wait a bit more for network capture
                 await asyncio.sleep(5)
             
             if captured_pdf_url:
                 pdf_url = captured_pdf_url
             else:
-                add_log("warning", "Could not capture PDF URL via network interception")
+                await db.add_log("warning", "Could not capture PDF URL via network interception")
                 
         except Exception as e:
-            add_log("warning", f"Network interception approach failed: {str(e)}")
+            await db.add_log("warning", f"Network interception approach failed: {str(e)}")
         finally:
             # Remove listeners
             try:
@@ -754,7 +754,7 @@ async def scrape_pdf_bill_url(page, context):
         
     except Exception as e:
         error_msg = f"Error scraping PDF URL: {str(e)}"
-        add_log("warning", error_msg)
+        await db.add_log("warning", error_msg)
         logger.warning(error_msg)
     
     # If we captured a URL, download the PDF
@@ -782,13 +782,13 @@ async def scrape_bill_history(page):
     
     try:
         bill_history_url = "https://www.coned.com/en/accounts-billing/my-account/bill-history-assistance"
-        add_log("info", f"Navigating to bill history page: {bill_history_url}")
+        await db.add_log("info", f"Navigating to bill history page: {bill_history_url}")
         
         await page.goto(bill_history_url, wait_until="networkidle", timeout=30000)
         await asyncio.sleep(3)  # Wait for page to load
         
         # Click the Payments checkbox using xpath
-        add_log("info", "Looking for Payments checkbox...")
+        await db.add_log("info", "Looking for Payments checkbox...")
         try:
             # Try xpath first
             payments_checkbox_xpath = '/html/body/div[3]/div[3]/div[3]/div[5]/div/div[1]/div/div/div/div/div[2]/div/label[1]'
@@ -812,15 +812,15 @@ async def scrape_bill_history(page):
                     if count > 0:
                         await element.wait_for(state="visible", timeout=5000)
                         await element.click()
-                        add_log("success", "Clicked Payments checkbox")
+                        await db.add_log("success", "Clicked Payments checkbox")
                         checkbox_found = True
                         break
                 except Exception as e:
-                    add_log("info", f"Checkbox selector {selector} failed: {str(e)}, trying next...")
+                    await db.add_log("info", f"Checkbox selector {selector} failed: {str(e)}, trying next...")
                     continue
             
             if not checkbox_found:
-                add_log("warning", "Could not find Payments checkbox")
+                await db.add_log("warning", "Could not find Payments checkbox")
                 return bill_history
             
             # Wait for ledger to load after clicking checkbox
@@ -828,14 +828,14 @@ async def scrape_bill_history(page):
             await page.wait_for_load_state("networkidle", timeout=10000)
             
             # Parse the ledger items
-            add_log("info", "Parsing bill history ledger...")
+            await db.add_log("info", "Parsing bill history ledger...")
             
             # Find all ledger items - both payments and bills
             # Use more specific selectors based on the HTML structure
             payment_items = await page.locator('.billing-payment-item--received, .js-payment-item').all()
             bill_items = await page.locator('.js-bill-item, .billing-payment-item--bill').all()
             
-            add_log("info", f"Found {len(payment_items)} payment items and {len(bill_items)} bill items")
+            await db.add_log("info", f"Found {len(payment_items)} payment items and {len(bill_items)} bill items")
             
             # Process payment items
             for item in payment_items:
@@ -885,10 +885,10 @@ async def scrape_bill_history(page):
                             payment_info += f" on {item_data.get('payment_date')}"
                         elif item_data.get("bill_cycle_date"):
                             payment_info += f" (bill cycle: {item_data.get('bill_cycle_date')})"
-                        add_log("info", payment_info)
+                        await db.add_log("info", payment_info)
                         
                 except Exception as e:
-                    add_log("warning", f"Error parsing payment item: {str(e)}")
+                    await db.add_log("warning", f"Error parsing payment item: {str(e)}")
                     continue
             
             # Process bill items
@@ -925,23 +925,23 @@ async def scrape_bill_history(page):
                     
                     if item_data.get("bill_cycle_date") or item_data.get("bill_total"):
                         bill_history["ledger"].append(item_data)
-                        add_log("info", f"Added bill: {item_data.get('bill_total')} for {item_data.get('month_range')}")
+                        await db.add_log("info", f"Added bill: {item_data.get('bill_total')} for {item_data.get('month_range')}")
                         
                 except Exception as e:
-                    add_log("warning", f"Error parsing bill item: {str(e)}")
+                    await db.add_log("warning", f"Error parsing bill item: {str(e)}")
                     continue
             
-            add_log("success", f"Parsed {len(bill_history['ledger'])} ledger entries")
+            await db.add_log("success", f"Parsed {len(bill_history['ledger'])} ledger entries")
             
         except Exception as e:
             error_msg = f"Error scraping bill history: {str(e)}"
-            add_log("error", error_msg)
+            await db.add_log("error", error_msg)
             logger.error(error_msg)
             bill_history["error"] = str(e)
             
     except Exception as e:
         error_msg = f"Error navigating to bill history page: {str(e)}"
-        add_log("error", error_msg)
+        await db.add_log("error", error_msg)
         logger.error(error_msg)
         bill_history["error"] = str(e)
     

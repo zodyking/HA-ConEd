@@ -28,9 +28,9 @@ class TTSScheduler:
         self._task: Optional[asyncio.Task] = None
         self._last_triggered: Dict[str, datetime] = {}
     
-    def load_schedule_config(self) -> Dict[str, Any]:
+    async def load_schedule_config(self) -> Dict[str, Any]:
         """Load TTS schedule configuration from database (persists across reinstalls)."""
-        from database import get_tts_schedule_db, save_tts_schedule_db
+        import db
         
         defaults = {
             "enabled": False,
@@ -48,13 +48,13 @@ class TTSScheduler:
         }
         
         # Try database first
-        data = get_tts_schedule_db()
+        data = await db.get_tts_schedule_db()
         
         # Migrate from JSON file if database is empty but file exists
         if data is None and TTS_SCHEDULE_FILE.exists():
             try:
                 data = json.loads(TTS_SCHEDULE_FILE.read_text())
-                save_tts_schedule_db(data)
+                await db.save_tts_schedule_db(data)
                 logger.info("Migrated TTS schedule from JSON to database")
             except:
                 pass
@@ -63,23 +63,23 @@ class TTSScheduler:
             return {**defaults, **data}
         return defaults
     
-    def save_schedule_config(self, config: Dict[str, Any]):
+    async def save_schedule_config(self, config: Dict[str, Any]):
         """Save TTS schedule configuration to database."""
-        from database import save_tts_schedule_db
+        import db
         
         config["updated_at"] = datetime.utcnow().isoformat() + "Z"
-        save_tts_schedule_db(config)
+        await db.save_tts_schedule_db(config)
         # Also write to file for backward compatibility
         try:
             TTS_SCHEDULE_FILE.write_text(json.dumps(config, indent=2))
         except:
             pass
     
-    def load_tts_config(self) -> Dict[str, Any]:
+    async def load_tts_config(self) -> Dict[str, Any]:
         """Load TTS configuration from database."""
-        from database import get_tts_config_db
+        import db
         
-        data = get_tts_config_db()
+        data = await db.get_tts_config_db()
         if data:
             return data
         
@@ -228,12 +228,12 @@ class TTSScheduler:
     async def _build_bill_summary_message(self) -> str:
         """Build the bill summary TTS message using ledger data and message template."""
         try:
-            from database import get_ledger_data, get_bill_details_by_id
+            import db
             import aiohttp
             import os
             
-            schedule_config = self.load_schedule_config()
-            tts_config = self.load_tts_config()
+            schedule_config = await self.load_schedule_config()
+            tts_config = await self.load_tts_config()
             template = schedule_config.get("message_template", "")
             current_usage_sensor = schedule_config.get("current_usage_sensor", "")
             future_usage_sensor = schedule_config.get("future_usage_sensor", "")
@@ -242,7 +242,7 @@ class TTSScheduler:
             if not template:
                 template = "{prefix} Your current balance is {balance}. Your last bill was {latest_bill_amount}, using {last_bill_kwh}, due {due_date}."
             
-            ledger = get_ledger_data()
+            ledger = await db.get_ledger_data()
             
             # Get latest bill from ledger (matches Account Ledger display order)
             bills = ledger.get("bills", [])
@@ -250,7 +250,7 @@ class TTSScheduler:
             latest_bill_id = latest_bill.get("id")
             
             # Get bill_details for the same bill
-            bill_details = get_bill_details_by_id(latest_bill_id) if latest_bill_id else None
+            bill_details = await db.get_bill_details(latest_bill_id) if latest_bill_id else None
             
             # Get balance from ledger
             balance = ledger.get("account_balance") or ledger.get("total_balance", "")

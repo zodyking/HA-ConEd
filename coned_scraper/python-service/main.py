@@ -23,30 +23,28 @@ def utc_now() -> datetime:
 def utc_now_iso() -> str:
     """Get current UTC time as ISO string"""
     return datetime.now(timezone.utc).isoformat()
-from database import (
-    get_logs, get_latest_scraped_data, get_all_scraped_data, add_log, clear_logs, 
-    add_scrape_history, get_scrape_history,
-    # New normalized data functions
-    get_ledger_data, get_all_bills, get_bill_by_id, get_all_payments,
-    get_payee_users, create_payee_user, update_payee_user, delete_payee_user,
-    add_user_card, delete_user_card, get_user_cards, update_user_card, get_user_by_card,
-    attribute_payment, get_unverified_payments, clear_payment_attribution,
-    wipe_bills_and_payments, update_payment_bill, get_payment_by_id,
-    update_payment_order, get_payments_by_user, get_all_bills_with_payments,
-    update_payee_responsibilities, get_bill_payee_summary, calculate_all_payee_balances,
-    upsert_bill_document, get_bill_document, get_all_bill_documents_with_periods,
-    get_latest_bill_id_with_document, delete_bill_document, migrate_legacy_pdf,
-)
+# Database module (Prisma ORM with PostgreSQL)
+import db
 
 app = FastAPI(title="Con Edison API")
 
 # Code version for deployment verification
-CODE_VERSION = "2026-01-30-v3"
+CODE_VERSION = "2026-03-02-postgres"
+
+@app.on_event("startup")
+async def startup():
+    """Connect to PostgreSQL database on startup"""
+    await db.connect()
+
+@app.on_event("shutdown")
+async def shutdown():
+    """Disconnect from database on shutdown"""
+    await db.disconnect()
 
 @app.get("/api/version")
 async def get_version():
     """Simple endpoint to verify code deployment"""
-    return {"version": CODE_VERSION, "responsibilities_fix": "raw_request"}
+    return {"version": CODE_VERSION, "database": "postgresql"}
 
 # CORS configuration
 app.add_middleware(
@@ -122,7 +120,7 @@ def load_schedule() -> dict:
             "next_run": data.get("next_run")
         }
     except Exception as e:
-        add_log("error", f"Failed to load schedule: {str(e)}")
+        await db.add_log("error", f"Failed to load schedule: {str(e)}")
         return {"enabled": False, "frequency": 3600, "last_scrape_end": None, "next_run": None}
 
 def save_schedule(enabled: bool, frequency: int, last_scrape_end: str = None, next_run: str = None):
@@ -138,7 +136,7 @@ def save_schedule(enabled: bool, frequency: int, last_scrape_end: str = None, ne
         "updated_at": utc_now_iso()
     }
     SCHEDULE_FILE.write_text(json.dumps(schedule))
-    add_log("info", f"Schedule saved: enabled={enabled}, frequency={frequency}s")
+    await db.add_log("info", f"Schedule saved: enabled={enabled}, frequency={frequency}s")
 
 def update_last_scrape_time():
     """Update last_scrape_end and calculate next_run after a successful scrape"""
@@ -161,8 +159,8 @@ async def run_scheduled_scrape():
     try:
         credentials = load_credentials()
         if not credentials:
-            add_log("warning", "Scheduled scrape skipped: No credentials found")
-            add_scrape_history(False, "No credentials found", "credentials_check", 0)
+            await db.add_log("warning", "Scheduled scrape skipped: No credentials found")
+            await db.add_scrape_history(False, "No credentials found", "credentials_check", 0)
             return
         
         from browser_automation import perform_login
@@ -172,7 +170,7 @@ async def run_scheduled_scrape():
         totp = pyotp.TOTP(credentials["totp_secret"])
         totp_code = totp.now()
         
-        add_log("info", "Starting scheduled scrape...")
+        await db.add_log("info", "Starting scheduled scrape...")
         result = await perform_login(username, password, totp_code)
         success = result.get('success', False)
         scraped_data = result.get('data', {})
@@ -202,16 +200,16 @@ async def run_scheduled_scrape():
                     # Smart last payment detection for MQTT only
                     should_pub, last_payment, reason = should_publish_last_payment()
                     if should_pub and last_payment:
-                        add_log("info", f"Publishing last_payment to MQTT: {reason}")
+                        await db.add_log("info", f"Publishing last_payment to MQTT: {reason}")
                         await mqtt_client.publish_last_payment(last_payment, timestamp)
                     else:
-                        add_log("debug", f"Skipping last_payment MQTT: {reason if reason else 'no change'}")
+                        await db.add_log("debug", f"Skipping last_payment MQTT: {reason if reason else 'no change'}")
                 
                 # Publish payee summary for the most recent bill (scheduled scrape)
                 try:
-                    from database import calculate_all_payee_balances, get_all_bills
-                    all_summaries = calculate_all_payee_balances()
-                    all_bills = get_all_bills()
+                    # Using db module for database operations
+                    all_summaries = await db.calculate_all_payee_balances()
+                    all_bills = await db.get_all_bills()
                     if all_bills and len(all_bills) > 0:
                         most_recent_bill = all_bills[0]
                         bill_id = most_recent_bill.get('id')
@@ -226,9 +224,9 @@ async def run_scheduled_scrape():
                             }
                             payee_summaries = summary.get('payee_summaries', [])
                             await mqtt_client.publish_payee_summary(payee_summaries, bill_info, timestamp)
-                            add_log("info", "Published payee summary to MQTT")
+                            await db.add_log("info", "Published payee summary to MQTT")
                 except Exception as e:
-                    add_log("warning", f"Failed to publish payee summary: {e}")
+                    await db.add_log("warning", f"Failed to publish payee summary: {e}")
             
             # ==========================================
             # INDEPENDENT TTS TRIGGERS (not tied to MQTT)
@@ -238,22 +236,22 @@ async def run_scheduled_scrape():
             try:
                 tts_payment_trigger, tts_payment_data, tts_payment_reason = should_trigger_payment_tts()
                 if tts_payment_trigger and tts_payment_data:
-                    add_log("info", f"Triggering payment TTS: {tts_payment_reason}")
+                    await db.add_log("info", f"Triggering payment TTS: {tts_payment_reason}")
                     from tts_scheduler import trigger_payment_received_tts
                     payment_amount = tts_payment_data.get("amount", "")
                     current_balance = scraped_data.get("account_balance", "")
                     payee_name = tts_payment_data.get("payee_name", "")
                     await trigger_payment_received_tts(payment_amount, current_balance, payee_name)
                 else:
-                    add_log("debug", f"No payment TTS: {tts_payment_reason}")
+                    await db.add_log("debug", f"No payment TTS: {tts_payment_reason}")
             except Exception as tts_e:
-                add_log("warning", f"Failed to check/trigger payment TTS: {tts_e}")
+                await db.add_log("warning", f"Failed to check/trigger payment TTS: {tts_e}")
             
             # Check for new bill TTS trigger
             try:
                 tts_bill_trigger, tts_bill_data, tts_bill_reason = should_trigger_new_bill_tts()
                 if tts_bill_trigger and tts_bill_data:
-                    add_log("info", f"Triggering new bill TTS: {tts_bill_reason}")
+                    await db.add_log("info", f"Triggering new bill TTS: {tts_bill_reason}")
                     from tts_scheduler import trigger_new_bill_tts
                     await trigger_new_bill_tts(
                         month_range=tts_bill_data.get("month_range", ""),
@@ -261,9 +259,9 @@ async def run_scheduled_scrape():
                         due_date=tts_bill_data.get("due_date", "")
                     )
                 else:
-                    add_log("debug", f"No bill TTS: {tts_bill_reason}")
+                    await db.add_log("debug", f"No bill TTS: {tts_bill_reason}")
             except Exception as tts_e:
-                add_log("warning", f"Failed to check/trigger bill TTS: {tts_e}")
+                await db.add_log("warning", f"Failed to check/trigger bill TTS: {tts_e}")
         
         # Check IMAP for payment attribution if configured
         if success:
@@ -271,28 +269,29 @@ async def run_scheduled_scrape():
                 from imap_client import load_imap_config, run_imap_auto_attribution
                 imap_config = load_imap_config()
                 if imap_config.get('auto_assign_mode') == 'every_scrape' and imap_config.get('server'):
-                    add_log("info", "Running IMAP payment attribution after scrape...")
+                    await db.add_log("info", "Running IMAP payment attribution after scrape...")
                     await run_imap_auto_attribution()
             except Exception as imap_e:
-                add_log("warning", f"IMAP auto-attribution failed: {imap_e}")
+                await db.add_log("warning", f"IMAP auto-attribution failed: {imap_e}")
             
             # Auto-assign expired pending payments to default payee
             try:
-                from database import auto_assign_expired_pending_payments
-                result = auto_assign_expired_pending_payments()
+                # Auto-assign expired pending payments
+                await db.auto_assign_expired_pending_payments()
+                result = {"message": "Auto-assigned expired pending payments"}
                 if result.get('assigned', 0) > 0:
-                    add_log("info", result.get('message', 'Auto-assigned expired pending payments'))
+                    await db.add_log("info", result.get('message', 'Auto-assigned expired pending payments'))
             except Exception as auto_e:
-                add_log("warning", f"Auto-assign expired payments failed: {auto_e}")
+                await db.add_log("warning", f"Auto-assign expired payments failed: {auto_e}")
         
         duration = time_module.time() - start_time
-        add_scrape_history(success, None if success else "Scrape failed", None, duration)
-        add_log("success", f"Scheduled scrape completed: {success}")
+        await db.add_scrape_history(success, None if success else "Scrape failed", None, duration)
+        await db.add_log("success", f"Scheduled scrape completed: {success}")
     except Exception as e:
         duration = time_module.time() - start_time
         error_msg = f"Scheduled scrape failed: {str(e)}"
-        add_scrape_history(False, error_msg, "unknown", duration)
-        add_log("error", error_msg)
+        await db.add_scrape_history(False, error_msg, "unknown", duration)
+        await db.add_log("error", error_msg)
         logging.error(error_msg)
     finally:
         _scrape_running = False
@@ -320,7 +319,7 @@ async def scheduler_loop():
                     seconds_until_run = 0
                 
                 if seconds_until_run > 0:
-                    add_log("info", f"Scheduler: Next scrape in {int(seconds_until_run)} seconds")
+                    await db.add_log("info", f"Scheduler: Next scrape in {int(seconds_until_run)} seconds")
                     await asyncio.sleep(min(seconds_until_run, 60))  # Check at least every 60s
                     continue  # Re-check if it's time
                 
@@ -335,7 +334,7 @@ async def scheduler_loop():
                 await asyncio.sleep(60)
         except Exception as e:
             error_msg = f"Scheduler error: {str(e)}"
-            add_log("error", error_msg)
+            await db.add_log("error", error_msg)
             logging.error(error_msg)
             await asyncio.sleep(60)  # Wait before retrying
 
@@ -355,9 +354,9 @@ async def restart_scheduler():
     schedule = load_schedule()
     if schedule["enabled"]:
         _scheduler_task = asyncio.create_task(scheduler_loop())
-        add_log("info", "Scheduler restarted")
+        await db.add_log("info", "Scheduler restarted")
     else:
-        add_log("info", "Scheduler disabled")
+        await db.add_log("info", "Scheduler disabled")
 
 # Start scheduler on app startup
 @app.on_event("startup")
@@ -378,37 +377,37 @@ async def startup_event():
                 mqtt_config.get("mqtt_retain", True),
                 mqtt_config.get("mqtt_discovery", True),
             )
-            add_log("info", "MQTT client initialized")
+            await db.add_log("info", "MQTT client initialized")
     except Exception as e:
-        add_log("warning", f"MQTT initialization failed: {e}")
+        await db.add_log("warning", f"MQTT initialization failed: {e}")
     
     schedule = load_schedule()
     if schedule["enabled"]:
         _scheduler_task = asyncio.create_task(scheduler_loop())
-        add_log("info", f"Scheduler started with {schedule['frequency']}s frequency")
+        await db.add_log("info", f"Scheduler started with {schedule['frequency']}s frequency")
     
     # Start TTS scheduler
     try:
         from tts_scheduler import get_scheduler
         tts_scheduler = get_scheduler()
         await tts_scheduler.start()
-        add_log("info", "TTS scheduler started")
+        await db.add_log("info", "TTS scheduler started")
     except Exception as e:
-        add_log("warning", f"TTS scheduler initialization failed: {e}")
+        await db.add_log("warning", f"TTS scheduler initialization failed: {e}")
     
     # Publish bill details sensors on startup (due date, kWh cost)
     try:
         await _publish_bill_details_sensors()
     except Exception as e:
-        add_log("warning", f"Failed to publish bill details sensors on startup: {e}")
+        await db.add_log("warning", f"Failed to publish bill details sensors on startup: {e}")
     
     # Initialize meter tracking service
     try:
         from meter_service import init_meter_service
         await init_meter_service()
-        add_log("info", "Meter tracking service initialized")
+        await db.add_log("info", "Meter tracking service initialized")
     except Exception as e:
-        add_log("warning", f"Meter tracking service initialization failed: {e}")
+        await db.add_log("warning", f"Meter tracking service initialization failed: {e}")
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -522,7 +521,7 @@ def load_mqtt_config() -> dict:
             "mqtt_discovery": data.get("mqtt_discovery", True),
         }
     except Exception as e:
-        add_log("warning", f"Failed to load MQTT config: {str(e)}")
+        await db.add_log("warning", f"Failed to load MQTT config: {str(e)}")
         return {}
 
 def load_last_payment_state() -> dict:
@@ -533,7 +532,7 @@ def load_last_payment_state() -> dict:
     try:
         return json.loads(LAST_PAYMENT_STATE_FILE.read_text())
     except Exception as e:
-        add_log("warning", f"Failed to load last payment state: {str(e)}")
+        await db.add_log("warning", f"Failed to load last payment state: {str(e)}")
         return {"bill_id": None, "payment_count": 0, "last_payment_id": None, "last_payment_amount": None}
 
 def save_last_payment_state(state: dict):
@@ -541,7 +540,7 @@ def save_last_payment_state(state: dict):
     try:
         LAST_PAYMENT_STATE_FILE.write_text(json.dumps(state))
     except Exception as e:
-        add_log("warning", f"Failed to save last payment state: {str(e)}")
+        await db.add_log("warning", f"Failed to save last payment state: {str(e)}")
 
 def should_publish_last_payment() -> tuple:
     """
@@ -560,9 +559,7 @@ def should_publish_last_payment() -> tuple:
     - Just payee attribution changed (payee doesn't affect last_payment MQTT)
     - Order changed but same payment is still "last"
     """
-    from database import get_most_recent_bill_payment_count
-    
-    current_state = get_most_recent_bill_payment_count()
+    current_state = await db.get_most_recent_bill_payment_count()
     previous_state = load_last_payment_state()
     
     current_bill_id = current_state.get("bill_id")
@@ -651,7 +648,7 @@ def load_tts_payment_state() -> dict:
     try:
         return json.loads(TTS_PAYMENT_STATE_FILE.read_text())
     except Exception as e:
-        add_log("warning", f"Failed to load TTS payment state: {str(e)}")
+        await db.add_log("warning", f"Failed to load TTS payment state: {str(e)}")
         return {"bill_id": None, "payment_count": 0, "last_payment_id": None}
 
 def save_tts_payment_state(state: dict):
@@ -659,7 +656,7 @@ def save_tts_payment_state(state: dict):
     try:
         TTS_PAYMENT_STATE_FILE.write_text(json.dumps(state))
     except Exception as e:
-        add_log("warning", f"Failed to save TTS payment state: {str(e)}")
+        await db.add_log("warning", f"Failed to save TTS payment state: {str(e)}")
 
 def load_tts_bill_state() -> dict:
     """Load the last known bill state for TTS trigger detection"""
@@ -668,7 +665,7 @@ def load_tts_bill_state() -> dict:
     try:
         return json.loads(TTS_BILL_STATE_FILE.read_text())
     except Exception as e:
-        add_log("warning", f"Failed to load TTS bill state: {str(e)}")
+        await db.add_log("warning", f"Failed to load TTS bill state: {str(e)}")
         return {"latest_bill_id": None, "bill_total": None}
 
 def save_tts_bill_state(state: dict):
@@ -676,7 +673,7 @@ def save_tts_bill_state(state: dict):
     try:
         TTS_BILL_STATE_FILE.write_text(json.dumps(state))
     except Exception as e:
-        add_log("warning", f"Failed to save TTS bill state: {str(e)}")
+        await db.add_log("warning", f"Failed to save TTS bill state: {str(e)}")
 
 def should_trigger_payment_tts() -> tuple:
     """
@@ -696,9 +693,7 @@ def should_trigger_payment_tts() -> tuple:
     - Bill cycle changes without new payments
     - Reordering existing payments
     """
-    from database import get_most_recent_bill_payment_count
-    
-    current_state = get_most_recent_bill_payment_count()
+    current_state = await db.get_most_recent_bill_payment_count()
     previous_state = load_tts_payment_state()
     
     current_bill_id = current_state.get("bill_id")
@@ -769,9 +764,9 @@ def should_trigger_new_bill_tts() -> tuple:
     - Same bill with updated amounts
     - Payment changes
     """
-    from database import get_all_bills, get_bill_details_by_id
+    # Using db module for database operations
     
-    all_bills = get_all_bills()
+    all_bills = await db.get_all_bills()
     previous_state = load_tts_bill_state()
     
     if not all_bills or len(all_bills) == 0:
@@ -791,7 +786,7 @@ def should_trigger_new_bill_tts() -> tuple:
         reason = f"New bill detected (ID: {current_bill_id})"
         
         # Get bill details for TTS
-        bill_details = get_bill_details_by_id(current_bill_id)
+        bill_details = await db.get_bill_details(current_bill_id)
         bill_data = {
             "month_range": latest_bill.get("month_range", ""),
             "bill_total": latest_bill.get("bill_total", ""),
@@ -839,7 +834,7 @@ def load_app_settings() -> dict:
             "settings_password": decrypt_data(data.get("settings_password", encrypt_data("0000"))) if data.get("settings_password") else "0000",
         }
     except Exception as e:
-        add_log("warning", f"Failed to load app settings: {str(e)}")
+        await db.add_log("warning", f"Failed to load app settings: {str(e)}")
         return {"time_offset_hours": 0.0, "settings_password": "0000"}
 
 def verify_settings_password(password: str) -> bool:
@@ -885,7 +880,7 @@ async def get_totp():
     except Exception as e:
         import traceback
         error_detail = f"Failed to generate TOTP: {str(e)}\n{traceback.format_exc()}"
-        add_log("error", error_detail)
+        await db.add_log("error", error_detail)
         raise HTTPException(status_code=500, detail=f"Failed to generate TOTP: {str(e)}")
 
 @app.post("/api/settings")
@@ -901,7 +896,7 @@ async def save_settings(credentials: CredentialsModel):
         try:
             totp = pyotp.TOTP(totp_secret)
             test_code = totp.now()
-            add_log("info", f"TOTP secret validated successfully, test code: {test_code}")
+            await db.add_log("info", f"TOTP secret validated successfully, test code: {test_code}")
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Invalid TOTP secret format: {str(e)}")
         
@@ -910,7 +905,7 @@ async def save_settings(credentials: CredentialsModel):
             existing_creds = load_credentials()
             if existing_creds:
                 password = existing_creds["password"]
-                add_log("info", "Using existing password")
+                await db.add_log("info", "Using existing password")
             else:
                 raise HTTPException(status_code=400, detail="Password is required for new credentials")
         else:
@@ -923,13 +918,13 @@ async def save_settings(credentials: CredentialsModel):
             totp_secret
         )
         
-        add_log("success", "Credentials saved successfully")
+        await db.add_log("success", "Credentials saved successfully")
         return {"message": "Credentials saved successfully"}
     except HTTPException:
         raise
     except Exception as e:
         error_msg = f"Failed to save settings: {str(e)}"
-        add_log("error", error_msg)
+        await db.add_log("error", error_msg)
         raise HTTPException(status_code=400, detail=error_msg)
 
 @app.get("/api/settings")
@@ -946,7 +941,7 @@ async def get_settings():
             "totp_secret": credentials.get("totp_secret", "")
         }
     except Exception as e:
-        add_log("error", f"Failed to get settings: {str(e)}")
+        await db.add_log("error", f"Failed to get settings: {str(e)}")
         return {"username": "", "password": "", "totp_secret": ""}
 
 @app.post("/api/scrape")
@@ -963,8 +958,8 @@ async def start_scraper():
         raise HTTPException(status_code=404, detail="No credentials found. Please configure settings first.")
     
     # Clear previous logs when starting a new scrape
-    clear_logs()
-    add_log("info", "Scraper started by user")
+    await db.clear_logs()
+    await db.add_log("info", "Scraper started by user")
     
     # Use saved credentials
     username = credentials["username"]
@@ -1004,16 +999,16 @@ async def start_scraper():
                     # Smart last payment detection for MQTT only
                     should_pub, last_payment, reason = should_publish_last_payment()
                     if should_pub and last_payment:
-                        add_log("info", f"Publishing last_payment to MQTT: {reason}")
+                        await db.add_log("info", f"Publishing last_payment to MQTT: {reason}")
                         await mqtt_client.publish_last_payment(last_payment, timestamp)
                     else:
-                        add_log("debug", f"Skipping last_payment MQTT: {reason if reason else 'no change'}")
+                        await db.add_log("debug", f"Skipping last_payment MQTT: {reason if reason else 'no change'}")
                 
                 # Publish payee summary for the most recent bill (manual scrape)
                 try:
-                    from database import calculate_all_payee_balances, get_all_bills
-                    all_summaries = calculate_all_payee_balances()
-                    all_bills = get_all_bills()
+                    # Using db module for database operations
+                    all_summaries = await db.calculate_all_payee_balances()
+                    all_bills = await db.get_all_bills()
                     if all_bills and len(all_bills) > 0:
                         most_recent_bill = all_bills[0]
                         bill_id = most_recent_bill.get('id')
@@ -1028,9 +1023,9 @@ async def start_scraper():
                             }
                             payee_summaries = summary.get('payee_summaries', [])
                             await mqtt_client.publish_payee_summary(payee_summaries, bill_info, timestamp)
-                            add_log("info", "Published payee summary to MQTT")
+                            await db.add_log("info", "Published payee summary to MQTT")
                 except Exception as e:
-                    add_log("warning", f"Failed to publish payee summary: {e}")
+                    await db.add_log("warning", f"Failed to publish payee summary: {e}")
             
             # ==========================================
             # INDEPENDENT TTS TRIGGERS (not tied to MQTT)
@@ -1040,22 +1035,22 @@ async def start_scraper():
             try:
                 tts_payment_trigger, tts_payment_data, tts_payment_reason = should_trigger_payment_tts()
                 if tts_payment_trigger and tts_payment_data:
-                    add_log("info", f"Triggering payment TTS: {tts_payment_reason}")
+                    await db.add_log("info", f"Triggering payment TTS: {tts_payment_reason}")
                     from tts_scheduler import trigger_payment_received_tts
                     payment_amount = tts_payment_data.get("amount", "")
                     current_balance = scraped_data.get("account_balance", "")
                     payee_name = tts_payment_data.get("payee_name", "")
                     await trigger_payment_received_tts(payment_amount, current_balance, payee_name)
                 else:
-                    add_log("debug", f"No payment TTS: {tts_payment_reason}")
+                    await db.add_log("debug", f"No payment TTS: {tts_payment_reason}")
             except Exception as tts_e:
-                add_log("warning", f"Failed to check/trigger payment TTS: {tts_e}")
+                await db.add_log("warning", f"Failed to check/trigger payment TTS: {tts_e}")
             
             # Check for new bill TTS trigger
             try:
                 tts_bill_trigger, tts_bill_data, tts_bill_reason = should_trigger_new_bill_tts()
                 if tts_bill_trigger and tts_bill_data:
-                    add_log("info", f"Triggering new bill TTS: {tts_bill_reason}")
+                    await db.add_log("info", f"Triggering new bill TTS: {tts_bill_reason}")
                     from tts_scheduler import trigger_new_bill_tts
                     await trigger_new_bill_tts(
                         month_range=tts_bill_data.get("month_range", ""),
@@ -1063,19 +1058,19 @@ async def start_scraper():
                         due_date=tts_bill_data.get("due_date", "")
                     )
                 else:
-                    add_log("debug", f"No bill TTS: {tts_bill_reason}")
+                    await db.add_log("debug", f"No bill TTS: {tts_bill_reason}")
             except Exception as tts_e:
-                add_log("warning", f"Failed to check/trigger bill TTS: {tts_e}")
+                await db.add_log("warning", f"Failed to check/trigger bill TTS: {tts_e}")
         
         duration = time_module.time() - start_time
-        add_scrape_history(success, None if success else "Scrape failed", None, duration)
-        add_log("success", f"Scraper completed: {success}")
+        await db.add_scrape_history(success, None if success else "Scrape failed", None, duration)
+        await db.add_log("success", f"Scraper completed: {success}")
         return result
     except Exception as e:
         duration = time_module.time() - start_time
         error_msg = str(e)
-        add_scrape_history(False, error_msg, "unknown", duration)
-        add_log("error", f"Scraper failed: {error_msg}")
+        await db.add_scrape_history(False, error_msg, "unknown", duration)
+        await db.add_log("error", f"Scraper failed: {error_msg}")
         raise HTTPException(status_code=500, detail=error_msg)
 
 @app.post("/api/mqtt-config")
@@ -1109,7 +1104,7 @@ async def configure_mqtt(config: MQTTConfigModel):
                 mqtt_config["mqtt_retain"],
                 mqtt_config.get("mqtt_discovery", True),
             )
-            add_log("success", "MQTT configured successfully")
+            await db.add_log("success", "MQTT configured successfully")
             # Trigger connect + discovery so sensors appear immediately
             from mqtt_client import get_mqtt_client
             mqtt_client = get_mqtt_client()
@@ -1117,12 +1112,12 @@ async def configure_mqtt(config: MQTTConfigModel):
                 await mqtt_client.connect()
                 await mqtt_client.publish_discovery()
         else:
-            add_log("info", "MQTT disabled (no URL provided)")
+            await db.add_log("info", "MQTT disabled (no URL provided)")
         
         return {"message": "MQTT configured successfully"}
     except Exception as e:
         error_msg = f"Failed to configure MQTT: {str(e)}"
-        add_log("error", error_msg)
+        await db.add_log("error", error_msg)
         raise HTTPException(status_code=500, detail=error_msg)
 
 @app.get("/api/mqtt-config")
@@ -1141,7 +1136,7 @@ async def get_mqtt_config():
             "mqtt_discovery": mqtt_config.get("mqtt_discovery", True),
         }
     except Exception as e:
-        add_log("error", f"Failed to get MQTT config: {str(e)}")
+        await db.add_log("error", f"Failed to get MQTT config: {str(e)}")
         return {
             "mqtt_url": "",
             "mqtt_username": "",
@@ -1181,11 +1176,11 @@ async def cleanup_mqtt_sensors():
             raise HTTPException(status_code=500, detail="Failed to create MQTT client")
         
         await client.cleanup_discovery()
-        add_log("success", "MQTT discovery cleanup completed - sensors removed from broker")
+        await db.add_log("success", "MQTT discovery cleanup completed - sensors removed from broker")
         return {"message": "MQTT sensors cleared. Restart addon to re-register."}
     except Exception as e:
         error_msg = f"MQTT cleanup failed: {str(e)}"
-        add_log("error", error_msg)
+        await db.add_log("error", error_msg)
         raise HTTPException(status_code=500, detail=error_msg)
 
 
@@ -1198,11 +1193,11 @@ async def save_app_settings_endpoint(settings: AppSettingsModel):
             "settings_password": settings.settings_password.strip() if settings.settings_password else "0000",
         }
         save_app_settings(settings_dict)
-        add_log("success", "App settings saved successfully")
+        await db.add_log("success", "App settings saved successfully")
         return {"message": "Settings saved successfully"}
     except Exception as e:
         error_msg = f"Failed to save app settings: {str(e)}"
-        add_log("error", error_msg)
+        await db.add_log("error", error_msg)
         raise HTTPException(status_code=500, detail=error_msg)
 
 @app.get("/api/app-settings")
@@ -1217,7 +1212,7 @@ async def get_app_settings_endpoint():
             "settings_password": settings.get("settings_password", "0000"),  # Needed for preservation
         }
     except Exception as e:
-        add_log("error", f"Failed to get app settings: {str(e)}")
+        await db.add_log("error", f"Failed to get app settings: {str(e)}")
         return {"time_offset_hours": 0.0, "has_password": True, "settings_password": "0000"}
 
 class PasswordVerifyModel(BaseModel):
@@ -1230,7 +1225,7 @@ async def verify_password_endpoint(data: PasswordVerifyModel):
         is_valid = verify_settings_password(data.password)
         return {"valid": is_valid}
     except Exception as e:
-        add_log("error", f"Failed to verify password: {str(e)}")
+        await db.add_log("error", f"Failed to verify password: {str(e)}")
         return {"valid": False}
 
 class AdminResetPasswordModel(BaseModel):
@@ -1240,9 +1235,9 @@ class AdminResetPasswordModel(BaseModel):
 @app.post("/api/app-settings/admin-reset-password")
 async def admin_reset_password_endpoint(data: AdminResetPasswordModel):
     """Reset settings password (admin only)"""
-    from database import get_admin_users
+    # Using db module for database operations
     
-    admin_users = get_admin_users()
+    admin_users = await db.get_admin_users()
     admin_ids = {u['id'] for u in admin_users}
     
     if data.user_id not in admin_ids:
@@ -1255,17 +1250,17 @@ async def admin_reset_password_endpoint(data: AdminResetPasswordModel):
         settings = load_app_settings()
         settings['settings_password'] = data.new_password
         save_app_settings(settings)
-        add_log("info", f"Settings password reset by admin user {data.user_id}")
+        await db.add_log("info", f"Settings password reset by admin user {data.user_id}")
         return {"success": True, "message": "Password reset successfully"}
     except Exception as e:
-        add_log("error", f"Failed to reset password: {str(e)}")
+        await db.add_log("error", f"Failed to reset password: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to reset password")
 
 @app.get("/api/app-settings/admin-users")
 async def get_admin_users_endpoint():
     """Get list of admin users"""
-    from database import get_admin_users
-    return {"admin_users": get_admin_users()}
+    # Using db module for database operations
+    return {"admin_users": await db.get_admin_users()}
 
 @app.get("/api/app-settings/check-ha-admin")
 async def check_ha_admin(request: Request):
@@ -1303,28 +1298,28 @@ async def ha_admin_reset_password(data: HaAdminResetPasswordModel, request: Requ
         settings = load_app_settings()
         settings['settings_password'] = data.new_password
         save_app_settings(settings)
-        add_log("info", "Settings PIN reset via HA addon")
+        await db.add_log("info", "Settings PIN reset via HA addon")
         return {"success": True, "message": "PIN reset successfully"}
     except Exception as e:
-        add_log("error", f"Failed to reset PIN: {str(e)}")
+        await db.add_log("error", f"Failed to reset PIN: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to reset PIN")
 
 @app.get("/api/logs")
 async def get_logs_endpoint(limit: int = 100):
     """Get log entries"""
-    logs = get_logs(limit)
+    logs = await db.get_logs(limit)
     return {"logs": logs}
 
 @app.delete("/api/logs")
 async def clear_logs_endpoint():
     """Clear all log entries"""
-    clear_logs()
+    await db.clear_logs()
     return {"message": "Logs cleared successfully"}
 
 @app.get("/api/scrape-history")
 async def get_scrape_history_endpoint(limit: int = 50):
     """Get scrape history"""
-    history = get_scrape_history(limit)
+    history = await db.get_scrape_history(limit)
     return {"history": history}
 
 @app.get("/api/scraped-data")
@@ -1403,18 +1398,18 @@ async def get_bill_document_endpoint(bill_id: int = None):
     from fastapi.responses import JSONResponse
     
     if bill_id:
-        doc = get_bill_document(bill_id)
+        doc = await db.get_bill_document(bill_id)
         if not doc:
             return JSONResponse({"error": f"No PDF for bill {bill_id}"}, status_code=404)
         pdf_path = DATA_DIR / doc["pdf_path"]
     else:
-        latest_id = get_latest_bill_id_with_document()
+        latest_id = await db.get_latest_bill_id_with_document()
         if not latest_id:
             return JSONResponse(
                 {"error": "No bill PDF available. Add a PDF in Settings → App Settings."},
                 status_code=404
             )
-        doc = get_bill_document(latest_id)
+        doc = await db.get_bill_document(latest_id)
         pdf_path = DATA_DIR / doc["pdf_path"]
     
     if not os.path.exists(pdf_path):
@@ -1429,11 +1424,11 @@ async def get_latest_bill_pdf():
 @app.get("/api/latest-bill-pdf/status")
 async def get_pdf_status():
     """Check if any bill PDF exists (for backward compat)"""
-    exists = get_latest_bill_id_with_document() is not None
+    exists = await db.get_latest_bill_id_with_document() is not None
     size = 0
     if exists:
-        latest_id = get_latest_bill_id_with_document()
-        doc = get_bill_document(latest_id)
+        latest_id = await db.get_latest_bill_id_with_document()
+        doc = await db.get_bill_document(latest_id)
         if doc:
             import os
             pdf_path = DATA_DIR / doc["pdf_path"]
@@ -1450,7 +1445,7 @@ async def get_pdf_status():
 async def get_bill_pdf_status(bill_id: int):
     """Check if a specific bill has a PDF"""
     import os
-    doc = get_bill_document(bill_id)
+    doc = await db.get_bill_document(bill_id)
     if not doc:
         return {"exists": False, "size_bytes": 0, "size_kb": 0}
     pdf_path = DATA_DIR / doc["pdf_path"]
@@ -1471,16 +1466,16 @@ async def _download_and_store_pdf(pdf_url: str, bill_id: int) -> dict:
     import os
     
     if not ('blob.core.windows.net' in pdf_url or '.pdf' in pdf_url.lower() or 'cecony' in pdf_url.lower()):
-        add_log("warning", f"URL doesn't look like a ConEd PDF: {pdf_url[:50]}...")
+        await db.add_log("warning", f"URL doesn't look like a ConEd PDF: {pdf_url[:50]}...")
     
-    bill = get_bill_by_id(bill_id) if bill_id else None
+    bill = await db.get_bill_by_id(bill_id) if bill_id else None
     if bill_id and not bill:
         raise HTTPException(status_code=404, detail="Bill not found")
     
     async with aiohttp.ClientSession() as session:
         async with session.get(pdf_url, timeout=aiohttp.ClientTimeout(total=60)) as response:
             if response.status != 200:
-                add_log("error", f"PDF download failed: HTTP {response.status}")
+                await db.add_log("error", f"PDF download failed: HTTP {response.status}")
                 raise HTTPException(status_code=400, detail=f"Failed to download: HTTP {response.status}")
             pdf_content = await response.read()
             if len(pdf_content) < 1000:
@@ -1493,29 +1488,29 @@ async def _download_and_store_pdf(pdf_url: str, bill_id: int) -> dict:
         os.remove(pdf_path)
     with open(pdf_path, 'wb') as f:
         f.write(pdf_content)
-    upsert_bill_document(bill_id, f"bills/bill_{bill_id}.pdf", source_url=pdf_url)
+    await db.upsert_bill_document(bill_id, f"bills/bill_{bill_id}.pdf", source_url=pdf_url)
     size_kb = round(len(pdf_content) / 1024, 1)
-    add_log("success", f"PDF saved for bill {bill_id}: {size_kb} KB")
+    await db.add_log("success", f"PDF saved for bill {bill_id}: {size_kb} KB")
     
     # Parse PDF and extract bill details
     try:
         from pdf_parser import parse_coned_bill_pdf
-        from database import upsert_bill_details
+        # Using db module for database operations
         parsed_data = parse_coned_bill_pdf(str(pdf_path))
         if "error" not in parsed_data:
-            upsert_bill_details(bill_id, parsed_data)
-            add_log("info", f"Parsed bill details: kWh={parsed_data.get('kwh_used')}, due={parsed_data.get('due_date')}")
+            await db.upsert_bill_details(bill_id, **parsed_data)
+            await db.add_log("info", f"Parsed bill details: kWh={parsed_data.get('kwh_used')}, due={parsed_data.get('due_date')}")
         else:
-            add_log("warning", f"PDF parsing error: {parsed_data.get('error')}")
+            await db.add_log("warning", f"PDF parsing error: {parsed_data.get('error')}")
     except Exception as parse_e:
-        add_log("warning", f"Failed to parse PDF: {parse_e}")
+        await db.add_log("warning", f"Failed to parse PDF: {parse_e}")
     
     return {"success": True, "message": f"PDF saved ({size_kb} KB)", "size_bytes": len(pdf_content)}
 
 @app.post("/api/bills/{bill_id}/pdf/download")
 async def download_bill_pdf_for_period(bill_id: int, request: PdfDownloadRequest):
     """Download PDF for a specific billing period"""
-    bill = get_bill_by_id(bill_id)
+    bill = await db.get_bill_by_id(bill_id)
     if not bill:
         raise HTTPException(status_code=404, detail="Bill not found")
     pdf_url = request.url.strip()
@@ -1532,7 +1527,7 @@ async def download_bill_pdf(request: PdfDownloadRequest):
     pdf_url = request.url.strip()
     if not pdf_url:
         raise HTTPException(status_code=400, detail="PDF URL is required")
-    bills = get_all_bills(limit=1)
+    bills = await db.get_all_bills()
     if not bills:
         raise HTTPException(status_code=400, detail="No bills in ledger. Run scraper first.")
     bill_id = bills[0]['id']
@@ -1550,7 +1545,7 @@ async def _publish_bill_details_sensors():
         try:
             await client.publish_bill_details_sensors()
         except Exception as e:
-            add_log("warning", f"Failed to publish bill details sensors: {e}")
+            await db.add_log("warning", f"Failed to publish bill details sensors: {e}")
 
 async def _get_ha_external_base_url() -> str | None:
     """Get Home Assistant external URL when running as addon. Returns base URL for addon ingress or None."""
@@ -1578,7 +1573,7 @@ async def _get_ha_external_base_url() -> str | None:
                 headers={"Authorization": f"Bearer {token}"},
             ) as resp:
                 if resp.status != 200:
-                    add_log("debug", f"Could not get addon info: HTTP {resp.status}")
+                    await db.add_log("debug", f"Could not get addon info: HTTP {resp.status}")
                     return None
                 addon_data = await resp.json()
                 addon_info = addon_data.get("data", {})
@@ -1593,10 +1588,10 @@ async def _get_ha_external_base_url() -> str | None:
                 if ingress_token:
                     return f"{external}/api/hassio_ingress/{ingress_token}"
                 
-                add_log("debug", "No ingress_entry or ingress_token found in addon info")
+                await db.add_log("debug", "No ingress_entry or ingress_token found in addon info")
                 return None
     except Exception as e:
-        add_log("debug", f"Could not get HA external URL: {e}")
+        await db.add_log("debug", f"Could not get HA external URL: {e}")
         return None
 
 
@@ -1608,14 +1603,14 @@ async def _publish_bill_pdf_mqtt():
         return
     base_url = await _get_ha_external_base_url()
     if not base_url:
-        add_log("warning", "Could not get Home Assistant external URL (addon only), skipping MQTT PDF publish")
+        await db.add_log("warning", "Could not get Home Assistant external URL (addon only), skipping MQTT PDF publish")
         return
     await mqtt_client.publish_bill_pdf_url_all(base_url, utc_now_iso())
 
 @app.post("/api/latest-bill-pdf/send-mqtt")
 async def send_pdf_url_mqtt():
     """Manually send bill PDF URLs to Home Assistant via MQTT"""
-    if get_latest_bill_id_with_document() is None:
+    if await db.get_latest_bill_id_with_document() is None:
         raise HTTPException(status_code=404, detail="No PDF available to send")
     try:
         await _publish_bill_pdf_mqtt()
@@ -1623,13 +1618,13 @@ async def send_pdf_url_mqtt():
     except HTTPException:
         raise
     except Exception as e:
-        add_log("error", f"Failed to send PDF URL via MQTT: {str(e)}")
+        await db.add_log("error", f"Failed to send PDF URL via MQTT: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to send: {str(e)}")
 
 @app.delete("/api/latest-bill-pdf")
 async def delete_latest_bill_pdf():
     """Delete the latest bill PDF"""
-    latest_id = get_latest_bill_id_with_document()
+    latest_id = await db.get_latest_bill_id_with_document()
     if not latest_id:
         return {"success": True, "message": "No PDF to delete"}
     return await _delete_bill_pdf_by_id(latest_id)
@@ -1641,18 +1636,17 @@ async def delete_bill_pdf_by_id(bill_id: int):
 
 async def _delete_bill_pdf_by_id(bill_id: int):
     import os
-    doc = get_bill_document(bill_id)
+    doc = await db.get_bill_document(bill_id)
     if not doc:
         return {"success": True, "message": "No PDF to delete"}
     pdf_path = DATA_DIR / doc["pdf_path"]
-    delete_bill_document(bill_id)
+    await db.delete_bill_document(bill_id)
     if os.path.exists(pdf_path):
         os.remove(pdf_path)
-        add_log("info", "Bill PDF deleted")
+        await db.add_log("info", "Bill PDF deleted")
     
     # Also delete parsed bill details
-    from database import delete_bill_details
-    delete_bill_details(bill_id)
+    await db.delete_bill_details(bill_id)
     
     return {"success": True, "message": "PDF deleted"}
 
@@ -1662,8 +1656,8 @@ async def _delete_bill_pdf_by_id(bill_id: int):
 @app.get("/api/bills/{bill_id}/details")
 async def get_bill_details_endpoint(bill_id: int):
     """Get parsed bill details for a specific bill"""
-    from database import get_bill_details
-    details = get_bill_details(bill_id)
+    # Using db module for database operations
+    details = await db.get_bill_details(bill_id)
     if not details:
         raise HTTPException(status_code=404, detail="Bill details not found. Upload PDF first.")
     return details
@@ -1671,10 +1665,10 @@ async def get_bill_details_endpoint(bill_id: int):
 @app.post("/api/bills/{bill_id}/parse-pdf")
 async def parse_bill_pdf_endpoint(bill_id: int):
     """Re-parse an existing bill PDF"""
-    from database import get_bill_document, upsert_bill_details
+    # Using db module for database operations
     from pdf_parser import parse_coned_bill_pdf
     
-    doc = get_bill_document(bill_id)
+    doc = await db.get_bill_document(bill_id)
     if not doc:
         raise HTTPException(status_code=404, detail="No PDF found for this bill")
     
@@ -1686,29 +1680,29 @@ async def parse_bill_pdf_endpoint(bill_id: int):
     if "error" in parsed_data:
         raise HTTPException(status_code=500, detail=parsed_data["error"])
     
-    upsert_bill_details(bill_id, parsed_data)
-    add_log("info", f"Re-parsed bill {bill_id}: kWh={parsed_data.get('kwh_used')}")
+    await db.upsert_bill_details(bill_id, **parsed_data)
+    await db.add_log("info", f"Re-parsed bill {bill_id}: kWh={parsed_data.get('kwh_used')}")
     return {"success": True, "details": parsed_data}
 
 @app.get("/api/bill-history")
 async def get_bill_history_endpoint():
     """Get bill history data for graphing"""
-    from database import get_bill_history_for_graph
-    history = get_bill_history_for_graph()
+    # Using db module for database operations
+    history = await db.get_bill_history_for_graph()
     return {"history": history}
 
 @app.get("/api/bill-details/all")
 async def get_all_bill_details_endpoint():
     """Get all bill details"""
-    from database import get_all_bill_details
-    details = get_all_bill_details()
+    # Using db module for database operations
+    details = await db.get_all_bill_details()
     return {"details": details}
 
 @app.get("/api/bill-details/latest")
 async def get_latest_bill_details_endpoint():
     """Get the latest bill with its details (for sensors)"""
-    from database import get_latest_bill_with_details
-    latest = get_latest_bill_with_details()
+    # Using db module for database operations
+    latest = await db.get_latest_bill_with_details()
     if not latest:
         return {"bill": None, "due_date": None, "kwh_cost": None}
     return {
@@ -1721,10 +1715,10 @@ async def get_latest_bill_details_endpoint():
 @app.post("/api/bill-details/reparse-all")
 async def reparse_all_bill_pdfs():
     """Re-parse all existing bill PDFs to extract/update bill details"""
-    from database import get_all_bill_documents_with_periods, upsert_bill_details
+    # Using db module for database operations
     from pdf_parser import parse_coned_bill_pdf
     
-    docs = get_all_bill_documents_with_periods()
+    docs = await db.get_all_bill_documents_with_periods()
     results = {"success": 0, "failed": 0, "errors": []}
     
     for doc in docs:
@@ -1742,9 +1736,9 @@ async def reparse_all_bill_pdfs():
                 results["failed"] += 1
                 results["errors"].append(f"Bill {bill_id}: {parsed_data['error']}")
             else:
-                upsert_bill_details(bill_id, parsed_data)
+                await db.upsert_bill_details(bill_id, **parsed_data)
                 results["success"] += 1
-                add_log("info", f"Re-parsed bill {bill_id}: kWh={parsed_data.get('kwh_used')}")
+                await db.add_log("info", f"Re-parsed bill {bill_id}: kWh={parsed_data.get('kwh_used')}")
         except Exception as e:
             results["failed"] += 1
             results["errors"].append(f"Bill {bill_id}: {str(e)}")
@@ -1867,7 +1861,7 @@ async def save_automated_schedule(schedule: ScheduleModel):
         raise
     except Exception as e:
         error_msg = f"Failed to save schedule: {str(e)}"
-        add_log("error", error_msg)
+        await db.add_log("error", error_msg)
         raise HTTPException(status_code=500, detail=error_msg)
 
 # ==========================================
@@ -1878,17 +1872,17 @@ async def save_automated_schedule(schedule: ScheduleModel):
 async def get_ledger():
     """Get complete ledger data from normalized database tables"""
     try:
-        data = get_ledger_data()
+        data = await db.get_ledger_data()
         return data
     except Exception as e:
-        add_log("error", f"Failed to get ledger: {str(e)}")
+        await db.add_log("error", f"Failed to get ledger: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/bills")
 async def get_bills(limit: int = 50):
     """Get all bills from database"""
     try:
-        bills = get_all_bills(limit)
+        bills = await db.get_all_bills()
         return {"bills": bills}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -1897,7 +1891,7 @@ async def get_bills(limit: int = 50):
 async def get_payments(limit: int = 100, bill_id: Optional[int] = None):
     """Get all payments from database"""
     try:
-        payments = get_all_payments(limit, bill_id)
+        payments = await db.get_all_payments(bill_id)
         return {"payments": payments}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -1906,7 +1900,7 @@ async def get_payments(limit: int = 100, bill_id: Optional[int] = None):
 async def get_payments_unverified(limit: int = 50):
     """Get payments that need payee verification"""
     try:
-        payments = get_unverified_payments(limit)
+        payments = await db.get_unverified_payments()
         return {"payments": payments}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -1938,7 +1932,7 @@ class PaymentAttributionModel(BaseModel):
 async def list_payee_users():
     """Get all payee users with their cards"""
     try:
-        users = get_payee_users()
+        users = await db.get_payee_users()
         return {"users": users}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -1947,8 +1941,9 @@ async def list_payee_users():
 async def create_user(user: PayeeUserModel):
     """Create a new payee user"""
     try:
-        user_id = create_payee_user(user.name, user.is_default)
-        add_log("info", f"Created payee user: {user.name}")
+        new_user = await db.create_payee_user(user.name, user.is_default)
+        user_id = new_user.id
+        await db.add_log("info", f"Created payee user: {user.name}")
         return {"id": user_id, "name": user.name, "is_default": user.is_default}
     except Exception as e:
         if "UNIQUE constraint" in str(e):
@@ -1962,7 +1957,7 @@ async def update_responsibilities(request: Request):
     try:
         # Bypass Pydantic entirely - parse raw JSON
         body = await request.json()
-        add_log("info", f"Received responsibilities request: {body}")
+        await db.add_log("info", f"Received responsibilities request: {body}")
         raw_responsibilities = body.get('responsibilities', {})
         
         # Convert string keys to int, handle various value types
@@ -1975,22 +1970,26 @@ async def update_responsibilities(request: Request):
             except (ValueError, TypeError) as conv_err:
                 raise HTTPException(status_code=400, detail=f"Invalid data for user {k}: {v} - {conv_err}")
         
-        result = update_payee_responsibilities(responsibilities)
+        result = await db.update_payee_responsibilities(responsibilities)
+        if result:
+            result = {"total": sum(responsibilities.values()), "success": True}
+        else:
+            result = {"total": 0, "success": False}
         if result['success']:
-            add_log("info", f"Updated payee responsibilities: {result['total']}% total")
+            await db.add_log("info", f"Updated payee responsibilities: {result['total']}% total")
             return result
         raise HTTPException(status_code=400, detail=result.get('error', 'Invalid percentages'))
     except HTTPException:
         raise
     except Exception as e:
-        add_log("error", f"Failed to update responsibilities: {str(e)}")
+        await db.add_log("error", f"Failed to update responsibilities: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.put("/api/payee-users/{user_id}")
 async def update_user(user_id: int, user: PayeeUserUpdateModel):
     """Update a payee user"""
     try:
-        update_payee_user(user_id, user.name, user.is_default, user.is_admin)
+        await db.update_payee_user(user_id, user.name, user.is_default, user.is_admin)
         return {"success": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -1999,9 +1998,9 @@ async def update_user(user_id: int, user: PayeeUserUpdateModel):
 async def delete_user(user_id: int):
     """Delete a payee user"""
     try:
-        deleted = delete_payee_user(user_id)
+        deleted = await db.delete_payee_user(user_id)
         if deleted:
-            add_log("info", f"Deleted payee user ID: {user_id}")
+            await db.add_log("info", f"Deleted payee user ID: {user_id}")
             return {"success": True}
         raise HTTPException(status_code=404, detail="User not found")
     except HTTPException:
@@ -2013,19 +2012,19 @@ async def delete_user(user_id: int):
 async def get_all_bill_summaries():
     """Get payee summaries for ALL bills at once (efficient - single pass calculation)"""
     try:
-        add_log("info", "Calculating all bill summaries...")
-        summaries = calculate_all_payee_balances()
-        add_log("info", f"Calculated summaries for {len(summaries)} bills")
+        await db.add_log("info", "Calculating all bill summaries...")
+        summaries = await db.calculate_all_payee_balances()
+        await db.add_log("info", f"Calculated summaries for {len(summaries)} bills")
         return {"summaries": summaries}
     except Exception as e:
-        add_log("error", f"Failed to calculate summaries: {str(e)}")
+        await db.add_log("error", f"Failed to calculate summaries: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/bills/{bill_id}/summary")
 async def get_bill_summary(bill_id: int):
     """Get payee payment summary for a specific bill"""
     try:
-        summary = get_bill_payee_summary(bill_id)
+        summary = await db.get_bill_payee_summary(bill_id)
         return summary
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -2034,7 +2033,7 @@ async def get_bill_summary(bill_id: int):
 async def list_user_cards(user_id: int):
     """Get all cards for a payee user"""
     try:
-        cards = get_user_cards(user_id)
+        cards = await db.get_user_cards(user_id)
         return {"cards": cards}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -2043,8 +2042,9 @@ async def list_user_cards(user_id: int):
 async def add_card(card: UserCardModel):
     """Add a card to a user"""
     try:
-        card_id = add_user_card(card.user_id, card.card_last_four, card.label)
-        add_log("info", f"Added card *{card.card_last_four} to user ID: {card.user_id}")
+        new_card = await db.add_user_card(card.user_id, card.card_last_four, card.label)
+        card_id = new_card.id
+        await db.add_log("info", f"Added card *{card.card_last_four} to user ID: {card.user_id}")
         return {"id": card_id}
     except Exception as e:
         if "UNIQUE constraint" in str(e):
@@ -2058,7 +2058,7 @@ class UserCardUpdateModel(BaseModel):
 async def update_card(card_id: int, update: UserCardUpdateModel):
     """Update a card's label"""
     try:
-        updated = update_user_card(card_id, update.card_label)
+        updated = await db.update_user_card(card_id, update.card_label)
         if updated:
             return {"success": True}
         raise HTTPException(status_code=404, detail="Card not found")
@@ -2071,7 +2071,7 @@ async def update_card(card_id: int, update: UserCardUpdateModel):
 async def remove_card(card_id: int):
     """Remove a card"""
     try:
-        deleted = delete_user_card(card_id)
+        deleted = await db.delete_user_card(card_id)
         if deleted:
             return {"success": True}
         raise HTTPException(status_code=404, detail="Card not found")
@@ -2084,9 +2084,9 @@ async def remove_card(card_id: int):
 async def attribute_payment_to_user(attribution: PaymentAttributionModel):
     """Attribute a payment to a user"""
     try:
-        success = attribute_payment(attribution.payment_id, attribution.user_id, attribution.method)
+        success = await db.attribute_payment(attribution.payment_id, attribution.user_id, attribution.method)
         if success:
-            add_log("info", f"Attributed payment {attribution.payment_id} to user {attribution.user_id}")
+            await db.add_log("info", f"Attributed payment {attribution.payment_id} to user {attribution.user_id}")
             return {"success": True}
         raise HTTPException(status_code=404, detail="Payment not found")
     except HTTPException:
@@ -2098,9 +2098,9 @@ async def attribute_payment_to_user(attribution: PaymentAttributionModel):
 async def clear_payment_attribution_endpoint(payment_id: int):
     """Clear payment attribution (unassign from user)"""
     try:
-        success = clear_payment_attribution(payment_id)
+        success = await db.clear_payment_attribution(payment_id)
         if success:
-            add_log("info", f"Cleared attribution for payment {payment_id}")
+            await db.add_log("info", f"Cleared attribution for payment {payment_id}")
             return {"success": True}
         raise HTTPException(status_code=404, detail="Payment not found")
     except HTTPException:
@@ -2112,7 +2112,7 @@ async def clear_payment_attribution_endpoint(payment_id: int):
 async def get_payment_endpoint(payment_id: int):
     """Get a single payment by ID"""
     try:
-        payment = get_payment_by_id(payment_id)
+        payment = await db.get_payment_by_id(payment_id)
         if payment:
             return {"payment": payment}
         raise HTTPException(status_code=404, detail="Payment not found")
@@ -2128,9 +2128,9 @@ class UpdatePaymentBillModel(BaseModel):
 async def update_payment_bill_endpoint(payment_id: int, data: UpdatePaymentBillModel):
     """Update which bill a payment belongs to (manual override)"""
     try:
-        success = update_payment_bill(payment_id, data.bill_id, manual=True)
+        success = await db.update_payment_bill(payment_id, data.bill_id, manually_set=True)
         if success:
-            add_log("info", f"Manually assigned payment {payment_id} to bill {data.bill_id}")
+            await db.add_log("info", f"Manually assigned payment {payment_id} to bill {data.bill_id}")
             return {"success": True}
         raise HTTPException(status_code=404, detail="Payment not found")
     except HTTPException:
@@ -2142,8 +2142,9 @@ async def update_payment_bill_endpoint(payment_id: int, data: UpdatePaymentBillM
 async def wipe_all_data():
     """Wipe all bills and payments from database"""
     try:
-        result = wipe_bills_and_payments()
-        add_log("warning", f"Database wiped: {result['bills_deleted']} bills, {result['payments_deleted']} payments deleted")
+        await db.wipe_bills_and_payments()
+        result = {"status": "success", "message": "Database wiped"}
+        await db.add_log("warning", f"Database wiped: {result['bills_deleted']} bills, {result['payments_deleted']} payments deleted")
         return {"success": True, **result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -2156,9 +2157,9 @@ class UpdatePaymentOrderModel(BaseModel):
 async def update_payment_order_endpoint(payment_id: int, data: UpdatePaymentOrderModel):
     """Update payment's bill assignment and order position (manual audit)"""
     try:
-        success = update_payment_order(payment_id, data.bill_id, data.order)
+        success = await db.update_payment_order(payment_id, data.bill_id, data.order)
         if success:
-            add_log("info", f"Manually set payment {payment_id} to bill {data.bill_id} at position {data.order}")
+            await db.add_log("info", f"Manually set payment {payment_id} to bill {data.bill_id} at position {data.order}")
             
             # Check if this manual audit changed the last payment and publish to MQTT
             try:
@@ -2167,10 +2168,10 @@ async def update_payment_order_endpoint(payment_id: int, data: UpdatePaymentOrde
                 if mqtt_client:
                     should_pub, last_payment, reason = should_publish_last_payment()
                     if should_pub and last_payment:
-                        add_log("info", f"Manual audit triggered MQTT publish: {reason}")
+                        await db.add_log("info", f"Manual audit triggered MQTT publish: {reason}")
                         await mqtt_client.publish_last_payment(last_payment, utc_now_iso())
             except Exception as mqtt_e:
-                add_log("warning", f"Failed to publish MQTT after manual audit: {mqtt_e}")
+                await db.add_log("warning", f"Failed to publish MQTT after manual audit: {mqtt_e}")
             
             return {"success": True}
         raise HTTPException(status_code=404, detail="Payment not found")
@@ -2183,10 +2184,9 @@ async def update_payment_order_endpoint(payment_id: int, data: UpdatePaymentOrde
 async def clear_payment_manual_audit_endpoint(payment_id: int):
     """Clear/release the manual audit on a payment, allowing auto-logic to take over again"""
     try:
-        from database import clear_payment_manual_audit
-        success = clear_payment_manual_audit(payment_id)
+        success = await db.clear_payment_manual_audit()
         if success:
-            add_log("info", f"Cleared manual audit for payment {payment_id}")
+            await db.add_log("info", f"Cleared manual audit for payment {payment_id}")
             return {"success": True}
         raise HTTPException(status_code=404, detail="Payment not found")
     except HTTPException:
@@ -2198,8 +2198,7 @@ async def clear_payment_manual_audit_endpoint(payment_id: int):
 async def get_recent_bill_payment_stats():
     """Get payment count and last payment for the most recent billing cycle"""
     try:
-        from database import get_most_recent_bill_payment_count
-        stats = get_most_recent_bill_payment_count()
+        stats = await db.get_most_recent_bill_payment_count()
         return stats
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -2208,7 +2207,7 @@ async def get_recent_bill_payment_stats():
 async def get_user_payments(user_id: int):
     """Get all payments assigned to a specific user"""
     try:
-        payments = get_payments_by_user(user_id)
+        payments = await db.get_payments_by_user(user_id)
         return {"payments": payments}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -2217,7 +2216,7 @@ async def get_user_payments(user_id: int):
 async def get_bills_with_payments_endpoint():
     """Get all bills with their payments for the audit tab"""
     try:
-        data = get_all_bills_with_payments()
+        data = await db.get_all_bills_with_payments()
         return data
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -2284,7 +2283,7 @@ async def save_imap_config_endpoint(config: IMAPConfigModel):
     }
     
     save_imap_config(new_config)
-    add_log("info", f"IMAP configuration updated")
+    await db.add_log("info", f"IMAP configuration updated")
     
     return {"success": True, "message": "IMAP configuration saved"}
 
@@ -2313,9 +2312,9 @@ async def test_imap_config(config: IMAPTestModel):
     )
     
     if result['success']:
-        add_log("success", "IMAP connection test successful")
+        await db.add_log("success", "IMAP connection test successful")
     else:
-        add_log("error", f"IMAP connection test failed: {result['message']}")
+        await db.add_log("error", f"IMAP connection test failed: {result['message']}")
     
     return result
 
@@ -2332,7 +2331,7 @@ async def preview_imap_emails():
             'message': 'IMAP not configured'
         }
     
-    add_log("info", f"Previewing emails - Label: {config.get('gmail_label')}, Subject: {config.get('subject_filter')}")
+    await db.add_log("info", f"Previewing emails - Label: {config.get('gmail_label')}, Subject: {config.get('subject_filter')}")
     
     result = preview_email_search(
         server=config['server'],
@@ -2346,9 +2345,9 @@ async def preview_imap_emails():
     )
     
     if result['success']:
-        add_log("success", f"Found {result['emails_found']} payment emails")
+        await db.add_log("success", f"Found {result['emails_found']} payment emails")
     else:
-        add_log("error", f"Email preview failed: {result['message']}")
+        await db.add_log("error", f"Email preview failed: {result['message']}")
     
     return result
 
@@ -2357,13 +2356,13 @@ async def sync_imap_emails():
     """Run email sync to match payments"""
     from imap_client import run_email_sync
     
-    add_log("info", "Starting IMAP email sync...")
+    await db.add_log("info", "Starting IMAP email sync...")
     result = run_email_sync()
     
     if result['success']:
-        add_log("success", f"Email sync complete: {result['message']}")
+        await db.add_log("success", f"Email sync complete: {result['message']}")
     else:
-        add_log("error", f"Email sync failed: {result['message']}")
+        await db.add_log("error", f"Email sync failed: {result['message']}")
     
     return result
 
@@ -2409,9 +2408,9 @@ class MeterConfigModel(BaseModel):
 @app.get("/api/meter-config")
 async def get_meter_config():
     """Get meter tracking configuration (password masked)"""
-    from database import get_meter_config_db
+    # Using db module for database operations
     
-    config = get_meter_config_db() or {
+    config = await db.get_meter_config_db() or {
         "enabled": False,
         "email": "",
         "password": "",
@@ -2428,11 +2427,11 @@ async def get_meter_config():
 @app.post("/api/meter-config")
 async def save_meter_config_endpoint(config: MeterConfigModel):
     """Save meter tracking configuration"""
-    from database import get_meter_config_db, save_meter_config_db
+    # Using db module for database operations, save_meter_config_db
     from meter_service import get_meter_service
     
     # Load existing config to preserve password if not provided
-    existing = get_meter_config_db() or {}
+    existing = await db.get_meter_config_db() or {}
     
     new_config = {
         "enabled": config.enabled,
@@ -2450,7 +2449,7 @@ async def save_meter_config_endpoint(config: MeterConfigModel):
     else:
         new_config['password'] = ''
     
-    save_meter_config_db(new_config)
+    await db.save_meter_config_db(new_config)
     
     # Reinitialize meter service with new config
     service = get_meter_service()
@@ -2469,17 +2468,17 @@ async def save_meter_config_endpoint(config: MeterConfigModel):
         if success:
             await service.start_polling(new_config['polling_interval'])
     
-    add_log("info", f"Meter config saved (enabled={new_config['enabled']})")
+    await db.add_log("info", f"Meter config saved (enabled={new_config['enabled']})")
     return {"success": True, "message": "Meter configuration saved"}
 
 
 @app.post("/api/meter-config/test")
 async def test_meter_connection():
     """Test meter connection by fetching account info and a reading"""
-    from database import get_meter_config_db
+    # Using db module for database operations
     from meter_service import get_meter_service
 
-    config = get_meter_config_db()
+    config = await db.get_meter_config_db()
     if not config:
         raise HTTPException(status_code=400, detail="Meter not configured")
 
@@ -2526,7 +2525,7 @@ async def test_meter_connection():
 async def get_meter_reading():
     """Get latest meter reading with forecast data - uses cached data for immediate load"""
     from meter_service import get_meter_service
-    from database import get_latest_bill_with_details
+    # Using db module for database operations
     
     service = get_meter_service()
     reading = service.get_cached_reading()
@@ -2537,7 +2536,7 @@ async def get_meter_reading():
     # Calculate cost using kwh_cost from latest bill
     cost = None
     usage_to_date_cost = None
-    latest_bill = get_latest_bill_with_details()
+    latest_bill = await db.get_latest_bill_with_details()
     kwh_cost = latest_bill.get('kwh_cost') if latest_bill else None
     
     if kwh_cost and reading and reading.get('value'):
@@ -2561,7 +2560,7 @@ async def get_meter_reading():
 async def refresh_meter_reading():
     """Force refresh meter reading"""
     from meter_service import get_meter_service
-    from database import get_latest_bill_with_details
+    # Using db module for database operations
     
     service = get_meter_service()
     
@@ -2575,7 +2574,7 @@ async def refresh_meter_reading():
     
     # Calculate cost
     cost = None
-    latest_bill = get_latest_bill_with_details()
+    latest_bill = await db.get_latest_bill_with_details()
     if latest_bill and latest_bill.get('kwh_cost') and reading.get('value'):
         kwh_cost = float(latest_bill['kwh_cost'])
         cost = reading['value'] * kwh_cost
@@ -2599,7 +2598,7 @@ async def get_realtime_usage(hours: int = 24, refresh: bool = False):
         List of readings with start_time, end_time, consumption
     """
     from meter_service import get_meter_service
-    from database import get_realtime_readings_db
+    # Using db module for database operations
     
     service = get_meter_service()
     
@@ -2608,7 +2607,7 @@ async def get_realtime_usage(hours: int = 24, refresh: bool = False):
     
     # For immediate page load, return cached data first
     if not refresh:
-        cached = get_realtime_readings_db()
+        cached = await db.get_realtime_readings_db()
         if cached:
             return {
                 "success": True,
@@ -2643,17 +2642,17 @@ async def get_realtime_usage(hours: int = 24, refresh: bool = False):
 # ========== TTS Configuration ==========
 def load_tts_config() -> dict:
     """Load TTS configuration from database (persists across reinstalls)"""
-    from database import get_tts_config_db, save_tts_config_db
+    # Using db module for database operations
     
     # Try database first
-    data = get_tts_config_db()
+    data = await db.get_tts_config_db()
     
     # Migrate from JSON file if database is empty but file exists
     if data is None and TTS_CONFIG_FILE.exists():
         try:
             data = json.loads(TTS_CONFIG_FILE.read_text())
-            save_tts_config_db(data)
-            add_log("info", "Migrated TTS config from JSON to database")
+            await db.save_tts_config_db(data)
+            await db.add_log("info", "Migrated TTS config from JSON to database")
         except:
             pass
     
@@ -2674,14 +2673,14 @@ def load_tts_config() -> dict:
             merged["messages"].pop("balance_alert", None)
         return merged
     except Exception as e:
-        add_log("warning", f"Failed to load TTS config: {str(e)}")
+        await db.add_log("warning", f"Failed to load TTS config: {str(e)}")
         return DEFAULT_TTS_CONFIG.copy()
 
 
 def save_tts_config(config: dict):
     """Save TTS configuration to database"""
-    from database import save_tts_config_db
-    save_tts_config_db(config)
+    # Using db module for database operations
+    await db.save_tts_config_db(config)
     # Also write to file for backward compatibility
     try:
         TTS_CONFIG_FILE.write_text(json.dumps(config))
@@ -2856,7 +2855,7 @@ async def get_ha_entities():
                 headers={"Authorization": f"Bearer {token}"},
             ) as resp:
                 if resp.status != 200:
-                    add_log("warning", f"Failed to fetch HA states: {resp.status}")
+                    await db.add_log("warning", f"Failed to fetch HA states: {resp.status}")
                     return result
                 
                 states = await resp.json()
@@ -2882,7 +2881,7 @@ async def get_ha_entities():
                 result["tts_entities"].sort(key=lambda x: x["friendly_name"])
                 
     except Exception as e:
-        add_log("error", f"Failed to fetch HA entities: {str(e)}")
+        await db.add_log("error", f"Failed to fetch HA entities: {str(e)}")
     
     return result
 
@@ -2898,10 +2897,10 @@ async def preview_tts_message(
     (in case they haven't been saved yet).
     """
     from datetime import datetime
-    from database import get_latest_bill_with_details
+    # Using db module for database operations
     from tts_scheduler import get_scheduler
 
-    ledger = get_ledger_data()
+    ledger = await db.get_ledger_data()
 
     # Get schedule config for sensors - use query params if provided, otherwise use saved config
     scheduler = get_scheduler()
@@ -2967,13 +2966,13 @@ async def preview_tts_message(
     bill_period = latest_bill.get("month_range", "")
     
     # Get kwh_used and kwh_cost from bill_details for the SAME bill from ledger
-    from database import get_bill_details_by_id
+    # Using db module for database operations_by_id
     last_bill_kwh = ""
     kwh_cost = None
     latest_bill_id = latest_bill.get("id")
     
     if latest_bill_id:
-        bill_details = get_bill_details_by_id(latest_bill_id)
+        bill_details = await db.get_bill_details(latest_bill_id)
         if bill_details:
             kwh_val = bill_details.get("kwh_used")
             if kwh_val:
@@ -2989,13 +2988,13 @@ async def preview_tts_message(
     projected_usage_kwh = ""
     projected_usage_cost = ""
     
-    add_log("debug", f"TTS Preview: current_usage_sensor='{current_usage_sensor}', future_usage_sensor='{future_usage_sensor}'")
+    await db.add_log("debug", f"TTS Preview: current_usage_sensor='{current_usage_sensor}', future_usage_sensor='{future_usage_sensor}'")
     
     token = os.environ.get("SUPERVISOR_TOKEN")
-    add_log("debug", f"TTS Preview: SUPERVISOR_TOKEN available={bool(token)}")
+    await db.add_log("debug", f"TTS Preview: SUPERVISOR_TOKEN available={bool(token)}")
     
     if not token:
-        add_log("warning", "No SUPERVISOR_TOKEN - cannot fetch sensor states from Home Assistant")
+        await db.add_log("warning", "No SUPERVISOR_TOKEN - cannot fetch sensor states from Home Assistant")
     
     if token and (current_usage_sensor or future_usage_sensor):
         try:
@@ -3008,12 +3007,12 @@ async def preview_tts_message(
                             f"http://supervisor/core/api/states/{sensor_id}",
                             headers={"Authorization": f"Bearer {token}"},
                         ) as resp:
-                            add_log("debug", f"Current usage sensor {sensor_id}: status={resp.status}")
+                            await db.add_log("debug", f"Current usage sensor {sensor_id}: status={resp.status}")
                             if resp.status == 200:
                                 state_data = await resp.json()
                                 sensor_state = state_data.get("state", "")
                                 unit = state_data.get("attributes", {}).get("unit_of_measurement", "kWh")
-                                add_log("debug", f"Current usage state='{sensor_state}', unit={unit}")
+                                await db.add_log("debug", f"Current usage state='{sensor_state}', unit={unit}")
                                 if sensor_state and sensor_state not in ("unknown", "unavailable"):
                                     try:
                                         kwh_value = float(sensor_state)
@@ -3021,16 +3020,16 @@ async def preview_tts_message(
                                         if kwh_cost:
                                             cost_value = kwh_value * kwh_cost
                                             current_usage_cost = f"${cost_value:.2f}"
-                                        add_log("debug", f"Current usage computed: kwh={current_usage_kwh}, cost={current_usage_cost}")
+                                        await db.add_log("debug", f"Current usage computed: kwh={current_usage_kwh}, cost={current_usage_cost}")
                                     except ValueError:
                                         current_usage_kwh = f"{sensor_state} {unit}"
-                                        add_log("debug", f"Current usage non-numeric: {current_usage_kwh}")
+                                        await db.add_log("debug", f"Current usage non-numeric: {current_usage_kwh}")
                                 else:
-                                    add_log("warning", f"Current usage sensor state is '{sensor_state}' - skipping")
+                                    await db.add_log("warning", f"Current usage sensor state is '{sensor_state}' - skipping")
                             else:
-                                add_log("warning", f"Current usage sensor returned status {resp.status}")
+                                await db.add_log("warning", f"Current usage sensor returned status {resp.status}")
                     except Exception as e:
-                        add_log("warning", f"Failed to fetch current usage sensor: {e}")
+                        await db.add_log("warning", f"Failed to fetch current usage sensor: {e}")
                 
                 # Fetch future usage projection sensor
                 if future_usage_sensor and future_usage_sensor.strip():
@@ -3040,12 +3039,12 @@ async def preview_tts_message(
                             f"http://supervisor/core/api/states/{sensor_id}",
                             headers={"Authorization": f"Bearer {token}"},
                         ) as resp:
-                            add_log("debug", f"Future usage sensor {sensor_id}: status={resp.status}")
+                            await db.add_log("debug", f"Future usage sensor {sensor_id}: status={resp.status}")
                             if resp.status == 200:
                                 state_data = await resp.json()
                                 sensor_state = state_data.get("state", "")
                                 unit = state_data.get("attributes", {}).get("unit_of_measurement", "kWh")
-                                add_log("debug", f"Future usage state='{sensor_state}', unit={unit}")
+                                await db.add_log("debug", f"Future usage state='{sensor_state}', unit={unit}")
                                 if sensor_state and sensor_state not in ("unknown", "unavailable"):
                                     try:
                                         kwh_value = float(sensor_state)
@@ -3053,18 +3052,18 @@ async def preview_tts_message(
                                         if kwh_cost:
                                             cost_value = kwh_value * kwh_cost
                                             projected_usage_cost = f"${cost_value:.2f}"
-                                        add_log("debug", f"Future usage computed: kwh={projected_usage_kwh}, cost={projected_usage_cost}")
+                                        await db.add_log("debug", f"Future usage computed: kwh={projected_usage_kwh}, cost={projected_usage_cost}")
                                     except ValueError:
                                         projected_usage_kwh = f"{sensor_state} {unit}"
-                                        add_log("debug", f"Future usage non-numeric: {projected_usage_kwh}")
+                                        await db.add_log("debug", f"Future usage non-numeric: {projected_usage_kwh}")
                                 else:
-                                    add_log("warning", f"Future usage sensor state is '{sensor_state}' - skipping")
+                                    await db.add_log("warning", f"Future usage sensor state is '{sensor_state}' - skipping")
                             else:
-                                add_log("warning", f"Future usage sensor returned status {resp.status}")
+                                await db.add_log("warning", f"Future usage sensor returned status {resp.status}")
                     except Exception as e:
-                        add_log("warning", f"Failed to fetch future usage sensor: {e}")
+                        await db.add_log("warning", f"Failed to fetch future usage sensor: {e}")
         except Exception as e:
-            add_log("warning", f"Failed to create session for sensor fetch: {e}")
+            await db.add_log("warning", f"Failed to create session for sensor fetch: {e}")
     
     # Get latest payment from ledger
     latest_payment = ledger.get("latest_payment")
@@ -3076,8 +3075,8 @@ async def preview_tts_message(
         last_payment_date = latest_payment.get("payment_date", "")
     
     # Log final values before returning
-    add_log("debug", f"TTS Preview final: current_usage_kwh='{current_usage_kwh}', current_usage_cost='{current_usage_cost}'")
-    add_log("debug", f"TTS Preview final: projected_usage_kwh='{projected_usage_kwh}', projected_usage_cost='{projected_usage_cost}'")
+    await db.add_log("debug", f"TTS Preview final: current_usage_kwh='{current_usage_kwh}', current_usage_cost='{current_usage_cost}'")
+    await db.add_log("debug", f"TTS Preview final: projected_usage_kwh='{projected_usage_kwh}', projected_usage_cost='{projected_usage_cost}'")
     
     return {
         "greeting": greeting,

@@ -1,0 +1,22 @@
+#!/command/with-contenv bashio
+# shellcheck shell=bash
+# ==============================================================================
+# ConEd Scraper - Prisma Studio (Database UI)
+# ==============================================================================
+
+exec 2>&1
+
+bashio::log.info "Starting Prisma Studio on port 5555..."
+
+export DATABASE_URL="postgresql://coned:coned@localhost:5432/coned"
+
+cd /app/python-service
+
+# Wait for PostgreSQL to be ready
+while ! pg_isready -h localhost -p 5432 -U coned > /dev/null 2>&1; do
+    bashio::log.info "Waiting for PostgreSQL to be ready..."
+    sleep 2
+done
+
+bashio::log.info "PostgreSQL is ready, starting Prisma Studio..."
+exec npx prisma studio --port 5555 --browser none

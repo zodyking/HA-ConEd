@@ -182,8 +182,8 @@ class MeterService:
             self.last_reading_time = datetime.now(timezone.utc)
             
             # Cache to database
-            from database import save_meter_reading_db
-            save_meter_reading_db(reading)
+            import db
+            await db.save_meter_reading_db(reading)
             
             logger.info(f"Meter reading fetched: {reading['value']} {reading['unit']} (hourly data from {latest.end_time})")
             return reading
@@ -220,18 +220,18 @@ class MeterService:
             }
             
             # Cache to database
-            from database import save_meter_forecast_db
-            save_meter_forecast_db(forecast_data)
+            import db
+            await db.save_meter_forecast_db(forecast_data)
             
             return forecast_data
         except Exception as e:
             logger.error(f"Failed to fetch forecast: {e}")
             return None
     
-    def get_cached_forecast(self) -> Optional[Dict[str, Any]]:
+    async def get_cached_forecast(self) -> Optional[Dict[str, Any]]:
         """Get the most recent cached forecast."""
-        from database import get_meter_forecast_db
-        return get_meter_forecast_db()
+        import db
+        return await db.get_meter_forecast_db()
     
     async def fetch_quarter_hour_reads(self, hours: int = 24) -> List[Dict[str, Any]]:
         """Fetch quarter-hour (15-minute) usage data for real-time chart.
@@ -287,8 +287,8 @@ class MeterService:
             ]
             
             # Cache to database (limit to last 24 hours worth for storage efficiency)
-            from database import save_realtime_readings_db
-            save_realtime_readings_db(result[-96:] if len(result) > 96 else result)  # 96 = 24 hours of 15-min intervals
+            import db
+            await db.save_realtime_readings_db(result[-96:] if len(result) > 96 else result)  # 96 = 24 hours of 15-min intervals
             
             logger.info(f"Fetched {len(result)} quarter-hour readings")
             return result
@@ -337,14 +337,14 @@ class MeterService:
             logger.error(f"Failed to get account info: {e}")
             return None
     
-    def get_cached_reading(self) -> Optional[Dict[str, Any]]:
+    async def get_cached_reading(self) -> Optional[Dict[str, Any]]:
         """Get the most recent cached reading."""
         if self.last_reading:
             return self.last_reading
         
         # Try to load from database
-        from database import get_meter_reading_db
-        cached = get_meter_reading_db()
+        import db
+        cached = await db.get_meter_reading_db()
         if cached:
             self.last_reading = cached
             return cached
@@ -398,7 +398,7 @@ class MeterService:
         """Publish meter reading to MQTT sensors."""
         try:
             from mqtt_client import get_mqtt_client
-            from database import get_latest_bill_with_details
+            import db
             
             mqtt_client = get_mqtt_client()
             if not mqtt_client:
@@ -415,7 +415,7 @@ class MeterService:
             await mqtt_client.publish_current_meter_usage(value, unit, timestamp)
             
             # Calculate and publish cost
-            latest_bill = get_latest_bill_with_details()
+            latest_bill = await db.get_latest_bill_with_details()
             if latest_bill and latest_bill.get('kwh_cost'):
                 kwh_cost = float(latest_bill['kwh_cost'])
                 usage_cost = value * kwh_cost
@@ -440,10 +440,10 @@ def get_meter_service() -> MeterService:
 
 async def init_meter_service():
     """Initialize meter service from database config."""
-    from database import get_meter_config_db
+    import db
     
     service = get_meter_service()
-    config = get_meter_config_db()
+    config = await db.get_meter_config_db()
     
     if config and config.get('enabled'):
         # Decrypt password for opower

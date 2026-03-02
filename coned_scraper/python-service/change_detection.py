@@ -3,7 +3,7 @@ Change detection for sensor values
 """
 import json
 from typing import Optional, Dict, Any, Tuple
-from database import get_latest_scraped_data
+import db
 
 def extract_numeric_value(value_str: str) -> float:
     """Extract numeric value from string like '$123.45'"""
@@ -73,7 +73,9 @@ def detect_changes(new_data: Dict[str, Any], timestamp: str) -> Dict[str, bool]:
     
     try:
         # Get previous data (latest 2 entries)
-        previous_entries = get_latest_scraped_data(2)
+        # Note: This function is now async; caller must handle this
+        import asyncio
+        previous_entries = asyncio.get_event_loop().run_until_complete(db.get_latest_scraped_data(2))
         
         if len(previous_entries) < 2:
             # First or second scrape - all values are "new"

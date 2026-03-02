@@ -1,0 +1,166 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider             = "prisma-client-py"
+  interface            = "asyncio"
+  recursive_type_depth = 5
+}
+
+model Bill {
+  id             Int       @id @default(autoincrement())
+  billCycleDate  DateTime  @map("bill_cycle_date")
+  billDate       DateTime? @map("bill_date")
+  monthRange     String?   @map("month_range")
+  billTotal      Decimal?  @map("bill_total") @db.Decimal(10, 2)
+  firstScrapedAt DateTime  @default(now()) @map("first_scraped_at")
+  lastScrapedAt  DateTime  @updatedAt @map("last_scraped_at")
+  scrapeCount    Int       @default(1) @map("scrape_count")
+
+  payments Payment[]
+  document BillDocument?
+  details  BillDetails?
+
+  @@unique([billCycleDate, monthRange])
+  @@index([billCycleDate])
+  @@map("bills")
+}
+
+model Payment {
+  id                 Int       @id @default(autoincrement())
+  paymentDate        DateTime  @map("payment_date")
+  description        String?
+  amount             Decimal   @db.Decimal(10, 2)
+  paymentHash        String    @unique @map("payment_hash")
+  payeeStatus        String    @default("unverified") @map("payee_status")
+  cardLastFour       String?   @map("card_last_four")
+  verificationMethod String?   @map("verification_method")
+  billManuallySet    Boolean   @default(false) @map("bill_manually_set")
+  manualOrder        Int?      @map("manual_order")
+  payeePendingUntil  DateTime? @map("payee_pending_until")
+  firstScrapedAt     DateTime  @default(now()) @map("first_scraped_at")
+  lastScrapedAt      DateTime  @updatedAt @map("last_scraped_at")
+  scrapeOrder        Int?      @map("scrape_order")
+
+  bill        Bill?      @relation(fields: [billId], references: [id], onDelete: SetNull)
+  billId      Int?       @map("bill_id")
+  payeeUser   PayeeUser? @relation(fields: [payeeUserId], references: [id], onDelete: SetNull)
+  payeeUserId Int?       @map("payee_user_id")
+
+  @@index([paymentDate])
+  @@index([billId])
+  @@index([firstScrapedAt])
+  @@map("payments")
+}
+
+model BillDetails {
+  id                      Int       @id @default(autoincrement())
+  dueDate                 DateTime? @map("due_date")
+  totalFromBillingPeriod  Decimal?  @map("total_from_billing_period") @db.Decimal(10, 2)
+  balanceFromPreviousBill Decimal?  @map("balance_from_previous_bill") @db.Decimal(10, 2)
+  totalAmountDue          Decimal?  @map("total_amount_due") @db.Decimal(10, 2)
+  kwhUsed                 Decimal?  @map("kwh_used") @db.Decimal(10, 2)
+  kwhCost                 Decimal?  @map("kwh_cost") @db.Decimal(10, 4)
+  electricityTotal        Decimal?  @map("electricity_total") @db.Decimal(10, 2)
+  billingPeriodStart      DateTime? @map("billing_period_start")
+  billingPeriodEnd        DateTime? @map("billing_period_end")
+  billingDays             Int?      @map("billing_days")
+  supplyCharges           Json?     @map("supply_charges")
+  deliveryCharges         Json?     @map("delivery_charges")
+  parsedAt                DateTime  @default(now()) @map("parsed_at")
+
+  bill   Bill @relation(fields: [billId], references: [id], onDelete: Cascade)
+  billId Int  @unique @map("bill_id")
+
+  @@index([billId])
+  @@map("bill_details")
+}
+
+model BillDocument {
+  id        Int      @id @default(autoincrement())
+  pdfPath   String   @map("pdf_path")
+  sourceUrl String?  @map("source_url")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  bill   Bill @relation(fields: [billId], references: [id], onDelete: Cascade)
+  billId Int  @unique @map("bill_id")
+
+  @@index([billId])
+  @@map("bill_documents")
+}
+
+model PayeeUser {
+  id                    Int      @id @default(autoincrement())
+  name                  String   @unique
+  isDefault             Boolean  @default(false) @map("is_default")
+  responsibilityPercent Int      @default(0) @map("responsibility_percent")
+  isAdmin               Boolean  @default(false) @map("is_admin")
+  createdAt             DateTime @default(now()) @map("created_at")
+
+  payments Payment[]
+  cards    UserCard[]
+
+  @@map("payee_users")
+}
+
+model UserCard {
+  id           Int      @id @default(autoincrement())
+  cardLastFour String   @unique @map("card_last_four")
+  cardLabel    String?  @map("card_label")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  user   PayeeUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId Int       @map("user_id")
+
+  @@map("user_cards")
+}
+
+model AccountBalanceHistory {
+  id                  Int      @id @default(autoincrement())
+  balance             Decimal  @db.Decimal(10, 2)
+  scrapedAt           DateTime @default(now()) @map("scraped_at")
+  changedFromPrevious Boolean  @default(false) @map("changed_from_previous")
+
+  @@map("account_balance_history")
+}
+
+model ScrapedData {
+  id             Int      @id @default(autoincrement())
+  timestamp      DateTime @default(now())
+  data           Json
+  status         String
+  errorMessage   String?  @map("error_message")
+  screenshotPath String?  @map("screenshot_path")
+
+  @@map("scraped_data")
+}
+
+model Log {
+  id        Int      @id @default(autoincrement())
+  timestamp DateTime @default(now())
+  level     String
+  message   String
+
+  @@map("logs")
+}
+
+model ScrapeHistory {
+  id              Int      @id @default(autoincrement())
+  timestamp       DateTime @default(now())
+  success         Boolean
+  errorMessage    String?  @map("error_message")
+  failureStep     String?  @map("failure_step")
+  durationSeconds Float?   @map("duration_seconds")
+
+  @@map("scrape_history")
+}
+
+model AppSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("app_settings")
+}

@@ -1,0 +1,46 @@
+#!/command/with-contenv bashio
+# shellcheck shell=bash
+# ==============================================================================
+# ConEd Scraper - PostgreSQL Database Service
+# ==============================================================================
+
+exec 2>&1
+
+DATA_DIR="/config/postgres/data"
+PGUSER="postgres"
+
+bashio::log.info "Starting PostgreSQL service..."
+
+# Ensure data directory exists with correct ownership
+mkdir -p "$DATA_DIR"
+chown -R postgres:postgres /config/postgres
+
+# Initialize database if not already done
+if [ ! -f "$DATA_DIR/PG_VERSION" ]; then
+    bashio::log.info "Initializing PostgreSQL database..."
+    
+    # Initialize the database cluster
+    sudo -u postgres /usr/lib/postgresql/*/bin/initdb -D "$DATA_DIR" --encoding=UTF8 --locale=C
+    
+    # Configure PostgreSQL for local connections
+    echo "host all all 127.0.0.1/32 trust" >> "$DATA_DIR/pg_hba.conf"
+    echo "local all all trust" >> "$DATA_DIR/pg_hba.conf"
+    
+    # Start PostgreSQL temporarily to create database and user
+    sudo -u postgres /usr/lib/postgresql/*/bin/pg_ctl -D "$DATA_DIR" -l /tmp/pg_init.log start
+    sleep 2
+    
+    # Create coned database and user
+    sudo -u postgres psql -c "CREATE USER coned WITH PASSWORD 'coned';" || true
+    sudo -u postgres psql -c "CREATE DATABASE coned OWNER coned;" || true
+    sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE coned TO coned;" || true
+    
+    # Stop temporary instance
+    sudo -u postgres /usr/lib/postgresql/*/bin/pg_ctl -D "$DATA_DIR" stop
+    sleep 1
+    
+    bashio::log.info "PostgreSQL database initialized successfully"
+fi
+
+bashio::log.info "Starting PostgreSQL daemon..."
+exec sudo -u postgres /usr/lib/postgresql/*/bin/postgres -D "$DATA_DIR" -c listen_addresses='127.0.0.1' -c port=5432

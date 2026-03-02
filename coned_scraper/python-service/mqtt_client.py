@@ -834,8 +834,8 @@ class MQTTClient:
     async def publish_bill_details_sensors(self, timestamp: Optional[str] = None):
         """Publish due_date, kwh_cost, kwh_used from latest bill details"""
         try:
-            from database import get_latest_bill_with_details
-            latest = get_latest_bill_with_details()
+            import db
+            latest = await db.get_latest_bill_with_details()
             if latest:
                 ts = timestamp or utc_now_iso()
                 await self.publish_due_date(latest.get("due_date"), ts)
@@ -847,9 +847,9 @@ class MQTTClient:
 
     async def publish_bill_pdf_url_all(self, base_url: str, timestamp: Optional[str] = None):
         """Publish bill PDF URLs: state=latest, attributes=all period links"""
-        from database import get_all_bill_documents_with_periods, get_latest_bill_id_with_document
-        docs = get_all_bill_documents_with_periods()
-        latest_id = get_latest_bill_id_with_document()
+        import db
+        docs = await db.get_all_bill_documents_with_periods()
+        latest_id = await db.get_latest_bill_id_with_document()
         latest_url = f"{base_url.rstrip('/')}/api/bill-document/{latest_id}" if latest_id else ""
         all_bills = {}
         for d in docs:

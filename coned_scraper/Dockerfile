@@ -11,14 +11,24 @@ RUN npm ci
 COPY frontend/ ./
 RUN npm run build
 
-# Stage 2: Addon image with Python only (Vue SPA served by FastAPI)
+# Stage 2: Addon image with Python, PostgreSQL, and Node.js for Prisma
 FROM ${BUILD_FROM}
 
+# Install PostgreSQL 16, Python, and Node.js (for Prisma Studio)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     python3-pip \
     python3-venv \
+    postgresql \
+    postgresql-client \
+    nodejs \
+    npm \
+    sudo \
     && rm -rf /var/lib/apt/lists/*
+
+# Create postgres data directory and set permissions
+RUN mkdir -p /config/postgres/data && \
+    chown -R postgres:postgres /config/postgres
 
 WORKDIR /app
 
@@ -29,16 +39,25 @@ RUN pip3 install --break-system-packages --no-cache-dir -r /app/python-service/r
 # Install Playwright Chromium and system dependencies
 RUN python3 -m playwright install chromium && python3 -m playwright install-deps chromium
 
+# Copy Prisma schema and generate client
+COPY python-service/prisma /app/python-service/prisma/
+RUN cd /app/python-service && python3 -m prisma generate
+
 # Copy full Python service
 COPY python-service/ /app/python-service/
 
 # Copy Vue SPA build output into python-service for FastAPI to serve
 COPY --from=vue-builder /app/frontend/dist /app/python-service/frontend/dist
 
-# Copy root filesystem (S6 overlay) - only api service (no web)
+# Copy root filesystem (S6 overlay) - api, postgres, and prisma-studio services
 COPY rootfs /
 RUN chmod +x /etc/s6-overlay/s6-rc.d/init-coned/run \
-    /etc/s6-overlay/s6-rc.d/api/run /etc/s6-overlay/s6-rc.d/api/finish
+    /etc/s6-overlay/s6-rc.d/api/run /etc/s6-overlay/s6-rc.d/api/finish \
+    /etc/s6-overlay/s6-rc.d/postgres/run /etc/s6-overlay/s6-rc.d/postgres/finish \
+    /etc/s6-overlay/s6-rc.d/prisma-studio/run /etc/s6-overlay/s6-rc.d/prisma-studio/finish
+
+# Set DATABASE_URL environment variable
+ENV DATABASE_URL="postgresql://coned:coned@localhost:5432/coned"
 
 # Build arguments
 ARG BUILD_ARCH

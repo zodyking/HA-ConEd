@@ -5,3 +5,16 @@
 # ==============================================================================
 
 bashio::log.info "ConEd Scraper initializing..."
+
+# Set up environment variables
+export DATABASE_URL="postgresql://coned:coned@localhost:5432/coned"
+export DATA_DIR=/config
+
+# Create necessary directories
+mkdir -p /config/postgres/data
+mkdir -p /config/bill_documents
+
+# Set permissions for postgres
+chown -R postgres:postgres /config/postgres 2>/dev/null || true
+
+bashio::log.info "Environment configured, waiting for services to start..."
