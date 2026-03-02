@@ -29,12 +29,21 @@ import db
 app = FastAPI(title="Con Edison API")
 
 # Code version for deployment verification
-CODE_VERSION = "1.1.0-postgres"
+CODE_VERSION = "1.1.1-postgres"
 
 @app.on_event("startup")
 async def startup():
-    """Connect to PostgreSQL database on startup"""
-    await db.connect()
+    """Connect to PostgreSQL database on startup (with retries for startup race)"""
+    for attempt in range(10):
+        try:
+            await db.connect()
+            return
+        except Exception as e:
+            if attempt < 9:
+                logging.warning(f"DB connect attempt {attempt + 1}/10 failed: {e}, retrying in 2s...")
+                await asyncio.sleep(2)
+            else:
+                raise
 
 @app.on_event("shutdown")
 async def shutdown():
