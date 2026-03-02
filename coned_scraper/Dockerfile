@@ -43,6 +43,9 @@ RUN python3 -m playwright install chromium && python3 -m playwright install-deps
 COPY python-service/prisma /app/python-service/prisma/
 RUN cd /app/python-service && python3 -m prisma generate
 
+# Install Prisma CLI globally for Prisma Studio
+RUN npm install -g prisma
+
 # Copy full Python service
 COPY python-service/ /app/python-service/
 

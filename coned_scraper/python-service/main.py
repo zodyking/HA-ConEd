@@ -46,6 +46,28 @@ async def get_version():
     """Simple endpoint to verify code deployment"""
     return {"version": CODE_VERSION, "database": "postgresql"}
 
+@app.get("/api/db-status")
+async def get_db_status():
+    """Check database connection and return status"""
+    try:
+        # Try to count logs as a simple query
+        log_count = await db.get_log_count()
+        bill_count = await db.get_bill_count()
+        return {
+            "connected": True,
+            "database": "postgresql",
+            "log_count": log_count,
+            "bill_count": bill_count,
+            "prisma_studio_port": 5555,
+            "prisma_studio_url": "http://<your-ha-ip>:5555"
+        }
+    except Exception as e:
+        return {
+            "connected": False,
+            "error": str(e),
+            "database": "postgresql"
+        }
+
 # CORS configuration
 app.add_middleware(
     CORSMiddleware,

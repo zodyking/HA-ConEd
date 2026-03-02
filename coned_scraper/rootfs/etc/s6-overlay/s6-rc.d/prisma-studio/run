@@ -19,4 +19,4 @@ while ! pg_isready -h localhost -p 5432 -U coned > /dev/null 2>&1; do
 done
 
 bashio::log.info "PostgreSQL is ready, starting Prisma Studio..."
-exec npx prisma studio --port 5555 --browser none
+exec prisma studio --port 5555 --browser none

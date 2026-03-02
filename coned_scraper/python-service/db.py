@@ -1124,6 +1124,16 @@ async def get_logs(limit: int = 100) -> List[Dict[str, Any]]:
         for l in logs
     ]
 
+async def get_log_count() -> int:
+    """Get total log count"""
+    await ensure_connected()
+    return await db.log.count()
+
+async def get_bill_count() -> int:
+    """Get total bill count"""
+    await ensure_connected()
+    return await db.bill.count()
+
 async def clear_logs():
     """Clear all logs"""
     await ensure_connected()
