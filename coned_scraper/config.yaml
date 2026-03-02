@@ -1,6 +1,6 @@
 ---
 name: Con Edison
-version: dev
+version: "1.0.0"
 slug: coned_scraper
 description: Con Edison account integration for Home Assistant — bills, payments, balance, MQTT
 url: https://github.com/zodyking/HA-ConEd
@@ -19,7 +19,7 @@ map:
 ports:
   5555/tcp: 5555
 ports_description:
-  5555/tcp: "Prisma Studio (Database UI) - Access at http://<your-ha-ip>:5555"
+  5555/tcp: "Prisma Studio (Database UI)"
 options:
   log_level: info
 schema:
