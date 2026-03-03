@@ -2,8 +2,8 @@
   "config": {
     "step": {
       "user": {
-        "title": "Connect to ConEd Connect Addon",
-        "description": "Enter the URL of your ConEd Connect addon. If running as a Home Assistant addon, the default should work.",
+        "title": "Connect to Con Edison Addon",
+        "description": "Enter the URL of your Con Edison addon. If running as a Home Assistant addon, use the addon's web UI URL or Ingress URL.",
         "data": {
           "addon_url": "Addon URL"
         }
