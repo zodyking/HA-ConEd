@@ -29,7 +29,7 @@ import db
 app = FastAPI(title="Con Edison API")
 
 # Code version for deployment verification
-CODE_VERSION = "1.3.27"
+CODE_VERSION = "1.3.28"
 
 @app.on_event("startup")
 async def startup():
@@ -2890,14 +2890,16 @@ async def preview_tts_message(
 ):
     """Generate preview data for TTS message template variables.
     
-    Optional query params allow passing current sensor values from frontend
-    (in case they haven't been saved yet).
+    Uses ConEd Connect integration sensors when meter tracking is enabled,
+    otherwise falls back to custom sensor configuration.
     """
     from datetime import datetime
-    # Using db module for database operations
+    from meter_service import get_meter_service
     from tts_scheduler import get_scheduler
 
     ledger = await db.get_ledger_data()
+    meter_service = get_meter_service()
+    meter_enabled = meter_service.is_enabled()
 
     # Get schedule config for sensors - use query params if provided, otherwise use saved config
     scheduler = get_scheduler()
@@ -2942,9 +2944,7 @@ async def preview_tts_message(
             dt = date_parser.parse(date_str)
             return dt.strftime("%B %d").replace(" 0", " ")  # "March 15" not "March 05"
         except:
-            # Try to extract month/day from common formats
             import re
-            # Match patterns like "Oct 08, 2025" or "10/08/2025" or "2025-10-08"
             match = re.search(r'(\w{3,9})\s+(\d{1,2})', date_str)
             if match:
                 return f"{match.group(1)} {int(match.group(2))}"
@@ -2963,7 +2963,6 @@ async def preview_tts_message(
     bill_period = latest_bill.get("month_range", "")
     
     # Get kwh_used and kwh_cost from bill_details for the SAME bill from ledger
-    # Using db module for database operations_by_id
     last_bill_kwh = ""
     kwh_cost = None
     latest_bill_id = latest_bill.get("id")
@@ -2973,27 +2972,80 @@ async def preview_tts_message(
         if bill_details:
             kwh_val = bill_details.get("kwh_used")
             if kwh_val:
-                last_bill_kwh = f"{kwh_val} kWh"
+                # Format as whole number for TTS readability
+                last_bill_kwh = f"{int(round(kwh_val))} kWh"
             kwh_cost = bill_details.get("kwh_cost")
-            # Use due_date from bill_details if not already set
             if not due_date:
                 due_date = format_date_for_tts(bill_details.get("due_date", "") or "")
     
-    # Fetch current and future usage from HA sensors
+    # Initialize usage variables
     current_usage_kwh = ""
     current_usage_cost = ""
     projected_usage_kwh = ""
     projected_usage_cost = ""
     
-    await db.add_log("debug", f"TTS Preview: current_usage_sensor='{current_usage_sensor}', future_usage_sensor='{future_usage_sensor}'")
-    
     token = os.environ.get("SUPERVISOR_TOKEN")
-    await db.add_log("debug", f"TTS Preview: SUPERVISOR_TOKEN available={bool(token)}")
     
-    if not token:
-        await db.add_log("warning", "No SUPERVISOR_TOKEN - cannot fetch sensor states from Home Assistant")
+    # If meter tracking is enabled, use ConEd Connect integration sensors directly
+    if meter_enabled and token:
+        await db.add_log("debug", "TTS Preview: Using ConEd Connect integration sensors (meter tracking enabled)")
+        try:
+            async with aiohttp.ClientSession() as session:
+                # Fetch from ConEd Connect sensors
+                coned_sensors = {
+                    "current_cycle_usage": "sensor.coned_connect_current_cycle_usage",
+                    "forecasted_usage": "sensor.coned_connect_forecasted_usage",
+                    "current_usage_cost": "sensor.coned_connect_current_usage_cost",
+                    "kwh_cost": "sensor.coned_connect_kwh_cost",
+                }
+                sensor_values = {}
+                
+                for key, sensor_id in coned_sensors.items():
+                    try:
+                        async with session.get(
+                            f"http://supervisor/core/api/states/{sensor_id}",
+                            headers={"Authorization": f"Bearer {token}"},
+                        ) as resp:
+                            if resp.status == 200:
+                                state_data = await resp.json()
+                                state = state_data.get("state", "")
+                                if state and state not in ("unknown", "unavailable"):
+                                    try:
+                                        sensor_values[key] = float(state)
+                                    except ValueError:
+                                        sensor_values[key] = state
+                    except Exception as e:
+                        await db.add_log("debug", f"Failed to fetch {sensor_id}: {e}")
+                
+                # Get kWh cost from sensor or bill details
+                sensor_kwh_cost = sensor_values.get("kwh_cost") or kwh_cost
+                
+                # Current cycle usage
+                if "current_cycle_usage" in sensor_values:
+                    kwh_val = sensor_values["current_cycle_usage"]
+                    current_usage_kwh = f"{int(round(kwh_val))} kWh"
+                    # Calculate cost if we have kWh cost
+                    if sensor_kwh_cost:
+                        cost_val = kwh_val * sensor_kwh_cost
+                        current_usage_cost = f"${cost_val:.2f}"
+                    elif "current_usage_cost" in sensor_values:
+                        current_usage_cost = f"${sensor_values['current_usage_cost']:.2f}"
+                
+                # Forecasted usage
+                if "forecasted_usage" in sensor_values:
+                    kwh_val = sensor_values["forecasted_usage"]
+                    projected_usage_kwh = f"{int(round(kwh_val))} kWh"
+                    # Calculate cost
+                    if sensor_kwh_cost:
+                        cost_val = kwh_val * sensor_kwh_cost
+                        projected_usage_cost = f"${cost_val:.2f}"
+                
+        except Exception as e:
+            await db.add_log("warning", f"Failed to fetch ConEd Connect sensors: {e}")
     
-    if token and (current_usage_sensor or future_usage_sensor):
+    # Fallback to custom sensors if meter tracking not enabled or sensors not populated
+    elif token and (current_usage_sensor or future_usage_sensor):
+        await db.add_log("debug", f"TTS Preview: Using custom sensors - current='{current_usage_sensor}', future='{future_usage_sensor}'")
         try:
             async with aiohttp.ClientSession() as session:
                 # Fetch current usage sensor
@@ -3004,27 +3056,18 @@ async def preview_tts_message(
                             f"http://supervisor/core/api/states/{sensor_id}",
                             headers={"Authorization": f"Bearer {token}"},
                         ) as resp:
-                            await db.add_log("debug", f"Current usage sensor {sensor_id}: status={resp.status}")
                             if resp.status == 200:
                                 state_data = await resp.json()
                                 sensor_state = state_data.get("state", "")
-                                unit = state_data.get("attributes", {}).get("unit_of_measurement", "kWh")
-                                await db.add_log("debug", f"Current usage state='{sensor_state}', unit={unit}")
                                 if sensor_state and sensor_state not in ("unknown", "unavailable"):
                                     try:
                                         kwh_value = float(sensor_state)
-                                        current_usage_kwh = f"{kwh_value:.1f} {unit}"
+                                        current_usage_kwh = f"{int(round(kwh_value))} kWh"
                                         if kwh_cost:
                                             cost_value = kwh_value * kwh_cost
                                             current_usage_cost = f"${cost_value:.2f}"
-                                        await db.add_log("debug", f"Current usage computed: kwh={current_usage_kwh}, cost={current_usage_cost}")
                                     except ValueError:
-                                        current_usage_kwh = f"{sensor_state} {unit}"
-                                        await db.add_log("debug", f"Current usage non-numeric: {current_usage_kwh}")
-                                else:
-                                    await db.add_log("warning", f"Current usage sensor state is '{sensor_state}' - skipping")
-                            else:
-                                await db.add_log("warning", f"Current usage sensor returned status {resp.status}")
+                                        current_usage_kwh = f"{sensor_state} kWh"
                     except Exception as e:
                         await db.add_log("warning", f"Failed to fetch current usage sensor: {e}")
                 
@@ -3036,27 +3079,18 @@ async def preview_tts_message(
                             f"http://supervisor/core/api/states/{sensor_id}",
                             headers={"Authorization": f"Bearer {token}"},
                         ) as resp:
-                            await db.add_log("debug", f"Future usage sensor {sensor_id}: status={resp.status}")
                             if resp.status == 200:
                                 state_data = await resp.json()
                                 sensor_state = state_data.get("state", "")
-                                unit = state_data.get("attributes", {}).get("unit_of_measurement", "kWh")
-                                await db.add_log("debug", f"Future usage state='{sensor_state}', unit={unit}")
                                 if sensor_state and sensor_state not in ("unknown", "unavailable"):
                                     try:
                                         kwh_value = float(sensor_state)
-                                        projected_usage_kwh = f"{kwh_value:.1f} {unit}"
+                                        projected_usage_kwh = f"{int(round(kwh_value))} kWh"
                                         if kwh_cost:
                                             cost_value = kwh_value * kwh_cost
                                             projected_usage_cost = f"${cost_value:.2f}"
-                                        await db.add_log("debug", f"Future usage computed: kwh={projected_usage_kwh}, cost={projected_usage_cost}")
                                     except ValueError:
-                                        projected_usage_kwh = f"{sensor_state} {unit}"
-                                        await db.add_log("debug", f"Future usage non-numeric: {projected_usage_kwh}")
-                                else:
-                                    await db.add_log("warning", f"Future usage sensor state is '{sensor_state}' - skipping")
-                            else:
-                                await db.add_log("warning", f"Future usage sensor returned status {resp.status}")
+                                        projected_usage_kwh = f"{sensor_state} kWh"
                     except Exception as e:
                         await db.add_log("warning", f"Failed to fetch future usage sensor: {e}")
         except Exception as e:
@@ -3071,9 +3105,7 @@ async def preview_tts_message(
         last_payment_amount = latest_payment.get("amount", "")
         last_payment_date = latest_payment.get("payment_date", "")
     
-    # Log final values before returning
     await db.add_log("debug", f"TTS Preview final: current_usage_kwh='{current_usage_kwh}', current_usage_cost='{current_usage_cost}'")
-    await db.add_log("debug", f"TTS Preview final: projected_usage_kwh='{projected_usage_kwh}', projected_usage_cost='{projected_usage_cost}'")
     
     return {
         "greeting": greeting,

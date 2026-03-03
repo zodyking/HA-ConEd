@@ -14,7 +14,6 @@ SENSOR_LATEST_BILL = "latest_bill"
 SENSOR_PREVIOUS_BILL = "previous_bill"
 SENSOR_LAST_PAYMENT = "last_payment"
 SENSOR_BILL_PDF_URL = "bill_pdf_url"
-SENSOR_PAYEE_SUMMARY = "payee_summary"
 SENSOR_DUE_DATE = "due_date"
 SENSOR_KWH_COST = "kwh_cost"
 SENSOR_LAST_BILL_KWH = "last_bill_kwh"
@@ -55,12 +54,6 @@ SENSORS = {
         "unit": None,
         "device_class": None,
         "icon": "mdi:file-pdf-box",
-    },
-    SENSOR_PAYEE_SUMMARY: {
-        "name": "Payee Summary",
-        "unit": "USD",
-        "device_class": "monetary",
-        "icon": "mdi:account-group",
     },
     SENSOR_DUE_DATE: {
         "name": "Due Date",

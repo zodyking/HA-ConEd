@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 from typing import Any
 
@@ -14,6 +15,8 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .const import DOMAIN, SCAN_INTERVAL
 
 _LOGGER = logging.getLogger(__name__)
+
+ADDON_SLUG = "9a4bbad0_coned_scraper"
 
 
 def extract_numeric(value: str | float | int | None) -> float:
@@ -42,6 +45,36 @@ class ConEdisonDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self.addon_url = addon_url.rstrip("/")
         self.hass = hass
+        self._ingress_url: str | None = None
+
+    async def _get_ingress_url(self) -> str | None:
+        """Get the Ingress URL for the addon from Supervisor API."""
+        if self._ingress_url:
+            return self._ingress_url
+        
+        token = os.environ.get("SUPERVISOR_TOKEN")
+        if not token:
+            return None
+        
+        try:
+            session = async_get_clientsession(self.hass)
+            async with session.get(
+                f"http://supervisor/addons/{ADDON_SLUG}/info",
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as response:
+                if response.status == 200:
+                    info = await response.json()
+                    data = info.get("data", {})
+                    ingress_entry = data.get("ingress_entry")
+                    if ingress_entry:
+                        self._ingress_url = f"{{{{HA_URL}}}}{ingress_entry}"
+                        _LOGGER.debug("Got ingress entry: %s", ingress_entry)
+                        return ingress_entry
+        except Exception as err:
+            _LOGGER.debug("Failed to get ingress URL: %s", err)
+        
+        return None
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from the addon API."""
@@ -79,17 +112,6 @@ class ConEdisonDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                             )
                             data["last_payment_data"] = last_payment
                     
-                    # Payee summary (bill_balance from most recent)
-                    payee_summaries = ledger.get("payee_summaries", {})
-                    if bills and payee_summaries:
-                        latest_bill_id = str(bills[0].get("id"))
-                        if latest_bill_id in payee_summaries:
-                            summary = payee_summaries[latest_bill_id]
-                            data["payee_summary"] = extract_numeric(
-                                summary.get("bill_balance", 0)
-                            )
-                            data["payee_summary_data"] = summary
-
             # Fetch bill details (due_date, kwh_cost, kwh_used)
             async with session.get(
                 f"{self.addon_url}/api/bill-details/latest",
@@ -121,18 +143,25 @@ class ConEdisonDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         data["current_cycle_usage"] = forecast.get("usage_to_date")
                         data["forecasted_usage"] = forecast.get("forecasted_usage")
 
-            # Fetch bill PDF URL
+            # Fetch bill PDF URL - check if PDF exists first
             async with session.get(
                 f"{self.addon_url}/api/bill-document",
                 timeout=aiohttp.ClientTimeout(total=10),
                 allow_redirects=False,
             ) as response:
                 if response.status == 200:
-                    data["bill_pdf_url"] = f"{self.addon_url}/api/bill-document"
-                elif response.status == 307 or response.status == 302:
-                    data["bill_pdf_url"] = response.headers.get(
-                        "Location", f"{self.addon_url}/api/bill-document"
-                    )
+                    # PDF exists - construct external Ingress URL
+                    ingress_entry = await self._get_ingress_url()
+                    if ingress_entry:
+                        # Use Home Assistant's external URL with ingress path
+                        ha_url = self.hass.config.external_url or self.hass.config.internal_url
+                        if ha_url:
+                            data["bill_pdf_url"] = f"{ha_url.rstrip('/')}{ingress_entry}/api/bill-document"
+                        else:
+                            data["bill_pdf_url"] = f"{ingress_entry}/api/bill-document"
+                    else:
+                        # Fallback to internal URL
+                        data["bill_pdf_url"] = f"{self.addon_url}/api/bill-document"
 
             return data
 
