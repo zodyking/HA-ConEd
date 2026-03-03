@@ -138,6 +138,7 @@
         <SettingsAppTab v-else-if="currentPage === 'app-settings'" />
         <SettingsPayeesPaymentsTab v-else-if="currentPage === 'payees-payments'" />
         <SettingsTtsTab v-else-if="currentPage === 'tts'" />
+        <SettingsNotificationsTab v-else-if="currentPage === 'notifications'" />
         <SettingsImapTab v-else-if="currentPage === 'imap'" />
       </div>
     </template>
@@ -147,6 +148,7 @@
 <script setup lang="ts">
 import { ref, nextTick, onMounted } from 'vue'
 import { getApiBase } from '../lib/api-base'
+import { waitForAdminResetVisibility } from '../lib/ha-user-admin'
 import Dashboard from './Dashboard.vue'
 import SettingsCredentialsTab from './settings/SettingsCredentialsTab.vue'
 import SettingsAutomatedTab from './settings/SettingsAutomatedTab.vue'
@@ -156,6 +158,7 @@ import SettingsAppTab from './settings/SettingsAppTab.vue'
 import SettingsPayeesPaymentsTab from './settings/SettingsPayeesPaymentsTab.vue'
 import SettingsTtsTab from './settings/SettingsTtsTab.vue'
 import SettingsImapTab from './settings/SettingsImapTab.vue'
+import SettingsNotificationsTab from './settings/SettingsNotificationsTab.vue'
 
 type Page =
   | 'menu'
@@ -168,6 +171,7 @@ type Page =
   | 'payees-payments'
   | 'tts'
   | 'imap'
+  | 'notifications'
 
 const currentPage = ref<Page>('menu')
 const isUnlocked = ref(false)
@@ -175,7 +179,7 @@ const pinDigits = ref<string[]>(['', '', '', ''])
 const pinRefs = ref<(HTMLInputElement | null)[]>([])
 const passwordError = ref('')
 
-// Admin reset state
+// Admin reset: only show for HA admin users (when in HA panel)
 const isHaAdmin = ref(false)
 const showAdminReset = ref(false)
 const newPinDigits = ref<string[]>(['', '', '', ''])
@@ -193,6 +197,7 @@ const menuItems = [
   { id: 'mqtt' as Page, icon: '📡', label: 'MQTT', description: 'Home Assistant MQTT integration' },
   { id: 'bill-settings' as Page, icon: '📄', label: 'Bill Settings', description: 'Bill PDFs, auto-download, re-parse' },
   { id: 'payees-payments' as Page, icon: '👥', label: 'Payees & Payments', description: 'Users, bill split, cards, and payment audit' },
+  { id: 'notifications' as Page, icon: '🔔', label: 'Notifications', description: 'Mobile push notifications for bill events' },
   { id: 'tts' as Page, icon: '🔊', label: 'TTS Alerts', description: 'Media player, TTS messages, and wait-for-idle' },
   { id: 'imap' as Page, icon: '📧', label: 'Email / IMAP', description: 'Email parsing for auto-payment detection' },
   { id: 'app-settings' as Page, icon: '⚙️', label: 'App Settings', description: 'Password and app configuration' },
@@ -276,17 +281,6 @@ function cancelLock() {
 }
 
 // Admin reset functions
-async function checkHaAdmin() {
-  try {
-    const res = await fetch(`${getApiBase()}/app-settings/check-ha-admin`)
-    if (res.ok) {
-      const data = await res.json()
-      isHaAdmin.value = data.is_admin === true
-    }
-  } catch {
-    isHaAdmin.value = false
-  }
-}
 
 function onNewPinInput(index: number, ev: Event) {
   const el = ev.target as HTMLInputElement
@@ -380,8 +374,8 @@ async function handleAdminReset() {
   }
 }
 
-onMounted(() => {
-  checkHaAdmin()
+onMounted(async () => {
+  isHaAdmin.value = await waitForAdminResetVisibility()
 })
 </script>
 

@@ -23,6 +23,7 @@
             <span>History</span>
           </button>
           <button
+            v-if="showSettingsNav"
             :class="['ha-nav-button', { active: activeTab === 'settings' }]"
             aria-label="Settings"
             @click="activeTab = 'settings'"
@@ -48,13 +49,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, watch, onMounted, onUnmounted } from 'vue'
 import AccountLedger from '../components/AccountLedger.vue'
 import History from '../components/History.vue'
 import Settings from '../components/Settings.vue'
 import { logoUrl } from '../lib/assets'
+import { waitForSettingsNavVisibility } from '../lib/ha-user-admin'
 
 const activeTab = ref<'account-ledger' | 'history' | 'settings'>('account-ledger')
+const showSettingsNav = ref(false)
 
 function onNavigate(tab: 'console' | 'settings') {
   activeTab.value = tab === 'console' ? 'settings' : tab
@@ -64,8 +67,15 @@ function handleNavigateToLedger() {
   activeTab.value = 'account-ledger'
 }
 
-onMounted(() => {
+watch([showSettingsNav, activeTab], ([nav, tab]) => {
+  if (nav === false && tab === 'settings') {
+    activeTab.value = 'account-ledger'
+  }
+})
+
+onMounted(async () => {
   window.addEventListener('navigateToLedger', handleNavigateToLedger)
+  showSettingsNav.value = await waitForSettingsNavVisibility()
 })
 onUnmounted(() => {
   window.removeEventListener('navigateToLedger', handleNavigateToLedger)

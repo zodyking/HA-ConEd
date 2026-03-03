@@ -1,0 +1,449 @@
+<template>
+  <div class="notify-settings">
+    <!-- Loading State -->
+    <div v-if="loading" class="notify-loading">
+      <div class="notify-spinner"></div>
+      <p>Loading notification settings...</p>
+    </div>
+
+    <template v-else>
+      <!-- Overview / Addon Check -->
+      <div v-if="!isAddon" class="notify-addon-notice">
+        <span class="notify-notice-icon">⚠️</span>
+        <div>
+          <strong>Home Assistant Addon Required</strong>
+          <p>Push notifications require this app to run as a Home Assistant addon with the Companion App configured on your mobile devices.</p>
+        </div>
+      </div>
+
+      <template v-else>
+        <!-- New Bill Posted -->
+        <div class="notify-section">
+          <div class="notify-section-header" @click="toggleSection('new_bill')">
+            <div class="notify-section-title">
+              <span class="notify-section-icon">📄</span>
+              <span>New Bill Posted</span>
+            </div>
+            <span class="notify-section-sub">When a new bill appears on your account</span>
+            <span class="notify-section-chevron" :class="{ expanded: expandedSections.new_bill }">▼</span>
+          </div>
+          
+          <div v-if="expandedSections.new_bill" class="notify-section-content">
+            <div class="notify-toggle-row">
+              <label class="notify-toggle">
+                <input v-model="configs.new_bill.enabled" type="checkbox" />
+                <span class="notify-toggle-slider"></span>
+              </label>
+              <span class="notify-toggle-label">Enable Notification</span>
+            </div>
+
+            <template v-if="configs.new_bill.enabled">
+              <div class="notify-form-group">
+                <label class="notify-label">Title</label>
+                <input v-model="configs.new_bill.title" type="text" class="notify-input" />
+              </div>
+
+              <div class="notify-form-group">
+                <label class="notify-label">Message Template</label>
+                <div class="notify-var-chips">
+                  <span class="notify-var-chip" @click="insertVar('new_bill', '{amount}')">{amount}</span>
+                  <span class="notify-var-chip" @click="insertVar('new_bill', '{due_date}')">{due_date}</span>
+                  <span class="notify-var-chip" @click="insertVar('new_bill', '{month_range}')">{month_range}</span>
+                </div>
+                <textarea
+                  ref="newBillInput"
+                  v-model="configs.new_bill.template"
+                  class="notify-textarea"
+                  rows="2"
+                ></textarea>
+              </div>
+
+              <button class="notify-btn notify-btn-test" :disabled="testing === 'new_bill'" @click="testNotification('new_bill')">
+                {{ testing === 'new_bill' ? 'Sending...' : '📱 Test Notification' }}
+              </button>
+            </template>
+          </div>
+        </div>
+
+        <!-- Payment Received -->
+        <div class="notify-section">
+          <div class="notify-section-header" @click="toggleSection('payment_received')">
+            <div class="notify-section-title">
+              <span class="notify-section-icon">💳</span>
+              <span>Payment Received</span>
+            </div>
+            <span class="notify-section-sub">When a payment is detected on your account</span>
+            <span class="notify-section-chevron" :class="{ expanded: expandedSections.payment_received }">▼</span>
+          </div>
+          
+          <div v-if="expandedSections.payment_received" class="notify-section-content">
+            <div class="notify-toggle-row">
+              <label class="notify-toggle">
+                <input v-model="configs.payment_received.enabled" type="checkbox" />
+                <span class="notify-toggle-slider"></span>
+              </label>
+              <span class="notify-toggle-label">Enable Notification</span>
+            </div>
+
+            <template v-if="configs.payment_received.enabled">
+              <div class="notify-form-group">
+                <label class="notify-label">Title</label>
+                <input v-model="configs.payment_received.title" type="text" class="notify-input" />
+              </div>
+
+              <div class="notify-form-group">
+                <label class="notify-label">Message Template</label>
+                <div class="notify-var-chips">
+                  <span class="notify-var-chip" @click="insertVar('payment_received', '{amount}')">{amount}</span>
+                  <span class="notify-var-chip" @click="insertVar('payment_received', '{balance}')">{balance}</span>
+                  <span class="notify-var-chip" @click="insertVar('payment_received', '{payee_name}')">{payee_name}</span>
+                </div>
+                <textarea
+                  ref="paymentReceivedInput"
+                  v-model="configs.payment_received.template"
+                  class="notify-textarea"
+                  rows="2"
+                ></textarea>
+              </div>
+
+              <button class="notify-btn notify-btn-test" :disabled="testing === 'payment_received'" @click="testNotification('payment_received')">
+                {{ testing === 'payment_received' ? 'Sending...' : '📱 Test Notification' }}
+              </button>
+            </template>
+          </div>
+        </div>
+
+        <!-- Due Date Reminder -->
+        <div class="notify-section">
+          <div class="notify-section-header" @click="toggleSection('due_reminder')">
+            <div class="notify-section-title">
+              <span class="notify-section-icon">⏰</span>
+              <span>Due Date Reminder</span>
+            </div>
+            <span class="notify-section-sub">Reminder before your bill is due</span>
+            <span class="notify-section-chevron" :class="{ expanded: expandedSections.due_reminder }">▼</span>
+          </div>
+          
+          <div v-if="expandedSections.due_reminder" class="notify-section-content">
+            <div class="notify-toggle-row">
+              <label class="notify-toggle">
+                <input v-model="configs.due_reminder.enabled" type="checkbox" />
+                <span class="notify-toggle-slider"></span>
+              </label>
+              <span class="notify-toggle-label">Enable Notification</span>
+            </div>
+
+            <template v-if="configs.due_reminder.enabled">
+              <div class="notify-form-group">
+                <label class="notify-label">Days Before Due</label>
+                <input v-model.number="configs.due_reminder.days_before_due" type="number" min="1" max="30" class="notify-input notify-input-small" />
+              </div>
+
+              <div class="notify-form-group">
+                <label class="notify-label">Title</label>
+                <input v-model="configs.due_reminder.title" type="text" class="notify-input" />
+              </div>
+
+              <div class="notify-form-group">
+                <label class="notify-label">Message Template</label>
+                <div class="notify-var-chips">
+                  <span class="notify-var-chip" @click="insertVar('due_reminder', '{amount}')">{amount}</span>
+                  <span class="notify-var-chip" @click="insertVar('due_reminder', '{due_date}')">{due_date}</span>
+                  <span class="notify-var-chip" @click="insertVar('due_reminder', '{days_until}')">{days_until}</span>
+                </div>
+                <textarea
+                  ref="dueReminderInput"
+                  v-model="configs.due_reminder.template"
+                  class="notify-textarea"
+                  rows="2"
+                ></textarea>
+              </div>
+
+              <button class="notify-btn notify-btn-test" :disabled="testing === 'due_reminder'" @click="testNotification('due_reminder')">
+                {{ testing === 'due_reminder' ? 'Sending...' : '📱 Test Notification' }}
+              </button>
+            </template>
+          </div>
+        </div>
+
+        <!-- Balance Change -->
+        <div class="notify-section">
+          <div class="notify-section-header" @click="toggleSection('balance_change')">
+            <div class="notify-section-title">
+              <span class="notify-section-icon">💰</span>
+              <span>Balance Change</span>
+            </div>
+            <span class="notify-section-sub">When your account balance changes</span>
+            <span class="notify-section-chevron" :class="{ expanded: expandedSections.balance_change }">▼</span>
+          </div>
+          
+          <div v-if="expandedSections.balance_change" class="notify-section-content">
+            <div class="notify-toggle-row">
+              <label class="notify-toggle">
+                <input v-model="configs.balance_change.enabled" type="checkbox" />
+                <span class="notify-toggle-slider"></span>
+              </label>
+              <span class="notify-toggle-label">Enable Notification</span>
+            </div>
+
+            <template v-if="configs.balance_change.enabled">
+              <div class="notify-form-group">
+                <label class="notify-label">Title</label>
+                <input v-model="configs.balance_change.title" type="text" class="notify-input" />
+              </div>
+
+              <div class="notify-form-group">
+                <label class="notify-label">Message Template</label>
+                <div class="notify-var-chips">
+                  <span class="notify-var-chip" @click="insertVar('balance_change', '{old_balance}')">{old_balance}</span>
+                  <span class="notify-var-chip" @click="insertVar('balance_change', '{new_balance}')">{new_balance}</span>
+                </div>
+                <textarea
+                  ref="balanceChangeInput"
+                  v-model="configs.balance_change.template"
+                  class="notify-textarea"
+                  rows="2"
+                ></textarea>
+              </div>
+
+              <button class="notify-btn notify-btn-test" :disabled="testing === 'balance_change'" @click="testNotification('balance_change')">
+                {{ testing === 'balance_change' ? 'Sending...' : '📱 Test Notification' }}
+              </button>
+            </template>
+          </div>
+        </div>
+
+        <!-- Save Button -->
+        <div class="notify-actions">
+          <button class="notify-btn notify-btn-primary" :disabled="saving" @click="saveAll">
+            {{ saving ? 'Saving...' : 'Save All Notification Settings' }}
+          </button>
+        </div>
+
+        <div v-if="message" :class="['notify-message', message.type]">
+          {{ message.text }}
+        </div>
+      </template>
+    </template>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref, reactive, onMounted } from 'vue'
+import { getApiBase } from '../../lib/api-base'
+
+interface NotificationConfig {
+  id?: number
+  event_type: string
+  enabled: boolean
+  title: string
+  template: string
+  days_before_due?: number | null
+}
+
+const loading = ref(true)
+const saving = ref(false)
+const testing = ref<string | null>(null)
+const isAddon = ref(false)
+const message = ref<{ type: 'success' | 'error'; text: string } | null>(null)
+
+const expandedSections = reactive({
+  new_bill: true,
+  payment_received: false,
+  due_reminder: false,
+  balance_change: false
+})
+
+const configs = reactive<Record<string, NotificationConfig>>({
+  new_bill: { event_type: 'new_bill', enabled: true, title: 'Con Edison Billing', template: 'A new bill for {amount} has posted, due {due_date}' },
+  payment_received: { event_type: 'payment_received', enabled: true, title: 'Con Edison Payment', template: 'Payment of {amount} received. Remaining balance: {balance}' },
+  due_reminder: { event_type: 'due_reminder', enabled: true, title: 'Con Edison Reminder', template: 'Your bill of {amount} is due in {days_until} days on {due_date}', days_before_due: 3 },
+  balance_change: { event_type: 'balance_change', enabled: true, title: 'Con Edison Balance', template: 'Your account balance changed from {old_balance} to {new_balance}' }
+})
+
+const newBillInput = ref<HTMLTextAreaElement | null>(null)
+const paymentReceivedInput = ref<HTMLTextAreaElement | null>(null)
+const dueReminderInput = ref<HTMLTextAreaElement | null>(null)
+const balanceChangeInput = ref<HTMLTextAreaElement | null>(null)
+
+function toggleSection(section: string) {
+  expandedSections[section as keyof typeof expandedSections] = !expandedSections[section as keyof typeof expandedSections]
+}
+
+function insertVar(eventType: string, variable: string) {
+  const inputMap: Record<string, typeof newBillInput> = {
+    new_bill: newBillInput,
+    payment_received: paymentReceivedInput,
+    due_reminder: dueReminderInput,
+    balance_change: balanceChangeInput
+  }
+  
+  const inputRef = inputMap[eventType]
+  const textarea = inputRef?.value
+  if (!textarea) {
+    configs[eventType].template += variable
+    return
+  }
+  
+  const start = textarea.selectionStart || 0
+  const end = textarea.selectionEnd || 0
+  const text = configs[eventType].template
+  configs[eventType].template = text.slice(0, start) + variable + text.slice(end)
+  
+  setTimeout(() => {
+    textarea.focus()
+    const newPos = start + variable.length
+    textarea.setSelectionRange(newPos, newPos)
+  }, 0)
+}
+
+async function loadConfigs() {
+  loading.value = true
+  try {
+    // Check addon status
+    const haRes = await fetch(`${getApiBase()}/ha-notify-services`)
+    if (haRes.ok) {
+      const d = await haRes.json()
+      isAddon.value = d.is_addon === true
+    }
+
+    // Load notification configs
+    const res = await fetch(`${getApiBase()}/notification-config`)
+    if (res.ok) {
+      const d = await res.json()
+      const loadedConfigs = d.configs || []
+      for (const cfg of loadedConfigs) {
+        if (configs[cfg.event_type]) {
+          configs[cfg.event_type] = { ...configs[cfg.event_type], ...cfg }
+        }
+      }
+    }
+  } catch (e) {
+    console.error('Failed to load notification configs:', e)
+    message.value = { type: 'error', text: 'Failed to load settings' }
+  } finally {
+    loading.value = false
+  }
+}
+
+async function saveAll() {
+  saving.value = true
+  message.value = null
+  
+  try {
+    const eventTypes = ['new_bill', 'payment_received', 'due_reminder', 'balance_change']
+    let success = true
+    
+    for (const eventType of eventTypes) {
+      const cfg = configs[eventType]
+      const res = await fetch(`${getApiBase()}/notification-config/${eventType}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          enabled: cfg.enabled,
+          title: cfg.title,
+          template: cfg.template,
+          days_before_due: cfg.days_before_due
+        })
+      })
+      if (!res.ok) {
+        success = false
+      }
+    }
+    
+    if (success) {
+      message.value = { type: 'success', text: 'Notification settings saved!' }
+    } else {
+      message.value = { type: 'error', text: 'Some settings failed to save' }
+    }
+  } catch (e) {
+    message.value = { type: 'error', text: 'Failed to save settings' }
+  } finally {
+    saving.value = false
+  }
+}
+
+async function testNotification(eventType: string) {
+  testing.value = eventType
+  message.value = null
+  
+  try {
+    const res = await fetch(`${getApiBase()}/notification-config/test/${eventType}`, {
+      method: 'POST'
+    })
+    const d = await res.json()
+    
+    if (res.ok) {
+      message.value = { type: 'success', text: d.message || 'Test notification sent!' }
+    } else {
+      message.value = { type: 'error', text: d.detail || 'Failed to send test notification' }
+    }
+  } catch (e) {
+    message.value = { type: 'error', text: 'Failed to send test notification' }
+  } finally {
+    testing.value = null
+  }
+}
+
+onMounted(() => {
+  loadConfigs()
+})
+</script>
+
+<style scoped>
+.notify-settings { display: flex; flex-direction: column; gap: 1rem; }
+
+.notify-loading { text-align: center; padding: 3rem; color: #666; }
+.notify-spinner { width: 32px; height: 32px; border: 3px solid #e0e0e0; border-top-color: #03a9f4; border-radius: 50%; margin: 0 auto 1rem; animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.notify-addon-notice { display: flex; gap: 1rem; padding: 1.25rem; background: #fff3e0; border: 1px solid #ffcc80; border-radius: 12px; }
+.notify-notice-icon { font-size: 1.5rem; }
+.notify-addon-notice p { margin: 0.5rem 0 0; font-size: 0.9rem; color: #666; }
+
+.notify-section { background: white; border: 1px solid #e0e0e0; border-radius: 12px; overflow: hidden; }
+.notify-section-header { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; padding: 1rem 1.25rem; cursor: pointer; background: #fafafa; border-bottom: 1px solid transparent; transition: background 0.15s; }
+.notify-section-header:hover { background: #f0f0f0; }
+.notify-section-title { display: flex; align-items: center; gap: 0.5rem; font-weight: 600; }
+.notify-section-icon { font-size: 1.25rem; }
+.notify-section-sub { flex: 1; font-size: 0.85rem; color: #666; }
+.notify-section-chevron { font-size: 0.75rem; color: #999; transition: transform 0.2s; }
+.notify-section-chevron.expanded { transform: rotate(180deg); }
+
+.notify-section-content { padding: 1.25rem; border-top: 1px solid #e0e0e0; }
+
+.notify-toggle-row { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem; }
+.notify-toggle { position: relative; width: 44px; height: 24px; cursor: pointer; }
+.notify-toggle input { opacity: 0; width: 0; height: 0; }
+.notify-toggle-slider { position: absolute; inset: 0; background: #ccc; border-radius: 24px; transition: background 0.2s; }
+.notify-toggle-slider::before { content: ''; position: absolute; width: 18px; height: 18px; left: 3px; bottom: 3px; background: white; border-radius: 50%; transition: transform 0.2s; }
+.notify-toggle input:checked + .notify-toggle-slider { background: #4caf50; }
+.notify-toggle input:checked + .notify-toggle-slider::before { transform: translateX(20px); }
+.notify-toggle-label { font-weight: 500; }
+
+.notify-form-group { margin-bottom: 1rem; }
+.notify-label { display: block; font-weight: 500; margin-bottom: 0.5rem; font-size: 0.9rem; }
+.notify-input { width: 100%; padding: 0.6rem 0.75rem; border: 1px solid #ddd; border-radius: 6px; font-size: 0.95rem; }
+.notify-input:focus { outline: none; border-color: #03a9f4; box-shadow: 0 0 0 2px rgba(3, 169, 244, 0.15); }
+.notify-input-small { max-width: 100px; }
+
+.notify-textarea { width: 100%; padding: 0.6rem 0.75rem; border: 1px solid #ddd; border-radius: 6px; font-size: 0.95rem; font-family: inherit; resize: vertical; }
+.notify-textarea:focus { outline: none; border-color: #03a9f4; box-shadow: 0 0 0 2px rgba(3, 169, 244, 0.15); }
+
+.notify-var-chips { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.5rem; }
+.notify-var-chip { display: inline-block; padding: 0.25rem 0.5rem; background: #e3f2fd; color: #1565c0; font-size: 0.75rem; font-family: monospace; border-radius: 4px; cursor: pointer; border: 1px solid #90caf9; transition: all 0.15s; }
+.notify-var-chip:hover { background: #bbdefb; transform: translateY(-1px); }
+
+.notify-btn { padding: 0.6rem 1.25rem; border: none; border-radius: 6px; font-size: 0.9rem; font-weight: 500; cursor: pointer; transition: all 0.15s; }
+.notify-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.notify-btn-primary { background: #1976d2; color: white; }
+.notify-btn-primary:hover:not(:disabled) { background: #1565c0; }
+.notify-btn-test { background: #e3f2fd; color: #1976d2; border: 1px solid #90caf9; margin-top: 0.5rem; }
+.notify-btn-test:hover:not(:disabled) { background: #bbdefb; }
+
+.notify-actions { margin-top: 0.5rem; }
+
+.notify-message { padding: 0.75rem 1rem; border-radius: 6px; margin-top: 1rem; }
+.notify-message.success { background: #e8f5e9; color: #2e7d32; }
+.notify-message.error { background: #ffebee; color: #c62828; }
+</style>

@@ -95,6 +95,9 @@ model BillDocument {
 model PayeeUser {
   id                    Int      @id @default(autoincrement())
   name                  String   @unique
+  haUserId              String?  @map("ha_user_id")
+  notifyService         String?  @map("notify_service")
+  notificationsEnabled  Boolean  @default(true) @map("notifications_enabled")
   isDefault             Boolean  @default(false) @map("is_default")
   responsibilityPercent Int      @default(0) @map("responsibility_percent")
   isAdmin               Boolean  @default(false) @map("is_admin")
@@ -175,4 +178,16 @@ model RealtimeReading {
 
   @@index([endTime])
   @@map("realtime_readings")
+}
+
+model NotificationConfig {
+  id          Int      @id @default(autoincrement())
+  eventType   String   @unique @map("event_type")
+  enabled     Boolean  @default(true)
+  title       String   @default("Con Edison Billing")
+  template    String
+  daysBeforeDue Int?   @map("days_before_due")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("notification_configs")
 }

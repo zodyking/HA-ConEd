@@ -273,6 +273,16 @@ async def run_scheduled_scrape():
                     current_balance = scraped_data.get("account_balance", "")
                     payee_name = tts_payment_data.get("payee_name", "")
                     await trigger_payment_received_tts(payment_amount, current_balance, payee_name)
+                    # Send push notification for payment
+                    try:
+                        from notifications import notify_payment_received
+                        await notify_payment_received(
+                            amount=payment_amount,
+                            balance=current_balance,
+                            payee_name=payee_name
+                        )
+                    except Exception as notify_e:
+                        await db.add_log("warning", f"Failed to send payment notification: {notify_e}")
                 else:
                     await db.add_log("debug", f"No payment TTS: {tts_payment_reason}")
             except Exception as tts_e:
@@ -289,10 +299,27 @@ async def run_scheduled_scrape():
                         bill_total=tts_bill_data.get("bill_total", ""),
                         due_date=tts_bill_data.get("due_date", "")
                     )
+                    # Send push notification for new bill
+                    try:
+                        from notifications import notify_new_bill
+                        await notify_new_bill(
+                            amount=tts_bill_data.get("bill_total", "N/A"),
+                            due_date=tts_bill_data.get("due_date", "N/A"),
+                            month_range=tts_bill_data.get("month_range", "N/A")
+                        )
+                    except Exception as notify_e:
+                        await db.add_log("warning", f"Failed to send new bill notification: {notify_e}")
                 else:
                     await db.add_log("debug", f"No bill TTS: {tts_bill_reason}")
             except Exception as tts_e:
                 await db.add_log("warning", f"Failed to check/trigger bill TTS: {tts_e}")
+            
+            # Check for due date reminders
+            try:
+                from notifications import check_and_send_due_reminders
+                await check_and_send_due_reminders()
+            except Exception as remind_e:
+                await db.add_log("warning", f"Failed to check due reminders: {remind_e}")
         
         # Check IMAP for payment attribution if configured
         if success:
@@ -1132,6 +1159,16 @@ async def start_scraper():
                     current_balance = scraped_data.get("account_balance", "")
                     payee_name = tts_payment_data.get("payee_name", "")
                     await trigger_payment_received_tts(payment_amount, current_balance, payee_name)
+                    # Send push notification for payment
+                    try:
+                        from notifications import notify_payment_received
+                        await notify_payment_received(
+                            amount=payment_amount,
+                            balance=current_balance,
+                            payee_name=payee_name
+                        )
+                    except Exception as notify_e:
+                        await db.add_log("warning", f"Failed to send payment notification: {notify_e}")
                 else:
                     await db.add_log("debug", f"No payment TTS: {tts_payment_reason}")
             except Exception as tts_e:
@@ -1148,10 +1185,27 @@ async def start_scraper():
                         bill_total=tts_bill_data.get("bill_total", ""),
                         due_date=tts_bill_data.get("due_date", "")
                     )
+                    # Send push notification for new bill
+                    try:
+                        from notifications import notify_new_bill
+                        await notify_new_bill(
+                            amount=tts_bill_data.get("bill_total", "N/A"),
+                            due_date=tts_bill_data.get("due_date", "N/A"),
+                            month_range=tts_bill_data.get("month_range", "N/A")
+                        )
+                    except Exception as notify_e:
+                        await db.add_log("warning", f"Failed to send new bill notification: {notify_e}")
                 else:
                     await db.add_log("debug", f"No bill TTS: {tts_bill_reason}")
             except Exception as tts_e:
                 await db.add_log("warning", f"Failed to check/trigger bill TTS: {tts_e}")
+            
+            # Check for due date reminders
+            try:
+                from notifications import check_and_send_due_reminders
+                await check_and_send_due_reminders()
+            except Exception as remind_e:
+                await db.add_log("warning", f"Failed to check due reminders: {remind_e}")
         
         duration = time_module.time() - start_time
         await db.add_scrape_history(success, None if success else "Scrape failed", None, duration)
@@ -2007,10 +2061,16 @@ async def get_payments_unverified(limit: int = 50):
 
 class PayeeUserModel(BaseModel):
     name: str
+    ha_user_id: Optional[str] = None
+    notify_service: Optional[str] = None
+    notifications_enabled: bool = True
     is_default: bool = False
 
 class PayeeUserUpdateModel(BaseModel):
     name: Optional[str] = None
+    ha_user_id: Optional[str] = None
+    notify_service: Optional[str] = None
+    notifications_enabled: Optional[bool] = None
     is_default: Optional[bool] = None
     is_admin: Optional[bool] = None
 
@@ -2037,12 +2097,17 @@ async def list_payee_users():
 async def create_user(user: PayeeUserModel):
     """Create a new payee user"""
     try:
-        new_user = await db.create_payee_user(user.name, user.is_default)
-        user_id = new_user.id
+        new_user = await db.create_payee_user_with_ha(
+            name=user.name,
+            ha_user_id=user.ha_user_id,
+            notify_service=user.notify_service,
+            notifications_enabled=user.notifications_enabled,
+            is_default=user.is_default
+        )
         await db.add_log("info", f"Created payee user: {user.name}")
-        return {"id": user_id, "name": user.name, "is_default": user.is_default}
+        return new_user
     except Exception as e:
-        if "UNIQUE constraint" in str(e):
+        if "UNIQUE constraint" in str(e) or "unique" in str(e).lower():
             raise HTTPException(status_code=400, detail="User with this name already exists")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -2085,7 +2150,19 @@ async def update_responsibilities(request: Request):
 async def update_user(user_id: int, user: PayeeUserUpdateModel):
     """Update a payee user"""
     try:
-        await db.update_payee_user(user_id, user.name, user.is_default, user.is_admin)
+        # Update basic fields
+        if user.name is not None or user.is_default is not None or user.is_admin is not None:
+            await db.update_payee_user(user_id, user.name, user.is_default, user.is_admin)
+        
+        # Update notification fields
+        if user.ha_user_id is not None or user.notify_service is not None or user.notifications_enabled is not None:
+            await db.update_payee_notify_settings(
+                user_id,
+                ha_user_id=user.ha_user_id,
+                notify_service=user.notify_service,
+                notifications_enabled=user.notifications_enabled
+            )
+        
         return {"success": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -3040,6 +3117,225 @@ async def get_ha_entities():
         await db.add_log("error", f"Failed to fetch HA entities: {str(e)}")
     
     return result
+
+
+@app.get("/api/ha-users")
+async def get_ha_users():
+    """Get Home Assistant users via websocket API when running as addon"""
+    import aiohttp
+    token = os.environ.get("SUPERVISOR_TOKEN")
+    
+    result = {
+        "users": [],
+        "is_addon": bool(token)
+    }
+    
+    if not token:
+        return result
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            # Use websocket API via HTTP POST to get user list
+            async with session.post(
+                "http://supervisor/core/api/websocket_api",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json"
+                },
+                json={"type": "config/auth/list"}
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    users = data if isinstance(data, list) else data.get("result", [])
+                    for user in users:
+                        if user.get("system_generated"):
+                            continue
+                        result["users"].append({
+                            "id": user.get("id"),
+                            "name": user.get("name"),
+                            "username": user.get("username"),
+                            "is_admin": user.get("group_ids", []) and "system-admin" in user.get("group_ids", []),
+                            "is_active": user.get("is_active", True)
+                        })
+                else:
+                    # Fallback: try person entities which often mirror users
+                    async with session.get(
+                        "http://supervisor/core/api/states",
+                        headers={"Authorization": f"Bearer {token}"}
+                    ) as states_resp:
+                        if states_resp.status == 200:
+                            states = await states_resp.json()
+                            for entity in states:
+                                entity_id = entity.get("entity_id", "")
+                                if entity_id.startswith("person."):
+                                    name = entity.get("attributes", {}).get("friendly_name", entity_id.split(".")[-1])
+                                    result["users"].append({
+                                        "id": entity_id,
+                                        "name": name,
+                                        "username": entity_id.split(".")[-1],
+                                        "is_admin": False,
+                                        "is_active": True
+                                    })
+                
+                result["users"].sort(key=lambda x: x["name"].lower())
+                
+    except Exception as e:
+        await db.add_log("error", f"Failed to fetch HA users: {str(e)}")
+    
+    return result
+
+
+@app.get("/api/ha-notify-services")
+async def get_ha_notify_services():
+    """Get available mobile app notify services from Home Assistant"""
+    import aiohttp
+    token = os.environ.get("SUPERVISOR_TOKEN")
+    
+    result = {
+        "services": [],
+        "is_addon": bool(token)
+    }
+    
+    if not token:
+        return result
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                "http://supervisor/core/api/services",
+                headers={"Authorization": f"Bearer {token}"}
+            ) as resp:
+                if resp.status != 200:
+                    await db.add_log("warning", f"Failed to fetch HA services: {resp.status}")
+                    return result
+                
+                services = await resp.json()
+                
+                # Find notify domain and filter for mobile_app services
+                for domain in services:
+                    if domain.get("domain") == "notify":
+                        for service_name in domain.get("services", {}):
+                            if service_name.startswith("mobile_app_"):
+                                device_name = service_name.replace("mobile_app_", "")
+                                friendly_name = device_name.replace("_", " ").title()
+                                result["services"].append({
+                                    "service": service_name,
+                                    "friendly_name": friendly_name,
+                                    "full_service": f"notify.{service_name}"
+                                })
+                
+                result["services"].sort(key=lambda x: x["friendly_name"])
+                
+    except Exception as e:
+        await db.add_log("error", f"Failed to fetch HA notify services: {str(e)}")
+    
+    return result
+
+
+# =============================================================================
+# Notification Config API
+# =============================================================================
+
+@app.get("/api/notification-config")
+async def get_notification_configs():
+    """Get all notification configurations"""
+    configs = await db.get_all_notification_configs()
+    return {"configs": configs}
+
+
+class NotificationConfigUpdate(BaseModel):
+    enabled: Optional[bool] = None
+    title: Optional[str] = None
+    template: Optional[str] = None
+    days_before_due: Optional[int] = None
+
+
+@app.put("/api/notification-config/{event_type}")
+async def update_notification_config_endpoint(event_type: str, data: NotificationConfigUpdate):
+    """Update a notification configuration"""
+    success = await db.update_notification_config(
+        event_type=event_type,
+        enabled=data.enabled,
+        title=data.title,
+        template=data.template,
+        days_before_due=data.days_before_due
+    )
+    if not success:
+        raise HTTPException(status_code=404, detail="Notification config not found")
+    return {"success": True}
+
+
+@app.post("/api/notification-config/test/{event_type}")
+async def test_notification(event_type: str, payee_id: Optional[int] = None):
+    """Send a test notification for a specific event type"""
+    import aiohttp
+    
+    token = os.environ.get("SUPERVISOR_TOKEN")
+    if not token:
+        raise HTTPException(status_code=400, detail="Not running as Home Assistant addon")
+    
+    # Get config
+    config = await db.get_notification_config(event_type)
+    if not config:
+        raise HTTPException(status_code=404, detail="Notification config not found")
+    
+    # Get payees to notify
+    if payee_id:
+        payees = await db.get_payee_users()
+        payee = next((p for p in payees if p["id"] == payee_id), None)
+        if not payee or not payee.get("notify_service"):
+            raise HTTPException(status_code=400, detail="Payee not found or has no notify service")
+        target_payees = [payee]
+    else:
+        target_payees = await db.get_payees_with_notifications()
+        if not target_payees:
+            raise HTTPException(status_code=400, detail="No payees with notifications enabled")
+    
+    # Build test message with sample data
+    test_data = {
+        "amount": "$125.50",
+        "due_date": "March 15, 2026",
+        "month_range": "Feb 1 - Feb 28",
+        "balance": "$0.00",
+        "payee_name": "Test User",
+        "days_until": "3",
+        "old_balance": "$125.50",
+        "new_balance": "$0.00",
+    }
+    
+    message = config["template"]
+    for key, value in test_data.items():
+        message = message.replace(f"{{{key}}}", value)
+    
+    # Send notifications
+    sent_count = 0
+    try:
+        async with aiohttp.ClientSession() as session:
+            for payee in target_payees:
+                notify_service = payee.get("notify_service")
+                if not notify_service:
+                    continue
+                
+                async with session.post(
+                    f"http://supervisor/core/api/services/notify/{notify_service}",
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "title": config["title"],
+                        "message": message
+                    }
+                ) as resp:
+                    if resp.status == 200:
+                        sent_count += 1
+                    else:
+                        await db.add_log("warning", f"Failed to send test notification to {notify_service}: {resp.status}")
+    except Exception as e:
+        await db.add_log("error", f"Failed to send test notifications: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+    
+    return {"success": True, "sent_count": sent_count, "message": f"Test notification sent to {sent_count} device(s)"}
 
 
 @app.get("/api/tts/preview-message")

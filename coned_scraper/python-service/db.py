@@ -879,6 +879,9 @@ async def get_payee_users() -> List[Dict[str, Any]]:
         {
             "id": u.id,
             "name": u.name,
+            "ha_user_id": u.haUserId,
+            "notify_service": u.notifyService,
+            "notifications_enabled": u.notificationsEnabled,
             "is_default": u.isDefault,
             "responsibility_percent": u.responsibilityPercent,
             "is_admin": u.isAdmin,
@@ -966,6 +969,218 @@ async def update_payee_responsibilities(responsibilities: Dict[int, int]) -> boo
         return True
     except Exception:
         return False
+
+async def update_payee_notify_settings(
+    user_id: int,
+    ha_user_id: Optional[str] = None,
+    notify_service: Optional[str] = None,
+    notifications_enabled: Optional[bool] = None
+) -> bool:
+    """Update payee notification settings"""
+    await ensure_connected()
+    
+    data = {}
+    if ha_user_id is not None:
+        data["haUserId"] = ha_user_id
+    if notify_service is not None:
+        data["notifyService"] = notify_service
+    if notifications_enabled is not None:
+        data["notificationsEnabled"] = notifications_enabled
+    
+    if not data:
+        return False
+    
+    try:
+        await db.payeeuser.update(where={"id": user_id}, data=data)
+        return True
+    except Exception:
+        return False
+
+async def get_payees_with_notifications() -> List[Dict[str, Any]]:
+    """Get payees that have notifications enabled and a notify service configured"""
+    await ensure_connected()
+    
+    users = await db.payeeuser.find_many(
+        where={
+            "notificationsEnabled": True,
+            "notifyService": {"not": None}
+        }
+    )
+    
+    return [
+        {
+            "id": u.id,
+            "name": u.name,
+            "ha_user_id": u.haUserId,
+            "notify_service": u.notifyService,
+        }
+        for u in users
+    ]
+
+async def create_payee_user_with_ha(
+    name: str,
+    ha_user_id: Optional[str] = None,
+    notify_service: Optional[str] = None,
+    notifications_enabled: bool = True,
+    is_default: bool = False
+) -> Dict[str, Any]:
+    """Create a new payee user with HA integration fields"""
+    await ensure_connected()
+    
+    if is_default:
+        await db.payeeuser.update_many(
+            where={"isDefault": True},
+            data={"isDefault": False}
+        )
+    
+    user = await db.payeeuser.create(
+        data={
+            "name": name,
+            "haUserId": ha_user_id,
+            "notifyService": notify_service,
+            "notificationsEnabled": notifications_enabled,
+            "isDefault": is_default,
+            "responsibilityPercent": 0,
+            "isAdmin": False
+        }
+    )
+    
+    return {
+        "id": user.id,
+        "name": user.name,
+        "ha_user_id": user.haUserId,
+        "notify_service": user.notifyService,
+        "notifications_enabled": user.notificationsEnabled,
+        "is_default": user.isDefault,
+    }
+
+# =============================================================================
+# Notification Config
+# =============================================================================
+
+DEFAULT_NOTIFICATION_CONFIGS = [
+    {
+        "event_type": "new_bill",
+        "title": "Con Edison Billing",
+        "template": "A new bill for {amount} has posted, due {due_date}",
+    },
+    {
+        "event_type": "payment_received",
+        "title": "Con Edison Payment",
+        "template": "Payment of {amount} received. Remaining balance: {balance}",
+    },
+    {
+        "event_type": "due_reminder",
+        "title": "Con Edison Reminder",
+        "template": "Your bill of {amount} is due in {days_until} days on {due_date}",
+        "days_before_due": 3,
+    },
+    {
+        "event_type": "balance_change",
+        "title": "Con Edison Balance",
+        "template": "Your account balance changed from {old_balance} to {new_balance}",
+    },
+]
+
+async def get_notification_config(event_type: str) -> Optional[Dict[str, Any]]:
+    """Get notification config for a specific event type"""
+    await ensure_connected()
+    
+    config = await db.notificationconfig.find_unique(where={"eventType": event_type})
+    
+    if not config:
+        return None
+    
+    return {
+        "id": config.id,
+        "event_type": config.eventType,
+        "enabled": config.enabled,
+        "title": config.title,
+        "template": config.template,
+        "days_before_due": config.daysBeforeDue,
+    }
+
+async def get_all_notification_configs() -> List[Dict[str, Any]]:
+    """Get all notification configs, creating defaults if needed"""
+    await ensure_connected()
+    
+    configs = await db.notificationconfig.find_many()
+    
+    if not configs:
+        for default_config in DEFAULT_NOTIFICATION_CONFIGS:
+            await db.notificationconfig.create(
+                data={
+                    "eventType": default_config["event_type"],
+                    "title": default_config["title"],
+                    "template": default_config["template"],
+                    "daysBeforeDue": default_config.get("days_before_due"),
+                    "enabled": True,
+                }
+            )
+        configs = await db.notificationconfig.find_many()
+    
+    return [
+        {
+            "id": c.id,
+            "event_type": c.eventType,
+            "enabled": c.enabled,
+            "title": c.title,
+            "template": c.template,
+            "days_before_due": c.daysBeforeDue,
+        }
+        for c in configs
+    ]
+
+async def update_notification_config(
+    event_type: str,
+    enabled: Optional[bool] = None,
+    title: Optional[str] = None,
+    template: Optional[str] = None,
+    days_before_due: Optional[int] = None
+) -> bool:
+    """Update a notification config"""
+    await ensure_connected()
+    
+    data = {}
+    if enabled is not None:
+        data["enabled"] = enabled
+    if title is not None:
+        data["title"] = title
+    if template is not None:
+        data["template"] = template
+    if days_before_due is not None:
+        data["daysBeforeDue"] = days_before_due
+    
+    if not data:
+        return False
+    
+    try:
+        await db.notificationconfig.update(
+            where={"eventType": event_type},
+            data=data
+        )
+        return True
+    except Exception:
+        return False
+
+async def ensure_notification_configs_exist():
+    """Ensure default notification configs exist in database"""
+    await ensure_connected()
+    
+    for default_config in DEFAULT_NOTIFICATION_CONFIGS:
+        existing = await db.notificationconfig.find_unique(
+            where={"eventType": default_config["event_type"]}
+        )
+        if not existing:
+            await db.notificationconfig.create(
+                data={
+                    "eventType": default_config["event_type"],
+                    "title": default_config["title"],
+                    "template": default_config["template"],
+                    "daysBeforeDue": default_config.get("days_before_due"),
+                    "enabled": True,
+                }
+            )
 
 # =============================================================================
 # User Cards

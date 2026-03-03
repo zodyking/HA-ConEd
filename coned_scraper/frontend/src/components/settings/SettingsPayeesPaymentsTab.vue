@@ -8,9 +8,12 @@
       </div>
       <div class="ha-card-content">
         <div class="ha-form-group">
-          <label class="ha-form-label">Add User</label>
+          <label class="ha-form-label">Add Payee</label>
           <div class="ha-add-row">
-            <input v-model="newUserName" type="text" class="ha-form-input" placeholder="Name" />
+            <button v-if="isAddon" type="button" class="ha-button ha-button-secondary" :disabled="haUsersLoading" @click="showHaUserModal = true; loadHaUsersAndServices()">
+              {{ haUsersLoading ? 'Loading...' : '+ Add from HA Users' }}
+            </button>
+            <input v-model="newUserName" type="text" class="ha-form-input" placeholder="Or enter name manually" />
             <button type="button" class="ha-button ha-button-primary" :disabled="!newUserName.trim() || isLoading" @click="handleAddUser">Add</button>
           </div>
         </div>
@@ -31,6 +34,24 @@
                 <span>%</span>
               </div>
               <div class="ha-cards">Cards: {{ user.cards?.length ? user.cards.map((c: string) => '*' + c).join(', ') : 'None' }} — click to manage</div>
+              <!-- Notification settings -->
+              <div v-if="isAddon" class="ha-notify-row" @click.stop>
+                <label class="ha-notify-toggle">
+                  <input type="checkbox" :checked="user.notifications_enabled" @change="toggleNotifications(user)" />
+                  <span>Notifications</span>
+                </label>
+                <div v-if="editingPayeeId === user.id" class="ha-notify-edit">
+                  <select v-model="editingNotifyService" class="ha-form-input ha-notify-select">
+                    <option value="">No device</option>
+                    <option v-for="svc in notifyServices" :key="svc.service" :value="svc.service">{{ svc.friendly_name }}</option>
+                  </select>
+                  <button type="button" class="ha-btn-sm ha-btn-green" @click="saveNotifyService(user.id)">Save</button>
+                  <button type="button" class="ha-btn-sm" @click="editingPayeeId = null">Cancel</button>
+                </div>
+                <button v-else type="button" class="ha-notify-device" @click="openNotifyEdit(user)">
+                  📱 {{ user.notify_service ? notifyServices.find(s => s.service === user.notify_service)?.friendly_name || user.notify_service : 'Set device' }}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -183,6 +204,35 @@
       </div>
     </div>
 
+    <!-- HA User Selection Modal -->
+    <div v-if="showHaUserModal" class="ha-modal-overlay" @click.self="showHaUserModal = false">
+      <div class="ha-modal ha-ha-user-modal">
+        <div class="ha-modal-header">
+          <h3>Add Payee from Home Assistant</h3>
+          <button type="button" class="ha-modal-close" @click="showHaUserModal = false">×</button>
+        </div>
+        <div class="ha-modal-content">
+          <div v-if="haUsersLoading" class="ha-loading">Loading HA users...</div>
+          <div v-else-if="haUsers.length === 0" class="ha-empty">No Home Assistant users found.</div>
+          <div v-else class="ha-ha-users-list">
+            <div
+              v-for="haUser in haUsers"
+              :key="haUser.id"
+              :class="['ha-ha-user-item', { disabled: isUserAlreadyAdded(haUser.id) }]"
+              @click="!isUserAlreadyAdded(haUser.id) && handleAddHaUser(haUser)"
+            >
+              <div class="ha-ha-user-info">
+                <span class="ha-ha-user-name">{{ haUser.name }}</span>
+                <span v-if="haUser.is_admin" class="ha-badge ha-badge-admin">Admin</span>
+                <span v-if="isUserAlreadyAdded(haUser.id)" class="ha-badge ha-badge-added">Already added</span>
+              </div>
+              <span v-if="haUser.username" class="ha-ha-user-username">@{{ haUser.username }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div v-if="message" :class="['ha-message', message.type]">{{ message.text }}</div>
   </div>
 </template>
@@ -191,10 +241,21 @@
 import { ref, computed, onMounted } from 'vue'
 import { getApiBase } from '../../lib/api-base'
 
-interface User { id: number; name: string; is_default: boolean; cards: string[]; responsibility_percent?: number }
+interface User { 
+  id: number
+  name: string
+  ha_user_id?: string | null
+  notify_service?: string | null
+  notifications_enabled?: boolean
+  is_default: boolean
+  cards: string[]
+  responsibility_percent?: number 
+}
 interface CardItem { id: number; user_id: number; card_last_four: string; card_label: string | null }
 interface Payment { id: number; payment_date: string; amount: string; description: string; bill_id: number | null; bill_month: string | null; bill_cycle: string | null; payee_name: string | null; payee_user_id: number | null; payee_status: string }
 interface Bill { id: number; bill_cycle_date: string; month_range: string; bill_total: string; payments: Payment[] }
+interface HaUser { id: string; name: string; username?: string; is_admin?: boolean; is_active?: boolean }
+interface NotifyService { service: string; friendly_name: string; full_service: string }
 
 const users = ref<User[]>([])
 const newUserName = ref('')
@@ -220,6 +281,15 @@ const editingCardId = ref<number | null>(null)
 const editingLabel = ref('')
 const breakdownShowRollover = ref(false)
 const breakdownSaving = ref(false)
+
+// HA user and notify service state
+const showHaUserModal = ref(false)
+const haUsers = ref<HaUser[]>([])
+const notifyServices = ref<NotifyService[]>([])
+const haUsersLoading = ref(false)
+const isAddon = ref(false)
+const editingPayeeId = ref<number | null>(null)
+const editingNotifyService = ref<string>('')
 
 const totalResponsibility = computed(() => Object.values(responsibilities.value).reduce((a, b) => a + (b || 0), 0))
 const isValidCardDigits = computed(() => /^\d{4}$/.test(newCardDigits.value))
@@ -465,10 +535,106 @@ async function saveEditLabel(cardId: number) {
   } catch { message.value = { type: 'error', text: 'Failed' } }
 }
 
+async function loadHaUsersAndServices() {
+  haUsersLoading.value = true
+  try {
+    const [usersRes, servicesRes] = await Promise.all([
+      fetch(`${getApiBase()}/ha-users`),
+      fetch(`${getApiBase()}/ha-notify-services`)
+    ])
+    if (usersRes.ok) {
+      const d = await usersRes.json()
+      haUsers.value = d.users || []
+      isAddon.value = d.is_addon === true
+    }
+    if (servicesRes.ok) {
+      const d = await servicesRes.json()
+      notifyServices.value = d.services || []
+    }
+  } catch (e) {
+    console.error('Failed to load HA data:', e)
+  } finally {
+    haUsersLoading.value = false
+  }
+}
+
+async function handleAddHaUser(haUser: HaUser) {
+  isLoading.value = true
+  message.value = null
+  try {
+    const res = await fetch(`${getApiBase()}/payee-users`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: haUser.name,
+        ha_user_id: haUser.id,
+        notifications_enabled: true,
+        is_default: users.value.length === 0
+      })
+    })
+    if (res.ok) {
+      showHaUserModal.value = false
+      await loadUsers()
+      message.value = { type: 'success', text: `Added ${haUser.name}` }
+    } else {
+      const e = await res.json().catch(() => ({}))
+      message.value = { type: 'error', text: e.detail || 'Failed to add user' }
+    }
+  } catch {
+    message.value = { type: 'error', text: 'Failed to connect' }
+  } finally {
+    isLoading.value = false
+  }
+}
+
+function openNotifyEdit(user: User) {
+  editingPayeeId.value = user.id
+  editingNotifyService.value = user.notify_service || ''
+}
+
+async function saveNotifyService(userId: number) {
+  try {
+    const res = await fetch(`${getApiBase()}/payee-users/${userId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ notify_service: editingNotifyService.value || null })
+    })
+    if (res.ok) {
+      editingPayeeId.value = null
+      await loadUsers()
+      message.value = { type: 'success', text: 'Notification device updated' }
+    } else {
+      message.value = { type: 'error', text: 'Failed to save' }
+    }
+  } catch {
+    message.value = { type: 'error', text: 'Failed to connect' }
+  }
+}
+
+async function toggleNotifications(user: User) {
+  try {
+    const res = await fetch(`${getApiBase()}/payee-users/${user.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ notifications_enabled: !user.notifications_enabled })
+    })
+    if (res.ok) {
+      await loadUsers()
+    }
+  } catch {
+    message.value = { type: 'error', text: 'Failed to update' }
+  }
+}
+
+function isUserAlreadyAdded(haUserId: string): boolean {
+  return users.value.some(u => u.ha_user_id === haUserId)
+}
+
 onMounted(() => {
   loadUsers()
   loadPaymentsData()
   loadAppSettings()
+  loadHaUsersAndServices()
 })
 </script>
 
@@ -557,4 +723,29 @@ onMounted(() => {
 .ha-audit-payment-info { margin-bottom: 1rem; font-size: 0.95rem; }
 .ha-btn-primary { background: #1976d2; color: white; }
 .ha-btn-primary:hover { background: #1565c0; }
+
+/* HA User Modal */
+.ha-ha-user-modal { max-width: 400px; }
+.ha-ha-users-list { display: flex; flex-direction: column; gap: 0.5rem; max-height: 300px; overflow-y: auto; }
+.ha-ha-user-item { padding: 0.75rem; border: 1px solid #e0e0e0; border-radius: 8px; cursor: pointer; transition: all 0.15s; }
+.ha-ha-user-item:hover:not(.disabled) { background: #e3f2fd; border-color: #03a9f4; }
+.ha-ha-user-item.disabled { opacity: 0.5; cursor: not-allowed; background: #f5f5f5; }
+.ha-ha-user-info { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem; }
+.ha-ha-user-name { font-weight: 600; }
+.ha-ha-user-username { font-size: 0.8rem; color: #666; }
+.ha-badge-admin { background: #9c27b0; }
+.ha-badge-added { background: #9e9e9e; }
+
+/* Notification settings */
+.ha-notify-row { display: flex; align-items: center; gap: 0.75rem; margin-top: 0.5rem; flex-wrap: wrap; }
+.ha-notify-toggle { display: flex; align-items: center; gap: 0.35rem; font-size: 0.8rem; cursor: pointer; }
+.ha-notify-toggle input { cursor: pointer; }
+.ha-notify-device { font-size: 0.75rem; color: #1976d2; background: #e3f2fd; border: 1px solid #90caf9; padding: 0.25rem 0.5rem; border-radius: 4px; cursor: pointer; }
+.ha-notify-device:hover { background: #bbdefb; }
+.ha-notify-edit { display: flex; gap: 0.35rem; align-items: center; }
+.ha-notify-select { font-size: 0.8rem; padding: 0.25rem 0.5rem; max-width: 180px; }
+
+/* Button secondary */
+.ha-button-secondary { background: #e3f2fd; color: #1976d2; border: 1px solid #90caf9; }
+.ha-button-secondary:hover { background: #bbdefb; }
 </style>
