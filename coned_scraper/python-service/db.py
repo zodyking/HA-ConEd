@@ -1339,15 +1339,16 @@ async def get_latest_scraped_data(limit: int = 1) -> List[Dict[str, Any]]:
 async def get_all_scraped_data() -> List[Dict[str, Any]]:
     """Get all scraped data"""
     await ensure_connected()
-    
+
     records = await db.scrapeddata.find_many(order={"timestamp": "desc"})
-    
+
     return [
         {
             "id": r.id,
             "timestamp": r.timestamp.isoformat() if r.timestamp else None,
             "data": r.data,
             "status": r.status,
+            "screenshot_path": r.screenshotPath,
         }
         for r in records
     ]
@@ -1684,12 +1685,85 @@ async def relink_payments_to_bills() -> int:
 # Data Sync
 # =============================================================================
 
+async def calculate_expected_balance() -> Optional[float]:
+    """
+    Calculate expected account balance based on latest bill minus payments.
+    Returns None if insufficient data to calculate.
+    """
+    await ensure_connected()
+    
+    # Get the latest bill
+    latest_bill = await db.bill.find_first(order={"billCycleDate": "desc"})
+    if not latest_bill or not latest_bill.billTotal:
+        return None
+    
+    bill_total = decimal_to_float(latest_bill.billTotal)
+    
+    # Get all payments for this bill
+    payments = await db.payment.find_many(where={"billId": latest_bill.id})
+    total_payments = sum(decimal_to_float(p.amount) for p in payments if p.amount)
+    
+    # Expected balance = bill total - payments made
+    expected = bill_total - total_payments
+    return expected
+
+
+async def validate_and_record_balance(scraped_balance: str) -> bool:
+    """
+    Validate scraped balance against expected balance before recording.
+    Only records if the scraped balance looks reasonable.
+    
+    Returns True if balance was recorded, False if rejected.
+    """
+    scraped_numeric = parse_amount(scraped_balance)
+    
+    # Get expected balance based on bill - payments
+    expected = await calculate_expected_balance()
+    
+    # Get previous balance for comparison
+    prev_balance = await get_current_balance()
+    prev_numeric = prev_balance["balance_numeric"] if prev_balance else None
+    
+    # Validation rules:
+    # 1. If scraped balance is 0 or negative but we have a positive expected balance, reject
+    # 2. If scraped balance differs from expected by more than 50%, be suspicious
+    # 3. If scraped balance drops to 0 from a non-zero value, reject (likely scrape error)
+    
+    should_record = True
+    reason = ""
+    
+    if expected is not None:
+        # If expected balance is positive but scraped is 0, likely error
+        if expected > 10 and scraped_numeric <= 0:
+            should_record = False
+            reason = f"Scraped balance $0 but expected ${expected:.2f} based on bill-payments"
+        
+        # If scraped differs from expected by more than 100%, suspicious
+        # (Allow some variance for fees, adjustments, etc.)
+        elif expected > 0:
+            diff_pct = abs(scraped_numeric - expected) / expected
+            if diff_pct > 1.0 and scraped_numeric <= 0:
+                should_record = False
+                reason = f"Scraped ${scraped_numeric:.2f} differs too much from expected ${expected:.2f}"
+    
+    # If previous balance was significant and now it's 0, likely error
+    if prev_numeric is not None and prev_numeric > 50 and scraped_numeric <= 0:
+        should_record = False
+        reason = f"Balance dropped from ${prev_numeric:.2f} to $0 - likely scrape error"
+    
+    if should_record:
+        await record_account_balance(scraped_balance)
+        return True
+    else:
+        logger.warning(f"Rejected scraped balance ${scraped_numeric:.2f}: {reason}")
+        await add_log("warning", f"Balance validation failed: {reason}. Keeping previous balance.")
+        return False
+
+
 async def sync_from_scrape(data: Dict[str, Any]):
     """Sync scraped data to normalized tables"""
     try:
-        # Record balance
-        if "account_balance" in data:
-            await record_account_balance(data["account_balance"])
+        scraped_balance = data.get("account_balance")
         
         # Process bills (nested format: bills with payments inside)
         if "bills" in data:
@@ -1757,6 +1831,11 @@ async def sync_from_scrape(data: Dict[str, Any]):
             logger.info(f"Synced {len([i for i in ledger if i.get('type')=='bill'])} bills and {len([i for i in ledger if i.get('type')=='payment'])} payments from ledger")
         elif "bills" in data:
             logger.info("Synced scraped data to normalized tables")
+        
+        # AFTER all bills and payments are processed, validate and record balance
+        # This ensures we have complete payment data before checking if balance makes sense
+        if scraped_balance:
+            await validate_and_record_balance(scraped_balance)
     except Exception as e:
         logger.warning(f"Failed to sync scraped data: {e}")
 
