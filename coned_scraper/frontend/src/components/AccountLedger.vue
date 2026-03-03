@@ -211,9 +211,9 @@
                               <span
                                 v-else-if="payment.payee_status === 'unverified'"
                                 class="ha-payee-unverified"
-                                title="Unassigned - edit in Settings → Payments"
+                                title="Unverified - assign payee in Settings → Payments"
                               >
-                                Unassigned
+                                Unverified
                               </span>
                             </div>
                             <div class="ha-payment-sub">

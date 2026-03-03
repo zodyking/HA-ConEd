@@ -1502,30 +1502,53 @@ async def get_ledger_data() -> Dict[str, Any]:
         }
         bills_data.append(bill_dict)
     
-    # Get orphan payments (no bill)
+    # Get orphan payments (no bill) - merge into correct bills for display
+    # They show under the bill with status Unverified, no separate section
     orphan_payments = await db.payment.find_many(
         where={"billId": None},
         include={"payeeUser": True},
         order={"paymentDate": "desc"}
     )
     
-    orphans = [
-        {
-            "id": p.id,
-            "payment_date": p.paymentDate.strftime("%m/%d/%Y") if p.paymentDate else None,
-            "description": p.description,
-            "amount": f"${decimal_to_float(p.amount):.2f}" if p.amount else None,
-            "amount_numeric": decimal_to_float(p.amount),
-            "payee_status": p.payeeStatus,
-            "payee_name": p.payeeUser.name if p.payeeUser else None,
-        }
-        for p in orphan_payments
-    ]
+    if orphan_payments and bills_data:
+        bills_by_date = [(parse_date(b.get("bill_cycle_date") or ""), b) for b in bills_data]
+        bills_by_date = [(d, b) for d, b in bills_by_date if d]
+        bills_by_date.sort(key=lambda x: x[0])
+        
+        for p in orphan_payments:
+            payment_dt = p.paymentDate
+            if not payment_dt:
+                continue
+            if payment_dt.tzinfo is None:
+                payment_dt = payment_dt.replace(tzinfo=timezone.utc)
+            payment_dict = {
+                "id": p.id,
+                "payment_date": p.paymentDate.strftime("%m/%d/%Y") if p.paymentDate else None,
+                "description": p.description or "Payment Received",
+                "amount": f"${decimal_to_float(p.amount):.2f}" if p.amount else None,
+                "amount_numeric": decimal_to_float(p.amount),
+                "payee_status": p.payeeStatus or "unverified",
+                "payee_name": p.payeeUser.name if p.payeeUser else None,
+            }
+            # Match to bill: largest cycle_date <= payment date
+            candidates = [(d, b) for d, b in bills_by_date if d <= payment_dt]
+            if candidates:
+                target_bill = candidates[-1][1]
+            else:
+                target_bill = bills_by_date[0][1]
+            target_bill["payments"].append(payment_dict)
+        
+        # Re-sort payments within each bill
+        for b in bills_data:
+            b["payments"].sort(
+                key=lambda p: parse_date(p.get("payment_date") or "") or datetime.min,
+                reverse=True
+            )
     
     return {
         "account_balance": account_balance,
         "bills": bills_data,
-        "orphan_payments": orphans,
+        "orphan_payments": [],  # No separate section - merged into bills
     }
 
 # =============================================================================
