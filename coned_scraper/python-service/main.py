@@ -1019,7 +1019,7 @@ async def start_scraper():
     
     credentials = load_credentials()
     if not credentials:
-        add_scrape_history(False, "No credentials found", "credentials_check", 0)
+        await db.add_scrape_history(False, "No credentials found", "credentials_check", 0)
         raise HTTPException(status_code=404, detail="No credentials found. Please configure settings first.")
     
     # Clear previous logs when starting a new scrape
@@ -1390,13 +1390,13 @@ async def get_scrape_history_endpoint(limit: int = 50):
 @app.get("/api/scraped-data")
 async def get_scraped_data_endpoint(limit: int = 100):
     """Get scraped data"""
-    data = get_all_scraped_data(limit)
+    data = await db.get_all_scraped_data()
     return {"data": data}
 
 @app.get("/api/scraped-data/latest")
 async def get_latest_data():
     """Get latest scraped data"""
-    data = get_latest_scraped_data(1)
+    data = await db.get_latest_scraped_data(1)
     return {"data": data[0] if data else None}
 
 @app.get("/api/screenshot/{filename}")

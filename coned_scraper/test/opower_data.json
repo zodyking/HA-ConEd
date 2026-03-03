@@ -1,0 +1,2869 @@
+{
+  "fetched_at": "2026-03-02T09:59:48.876435+00:00",
+  "account": {
+    "utility_account_id": "9070650384",
+    "uuid": "6b10de33-daab-11f0-ba90-0200170e78f8",
+    "meter_type": "ELEC",
+    "read_resolution": "QUARTER_HOUR",
+    "customer_uuid": "1fd82d17-6255-11f0-a003-0200170e78f8"
+  },
+  "forecast": {
+    "start_date": "2026-02-18",
+    "end_date": "2026-03-20",
+    "usage_to_date": 403.0,
+    "forecasted_usage": 1154.0,
+    "cost_to_date": 0,
+    "forecasted_cost": 0,
+    "unit": "KWH"
+  },
+  "hourly_reads": [
+    {
+      "start_time": "2026-02-23T00:00:00-05:00",
+      "end_time": "2026-02-23T01:00:00-05:00",
+      "consumption": 3.852,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-23T01:00:00-05:00",
+      "end_time": "2026-02-23T02:00:00-05:00",
+      "consumption": 3.249,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-23T02:00:00-05:00",
+      "end_time": "2026-02-23T03:00:00-05:00",
+      "consumption": 2.76,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-23T03:00:00-05:00",
+      "end_time": "2026-02-23T04:00:00-05:00",
+      "consumption": 2.259,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-23T04:00:00-05:00",
+      "end_time": "2026-02-23T05:00:00-05:00",
+      "consumption": 3.792,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-23T05:00:00-05:00",
+      "end_time": "2026-02-23T06:00:00-05:00",
+      "consumption": 1.722,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-23T06:00:00-05:00",
+      "end_time": "2026-02-23T07:00:00-05:00",
+      "consumption": 1.917,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-23T07:00:00-05:00",
+      "end_time": "2026-02-23T08:00:00-05:00",
+      "consumption": 2.244,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-23T08:00:00-05:00",
+      "end_time": "2026-02-23T09:00:00-05:00",
+      "consumption": 3.135,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-23T09:00:00-05:00",
+      "end_time": "2026-02-23T10:00:00-05:00",
+      "consumption": 2.544,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-23T10:00:00-05:00",
+      "end_time": "2026-02-23T11:00:00-05:00",
+      "consumption": 2.334,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-23T11:00:00-05:00",
+      "end_time": "2026-02-23T12:00:00-05:00",
+      "consumption": 2.172,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-23T12:00:00-05:00",
+      "end_time": "2026-02-23T13:00:00-05:00",
+      "consumption": 2.487,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-23T13:00:00-05:00",
+      "end_time": "2026-02-23T14:00:00-05:00",
+      "consumption": 1.995,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-23T14:00:00-05:00",
+      "end_time": "2026-02-23T15:00:00-05:00",
+      "consumption": 1.902,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-23T15:00:00-05:00",
+      "end_time": "2026-02-23T16:00:00-05:00",
+      "consumption": 2.079,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-23T16:00:00-05:00",
+      "end_time": "2026-02-23T17:00:00-05:00",
+      "consumption": 2.475,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-23T17:00:00-05:00",
+      "end_time": "2026-02-23T18:00:00-05:00",
+      "consumption": 2.1,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-23T18:00:00-05:00",
+      "end_time": "2026-02-23T19:00:00-05:00",
+      "consumption": 1.89,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-23T19:00:00-05:00",
+      "end_time": "2026-02-23T20:00:00-05:00",
+      "consumption": 3.243,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-23T20:00:00-05:00",
+      "end_time": "2026-02-23T21:00:00-05:00",
+      "consumption": 4.983,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-23T21:00:00-05:00",
+      "end_time": "2026-02-23T22:00:00-05:00",
+      "consumption": 3.351,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-23T22:00:00-05:00",
+      "end_time": "2026-02-23T23:00:00-05:00",
+      "consumption": 1.464,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-23T23:00:00-05:00",
+      "end_time": "2026-02-24T00:00:00-05:00",
+      "consumption": 1.803,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-24T00:00:00-05:00",
+      "end_time": "2026-02-24T01:00:00-05:00",
+      "consumption": 1.278,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-24T01:00:00-05:00",
+      "end_time": "2026-02-24T02:00:00-05:00",
+      "consumption": 1.392,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-24T02:00:00-05:00",
+      "end_time": "2026-02-24T03:00:00-05:00",
+      "consumption": 1.65,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-24T03:00:00-05:00",
+      "end_time": "2026-02-24T04:00:00-05:00",
+      "consumption": 1.374,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-24T04:00:00-05:00",
+      "end_time": "2026-02-24T05:00:00-05:00",
+      "consumption": 1.44,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-24T05:00:00-05:00",
+      "end_time": "2026-02-24T06:00:00-05:00",
+      "consumption": 1.35,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-24T06:00:00-05:00",
+      "end_time": "2026-02-24T07:00:00-05:00",
+      "consumption": 1.866,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-24T07:00:00-05:00",
+      "end_time": "2026-02-24T08:00:00-05:00",
+      "consumption": 1.434,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-24T08:00:00-05:00",
+      "end_time": "2026-02-24T09:00:00-05:00",
+      "consumption": 1.734,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-24T09:00:00-05:00",
+      "end_time": "2026-02-24T10:00:00-05:00",
+      "consumption": 1.575,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-24T10:00:00-05:00",
+      "end_time": "2026-02-24T11:00:00-05:00",
+      "consumption": 2.316,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-24T11:00:00-05:00",
+      "end_time": "2026-02-24T12:00:00-05:00",
+      "consumption": 2.445,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-24T12:00:00-05:00",
+      "end_time": "2026-02-24T13:00:00-05:00",
+      "consumption": 1.992,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-24T13:00:00-05:00",
+      "end_time": "2026-02-24T14:00:00-05:00",
+      "consumption": 1.332,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-24T14:00:00-05:00",
+      "end_time": "2026-02-24T15:00:00-05:00",
+      "consumption": 1.287,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-24T15:00:00-05:00",
+      "end_time": "2026-02-24T16:00:00-05:00",
+      "consumption": 2.886,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-24T16:00:00-05:00",
+      "end_time": "2026-02-24T17:00:00-05:00",
+      "consumption": 4.65,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-24T17:00:00-05:00",
+      "end_time": "2026-02-24T18:00:00-05:00",
+      "consumption": 1.836,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-24T18:00:00-05:00",
+      "end_time": "2026-02-24T19:00:00-05:00",
+      "consumption": 2.232,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-24T19:00:00-05:00",
+      "end_time": "2026-02-24T20:00:00-05:00",
+      "consumption": 1.881,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-24T20:00:00-05:00",
+      "end_time": "2026-02-24T21:00:00-05:00",
+      "consumption": 3.909,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-24T21:00:00-05:00",
+      "end_time": "2026-02-24T22:00:00-05:00",
+      "consumption": 3.393,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-24T22:00:00-05:00",
+      "end_time": "2026-02-24T23:00:00-05:00",
+      "consumption": 1.191,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-24T23:00:00-05:00",
+      "end_time": "2026-02-25T00:00:00-05:00",
+      "consumption": 1.845,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-25T00:00:00-05:00",
+      "end_time": "2026-02-25T01:00:00-05:00",
+      "consumption": 1.356,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-25T01:00:00-05:00",
+      "end_time": "2026-02-25T02:00:00-05:00",
+      "consumption": 1.347,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-25T02:00:00-05:00",
+      "end_time": "2026-02-25T03:00:00-05:00",
+      "consumption": 1.623,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-25T03:00:00-05:00",
+      "end_time": "2026-02-25T04:00:00-05:00",
+      "consumption": 1.005,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-25T04:00:00-05:00",
+      "end_time": "2026-02-25T05:00:00-05:00",
+      "consumption": 1.026,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-25T05:00:00-05:00",
+      "end_time": "2026-02-25T06:00:00-05:00",
+      "consumption": 1.035,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-25T06:00:00-05:00",
+      "end_time": "2026-02-25T07:00:00-05:00",
+      "consumption": 1.335,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-25T07:00:00-05:00",
+      "end_time": "2026-02-25T08:00:00-05:00",
+      "consumption": 1.272,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-25T08:00:00-05:00",
+      "end_time": "2026-02-25T09:00:00-05:00",
+      "consumption": 1.116,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-25T09:00:00-05:00",
+      "end_time": "2026-02-25T10:00:00-05:00",
+      "consumption": 1.167,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-25T10:00:00-05:00",
+      "end_time": "2026-02-25T11:00:00-05:00",
+      "consumption": 2.508,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-25T11:00:00-05:00",
+      "end_time": "2026-02-25T12:00:00-05:00",
+      "consumption": 2.397,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-25T12:00:00-05:00",
+      "end_time": "2026-02-25T13:00:00-05:00",
+      "consumption": 2.046,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-25T13:00:00-05:00",
+      "end_time": "2026-02-25T14:00:00-05:00",
+      "consumption": 1.665,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-25T14:00:00-05:00",
+      "end_time": "2026-02-25T15:00:00-05:00",
+      "consumption": 1.473,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-25T15:00:00-05:00",
+      "end_time": "2026-02-25T16:00:00-05:00",
+      "consumption": 3.414,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-25T16:00:00-05:00",
+      "end_time": "2026-02-25T17:00:00-05:00",
+      "consumption": 1.308,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-25T17:00:00-05:00",
+      "end_time": "2026-02-25T18:00:00-05:00",
+      "consumption": 0.627,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-25T18:00:00-05:00",
+      "end_time": "2026-02-25T19:00:00-05:00",
+      "consumption": 0.636,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-25T19:00:00-05:00",
+      "end_time": "2026-02-25T20:00:00-05:00",
+      "consumption": 0.657,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-25T20:00:00-05:00",
+      "end_time": "2026-02-25T21:00:00-05:00",
+      "consumption": 0.276,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-25T21:00:00-05:00",
+      "end_time": "2026-02-25T22:00:00-05:00",
+      "consumption": 0.27,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-25T22:00:00-05:00",
+      "end_time": "2026-02-25T23:00:00-05:00",
+      "consumption": 0.555,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-25T23:00:00-05:00",
+      "end_time": "2026-02-26T00:00:00-05:00",
+      "consumption": 0.243,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-26T00:00:00-05:00",
+      "end_time": "2026-02-26T01:00:00-05:00",
+      "consumption": 0.351,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-26T01:00:00-05:00",
+      "end_time": "2026-02-26T02:00:00-05:00",
+      "consumption": 0.42,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-26T02:00:00-05:00",
+      "end_time": "2026-02-26T03:00:00-05:00",
+      "consumption": 0.426,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-26T03:00:00-05:00",
+      "end_time": "2026-02-26T04:00:00-05:00",
+      "consumption": 1.584,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-26T04:00:00-05:00",
+      "end_time": "2026-02-26T05:00:00-05:00",
+      "consumption": 1.803,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-26T05:00:00-05:00",
+      "end_time": "2026-02-26T06:00:00-05:00",
+      "consumption": 1.407,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-26T06:00:00-05:00",
+      "end_time": "2026-02-26T07:00:00-05:00",
+      "consumption": 1.38,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-26T07:00:00-05:00",
+      "end_time": "2026-02-26T08:00:00-05:00",
+      "consumption": 1.593,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-26T08:00:00-05:00",
+      "end_time": "2026-02-26T09:00:00-05:00",
+      "consumption": 1.491,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-26T09:00:00-05:00",
+      "end_time": "2026-02-26T10:00:00-05:00",
+      "consumption": 1.461,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-26T10:00:00-05:00",
+      "end_time": "2026-02-26T11:00:00-05:00",
+      "consumption": 1.404,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-26T11:00:00-05:00",
+      "end_time": "2026-02-26T12:00:00-05:00",
+      "consumption": 1.554,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-26T12:00:00-05:00",
+      "end_time": "2026-02-26T13:00:00-05:00",
+      "consumption": 1.452,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-26T13:00:00-05:00",
+      "end_time": "2026-02-26T14:00:00-05:00",
+      "consumption": 1.191,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-26T14:00:00-05:00",
+      "end_time": "2026-02-26T15:00:00-05:00",
+      "consumption": 1.332,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-26T15:00:00-05:00",
+      "end_time": "2026-02-26T16:00:00-05:00",
+      "consumption": 1.581,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-26T16:00:00-05:00",
+      "end_time": "2026-02-26T17:00:00-05:00",
+      "consumption": 0.879,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-26T17:00:00-05:00",
+      "end_time": "2026-02-26T18:00:00-05:00",
+      "consumption": 4.338,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-26T18:00:00-05:00",
+      "end_time": "2026-02-26T19:00:00-05:00",
+      "consumption": 1.236,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-26T19:00:00-05:00",
+      "end_time": "2026-02-26T20:00:00-05:00",
+      "consumption": 1.05,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-26T20:00:00-05:00",
+      "end_time": "2026-02-26T21:00:00-05:00",
+      "consumption": 0.702,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-26T21:00:00-05:00",
+      "end_time": "2026-02-26T22:00:00-05:00",
+      "consumption": 0.804,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-26T22:00:00-05:00",
+      "end_time": "2026-02-26T23:00:00-05:00",
+      "consumption": 0.789,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-26T23:00:00-05:00",
+      "end_time": "2026-02-27T00:00:00-05:00",
+      "consumption": 1.155,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-27T00:00:00-05:00",
+      "end_time": "2026-02-27T01:00:00-05:00",
+      "consumption": 0.852,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-27T01:00:00-05:00",
+      "end_time": "2026-02-27T02:00:00-05:00",
+      "consumption": 0.804,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-27T02:00:00-05:00",
+      "end_time": "2026-02-27T03:00:00-05:00",
+      "consumption": 0.747,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-27T03:00:00-05:00",
+      "end_time": "2026-02-27T04:00:00-05:00",
+      "consumption": 1.536,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-27T04:00:00-05:00",
+      "end_time": "2026-02-27T05:00:00-05:00",
+      "consumption": 1.221,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-27T05:00:00-05:00",
+      "end_time": "2026-02-27T06:00:00-05:00",
+      "consumption": 1.263,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-27T06:00:00-05:00",
+      "end_time": "2026-02-27T07:00:00-05:00",
+      "consumption": 1.326,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-27T07:00:00-05:00",
+      "end_time": "2026-02-27T08:00:00-05:00",
+      "consumption": 1.293,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-27T08:00:00-05:00",
+      "end_time": "2026-02-27T09:00:00-05:00",
+      "consumption": 1.419,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-27T09:00:00-05:00",
+      "end_time": "2026-02-27T10:00:00-05:00",
+      "consumption": 2.127,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-27T10:00:00-05:00",
+      "end_time": "2026-02-27T11:00:00-05:00",
+      "consumption": 1.704,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-27T11:00:00-05:00",
+      "end_time": "2026-02-27T12:00:00-05:00",
+      "consumption": 1.347,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-27T12:00:00-05:00",
+      "end_time": "2026-02-27T13:00:00-05:00",
+      "consumption": 1.317,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-27T13:00:00-05:00",
+      "end_time": "2026-02-27T14:00:00-05:00",
+      "consumption": 1.665,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-27T14:00:00-05:00",
+      "end_time": "2026-02-27T15:00:00-05:00",
+      "consumption": 1.602,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-27T15:00:00-05:00",
+      "end_time": "2026-02-27T16:00:00-05:00",
+      "consumption": 2.103,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-27T16:00:00-05:00",
+      "end_time": "2026-02-27T17:00:00-05:00",
+      "consumption": 0.924,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-27T17:00:00-05:00",
+      "end_time": "2026-02-27T18:00:00-05:00",
+      "consumption": 1.095,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-27T18:00:00-05:00",
+      "end_time": "2026-02-27T19:00:00-05:00",
+      "consumption": 2.76,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-27T19:00:00-05:00",
+      "end_time": "2026-02-27T20:00:00-05:00",
+      "consumption": 1.722,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-27T20:00:00-05:00",
+      "end_time": "2026-02-27T21:00:00-05:00",
+      "consumption": 0.774,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-27T21:00:00-05:00",
+      "end_time": "2026-02-27T22:00:00-05:00",
+      "consumption": 1.161,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-27T22:00:00-05:00",
+      "end_time": "2026-02-27T23:00:00-05:00",
+      "consumption": 0.765,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-27T23:00:00-05:00",
+      "end_time": "2026-02-28T00:00:00-05:00",
+      "consumption": 0.756,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-28T00:00:00-05:00",
+      "end_time": "2026-02-28T01:00:00-05:00",
+      "consumption": 1.077,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-28T01:00:00-05:00",
+      "end_time": "2026-02-28T02:00:00-05:00",
+      "consumption": 0.915,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-28T02:00:00-05:00",
+      "end_time": "2026-02-28T03:00:00-05:00",
+      "consumption": 0.945,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-28T03:00:00-05:00",
+      "end_time": "2026-02-28T04:00:00-05:00",
+      "consumption": 1.257,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-28T04:00:00-05:00",
+      "end_time": "2026-02-28T05:00:00-05:00",
+      "consumption": 2.433,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-28T05:00:00-05:00",
+      "end_time": "2026-02-28T06:00:00-05:00",
+      "consumption": 1.356,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-28T06:00:00-05:00",
+      "end_time": "2026-02-28T07:00:00-05:00",
+      "consumption": 1.413,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-28T07:00:00-05:00",
+      "end_time": "2026-02-28T08:00:00-05:00",
+      "consumption": 1.65,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-28T08:00:00-05:00",
+      "end_time": "2026-02-28T09:00:00-05:00",
+      "consumption": 1.278,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-28T09:00:00-05:00",
+      "end_time": "2026-02-28T10:00:00-05:00",
+      "consumption": 1.203,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-28T10:00:00-05:00",
+      "end_time": "2026-02-28T11:00:00-05:00",
+      "consumption": 0.996,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-28T11:00:00-05:00",
+      "end_time": "2026-02-28T12:00:00-05:00",
+      "consumption": 1.197,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-28T12:00:00-05:00",
+      "end_time": "2026-02-28T13:00:00-05:00",
+      "consumption": 0.753,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-28T13:00:00-05:00",
+      "end_time": "2026-02-28T14:00:00-05:00",
+      "consumption": 0.9,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-28T14:00:00-05:00",
+      "end_time": "2026-02-28T15:00:00-05:00",
+      "consumption": 0.942,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-28T15:00:00-05:00",
+      "end_time": "2026-02-28T16:00:00-05:00",
+      "consumption": 0.936,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-28T16:00:00-05:00",
+      "end_time": "2026-02-28T17:00:00-05:00",
+      "consumption": 0.831,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-28T17:00:00-05:00",
+      "end_time": "2026-02-28T18:00:00-05:00",
+      "consumption": 1.188,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-28T18:00:00-05:00",
+      "end_time": "2026-02-28T19:00:00-05:00",
+      "consumption": 0.636,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-28T19:00:00-05:00",
+      "end_time": "2026-02-28T20:00:00-05:00",
+      "consumption": 1.521,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-28T20:00:00-05:00",
+      "end_time": "2026-02-28T21:00:00-05:00",
+      "consumption": 1.086,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-28T21:00:00-05:00",
+      "end_time": "2026-02-28T22:00:00-05:00",
+      "consumption": 1.086,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-28T22:00:00-05:00",
+      "end_time": "2026-02-28T23:00:00-05:00",
+      "consumption": 2.544,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-28T23:00:00-05:00",
+      "end_time": "2026-03-01T00:00:00-05:00",
+      "consumption": 1.392,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-03-01T00:00:00-05:00",
+      "end_time": "2026-03-01T01:00:00-05:00",
+      "consumption": 1.536,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-03-01T01:00:00-05:00",
+      "end_time": "2026-03-01T02:00:00-05:00",
+      "consumption": 1.089,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-03-01T02:00:00-05:00",
+      "end_time": "2026-03-01T03:00:00-05:00",
+      "consumption": 1.422,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-03-01T03:00:00-05:00",
+      "end_time": "2026-03-01T04:00:00-05:00",
+      "consumption": 1.956,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-03-01T04:00:00-05:00",
+      "end_time": "2026-03-01T05:00:00-05:00",
+      "consumption": 1.908,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-03-01T05:00:00-05:00",
+      "end_time": "2026-03-01T06:00:00-05:00",
+      "consumption": 1.86,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-03-01T06:00:00-05:00",
+      "end_time": "2026-03-01T07:00:00-05:00",
+      "consumption": 1.473,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-03-01T07:00:00-05:00",
+      "end_time": "2026-03-01T08:00:00-05:00",
+      "consumption": 1.224,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-03-01T08:00:00-05:00",
+      "end_time": "2026-03-01T09:00:00-05:00",
+      "consumption": 0.84,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-03-01T09:00:00-05:00",
+      "end_time": "2026-03-01T10:00:00-05:00",
+      "consumption": 1.221,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-03-01T10:00:00-05:00",
+      "end_time": "2026-03-01T11:00:00-05:00",
+      "consumption": 1.017,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-03-01T11:00:00-05:00",
+      "end_time": "2026-03-01T12:00:00-05:00",
+      "consumption": 0.738,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-03-01T12:00:00-05:00",
+      "end_time": "2026-03-01T13:00:00-05:00",
+      "consumption": 0.456,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-03-01T13:00:00-05:00",
+      "end_time": "2026-03-01T14:00:00-05:00",
+      "consumption": 0.618,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-03-01T14:00:00-05:00",
+      "end_time": "2026-03-01T15:00:00-05:00",
+      "consumption": 1.494,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-03-01T15:00:00-05:00",
+      "end_time": "2026-03-01T16:00:00-05:00",
+      "consumption": 0.786,
+      "provided_cost": 0
+    }
+  ],
+  "daily_reads": [
+    {
+      "start_time": "2025-05-02T00:00:00-04:00",
+      "end_time": "2025-05-03T00:00:00-04:00",
+      "consumption": 14.811,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-05-03T00:00:00-04:00",
+      "end_time": "2025-05-04T00:00:00-04:00",
+      "consumption": 21.492,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-05-04T00:00:00-04:00",
+      "end_time": "2025-05-05T00:00:00-04:00",
+      "consumption": 23.358,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-05-05T00:00:00-04:00",
+      "end_time": "2025-05-06T00:00:00-04:00",
+      "consumption": 15.684,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-05-06T00:00:00-04:00",
+      "end_time": "2025-05-07T00:00:00-04:00",
+      "consumption": 16.41,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-05-07T00:00:00-04:00",
+      "end_time": "2025-05-08T00:00:00-04:00",
+      "consumption": 12.165,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-05-08T00:00:00-04:00",
+      "end_time": "2025-05-09T00:00:00-04:00",
+      "consumption": 20.535,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-05-09T00:00:00-04:00",
+      "end_time": "2025-05-10T00:00:00-04:00",
+      "consumption": 16.524,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-05-10T00:00:00-04:00",
+      "end_time": "2025-05-11T00:00:00-04:00",
+      "consumption": 18.675,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-05-11T00:00:00-04:00",
+      "end_time": "2025-05-12T00:00:00-04:00",
+      "consumption": 22.038,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-05-12T00:00:00-04:00",
+      "end_time": "2025-05-13T00:00:00-04:00",
+      "consumption": 19.878,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-05-13T00:00:00-04:00",
+      "end_time": "2025-05-14T00:00:00-04:00",
+      "consumption": 14.178,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-05-14T00:00:00-04:00",
+      "end_time": "2025-05-15T00:00:00-04:00",
+      "consumption": 12.144,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-05-15T00:00:00-04:00",
+      "end_time": "2025-05-16T00:00:00-04:00",
+      "consumption": 17.94,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-05-16T00:00:00-04:00",
+      "end_time": "2025-05-17T00:00:00-04:00",
+      "consumption": 20.4,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-05-17T00:00:00-04:00",
+      "end_time": "2025-05-18T00:00:00-04:00",
+      "consumption": 18.075,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-05-18T00:00:00-04:00",
+      "end_time": "2025-05-19T00:00:00-04:00",
+      "consumption": 21.909,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-05-19T00:00:00-04:00",
+      "end_time": "2025-05-20T00:00:00-04:00",
+      "consumption": 22.215,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-05-20T00:00:00-04:00",
+      "end_time": "2025-05-21T00:00:00-04:00",
+      "consumption": 15.141,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-05-21T00:00:00-04:00",
+      "end_time": "2025-05-22T00:00:00-04:00",
+      "consumption": 18.693,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-05-22T00:00:00-04:00",
+      "end_time": "2025-05-23T00:00:00-04:00",
+      "consumption": 17.724,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-05-23T00:00:00-04:00",
+      "end_time": "2025-05-24T00:00:00-04:00",
+      "consumption": 21.201,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-05-24T00:00:00-04:00",
+      "end_time": "2025-05-25T00:00:00-04:00",
+      "consumption": 24.501,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-05-25T00:00:00-04:00",
+      "end_time": "2025-05-26T00:00:00-04:00",
+      "consumption": 17.868,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-05-26T00:00:00-04:00",
+      "end_time": "2025-05-27T00:00:00-04:00",
+      "consumption": 22.617,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-05-27T00:00:00-04:00",
+      "end_time": "2025-05-28T00:00:00-04:00",
+      "consumption": 16.308,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-05-28T00:00:00-04:00",
+      "end_time": "2025-05-29T00:00:00-04:00",
+      "consumption": 13.452,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-05-29T00:00:00-04:00",
+      "end_time": "2025-05-30T00:00:00-04:00",
+      "consumption": 15.657,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-05-30T00:00:00-04:00",
+      "end_time": "2025-05-31T00:00:00-04:00",
+      "consumption": 19.125,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-05-31T00:00:00-04:00",
+      "end_time": "2025-06-01T00:00:00-04:00",
+      "consumption": 23.55,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-06-01T00:00:00-04:00",
+      "end_time": "2025-06-02T00:00:00-04:00",
+      "consumption": 21.222,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-06-02T00:00:00-04:00",
+      "end_time": "2025-06-03T00:00:00-04:00",
+      "consumption": 15.588,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-06-03T00:00:00-04:00",
+      "end_time": "2025-06-04T00:00:00-04:00",
+      "consumption": 14.943,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-06-04T00:00:00-04:00",
+      "end_time": "2025-06-05T00:00:00-04:00",
+      "consumption": 20.478,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-06-05T00:00:00-04:00",
+      "end_time": "2025-06-06T00:00:00-04:00",
+      "consumption": 14.4,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-06-06T00:00:00-04:00",
+      "end_time": "2025-06-07T00:00:00-04:00",
+      "consumption": 16.596,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-06-07T00:00:00-04:00",
+      "end_time": "2025-06-08T00:00:00-04:00",
+      "consumption": 25.902,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-06-08T00:00:00-04:00",
+      "end_time": "2025-06-09T00:00:00-04:00",
+      "consumption": 25.329,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-06-09T00:00:00-04:00",
+      "end_time": "2025-06-10T00:00:00-04:00",
+      "consumption": 15.711,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-06-10T00:00:00-04:00",
+      "end_time": "2025-06-11T00:00:00-04:00",
+      "consumption": 12.789,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-06-11T00:00:00-04:00",
+      "end_time": "2025-06-12T00:00:00-04:00",
+      "consumption": 24.765,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-06-12T00:00:00-04:00",
+      "end_time": "2025-06-13T00:00:00-04:00",
+      "consumption": 29.664,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-06-13T00:00:00-04:00",
+      "end_time": "2025-06-14T00:00:00-04:00",
+      "consumption": 22.395,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-06-14T00:00:00-04:00",
+      "end_time": "2025-06-15T00:00:00-04:00",
+      "consumption": 14.952,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-06-15T00:00:00-04:00",
+      "end_time": "2025-06-16T00:00:00-04:00",
+      "consumption": 17.469,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-06-16T00:00:00-04:00",
+      "end_time": "2025-06-17T00:00:00-04:00",
+      "consumption": 16.683,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-06-17T00:00:00-04:00",
+      "end_time": "2025-06-18T00:00:00-04:00",
+      "consumption": 14.058,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-06-18T00:00:00-04:00",
+      "end_time": "2025-06-19T00:00:00-04:00",
+      "consumption": 19.863,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-06-19T00:00:00-04:00",
+      "end_time": "2025-06-20T00:00:00-04:00",
+      "consumption": 27.132,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-06-20T00:00:00-04:00",
+      "end_time": "2025-06-21T00:00:00-04:00",
+      "consumption": 18.099,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-06-21T00:00:00-04:00",
+      "end_time": "2025-06-22T00:00:00-04:00",
+      "consumption": 25.419,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-06-22T00:00:00-04:00",
+      "end_time": "2025-06-23T00:00:00-04:00",
+      "consumption": 24.99,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-06-23T00:00:00-04:00",
+      "end_time": "2025-06-24T00:00:00-04:00",
+      "consumption": 32.112,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-06-24T00:00:00-04:00",
+      "end_time": "2025-06-25T00:00:00-04:00",
+      "consumption": 40.812,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-06-25T00:00:00-04:00",
+      "end_time": "2025-06-26T00:00:00-04:00",
+      "consumption": 36.102,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-06-26T00:00:00-04:00",
+      "end_time": "2025-06-27T00:00:00-04:00",
+      "consumption": 18.993,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-06-27T00:00:00-04:00",
+      "end_time": "2025-06-28T00:00:00-04:00",
+      "consumption": 18.78,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-06-28T00:00:00-04:00",
+      "end_time": "2025-06-29T00:00:00-04:00",
+      "consumption": 26.682,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-06-29T00:00:00-04:00",
+      "end_time": "2025-06-30T00:00:00-04:00",
+      "consumption": 29.316,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-06-30T00:00:00-04:00",
+      "end_time": "2025-07-01T00:00:00-04:00",
+      "consumption": 23.544,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-07-01T00:00:00-04:00",
+      "end_time": "2025-07-02T00:00:00-04:00",
+      "consumption": 25.332,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-07-02T00:00:00-04:00",
+      "end_time": "2025-07-03T00:00:00-04:00",
+      "consumption": 22.095,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-07-03T00:00:00-04:00",
+      "end_time": "2025-07-04T00:00:00-04:00",
+      "consumption": 25.359,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-07-04T00:00:00-04:00",
+      "end_time": "2025-07-05T00:00:00-04:00",
+      "consumption": 33.786,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-07-05T00:00:00-04:00",
+      "end_time": "2025-07-06T00:00:00-04:00",
+      "consumption": 36.867,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-07-06T00:00:00-04:00",
+      "end_time": "2025-07-07T00:00:00-04:00",
+      "consumption": 27.336,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-07-07T00:00:00-04:00",
+      "end_time": "2025-07-08T00:00:00-04:00",
+      "consumption": 30.165,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-07-08T00:00:00-04:00",
+      "end_time": "2025-07-09T00:00:00-04:00",
+      "consumption": 30.87,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-07-09T00:00:00-04:00",
+      "end_time": "2025-07-10T00:00:00-04:00",
+      "consumption": 31.797,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-07-10T00:00:00-04:00",
+      "end_time": "2025-07-11T00:00:00-04:00",
+      "consumption": 29.298,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-07-11T00:00:00-04:00",
+      "end_time": "2025-07-12T00:00:00-04:00",
+      "consumption": 25.452,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-07-12T00:00:00-04:00",
+      "end_time": "2025-07-13T00:00:00-04:00",
+      "consumption": 29.619,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-07-13T00:00:00-04:00",
+      "end_time": "2025-07-14T00:00:00-04:00",
+      "consumption": 37.212,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-07-14T00:00:00-04:00",
+      "end_time": "2025-07-15T00:00:00-04:00",
+      "consumption": 29.229,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-07-15T00:00:00-04:00",
+      "end_time": "2025-07-16T00:00:00-04:00",
+      "consumption": 28.47,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-07-16T00:00:00-04:00",
+      "end_time": "2025-07-17T00:00:00-04:00",
+      "consumption": 26.463,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-07-17T00:00:00-04:00",
+      "end_time": "2025-07-18T00:00:00-04:00",
+      "consumption": 20.733,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-07-18T00:00:00-04:00",
+      "end_time": "2025-07-19T00:00:00-04:00",
+      "consumption": 28.578,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-07-19T00:00:00-04:00",
+      "end_time": "2025-07-20T00:00:00-04:00",
+      "consumption": 22.575,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-07-20T00:00:00-04:00",
+      "end_time": "2025-07-21T00:00:00-04:00",
+      "consumption": 25.851,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-07-21T00:00:00-04:00",
+      "end_time": "2025-07-22T00:00:00-04:00",
+      "consumption": 24.012,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-07-22T00:00:00-04:00",
+      "end_time": "2025-07-23T00:00:00-04:00",
+      "consumption": 17.046,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-07-23T00:00:00-04:00",
+      "end_time": "2025-07-24T00:00:00-04:00",
+      "consumption": 16.458,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-07-24T00:00:00-04:00",
+      "end_time": "2025-07-25T00:00:00-04:00",
+      "consumption": 13.734,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-07-25T00:00:00-04:00",
+      "end_time": "2025-07-26T00:00:00-04:00",
+      "consumption": 26.712,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-07-26T00:00:00-04:00",
+      "end_time": "2025-07-27T00:00:00-04:00",
+      "consumption": 33.357,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-07-27T00:00:00-04:00",
+      "end_time": "2025-07-28T00:00:00-04:00",
+      "consumption": 19.791,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-07-28T00:00:00-04:00",
+      "end_time": "2025-07-29T00:00:00-04:00",
+      "consumption": 25.92,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-07-29T00:00:00-04:00",
+      "end_time": "2025-07-30T00:00:00-04:00",
+      "consumption": 25.296,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-07-30T00:00:00-04:00",
+      "end_time": "2025-07-31T00:00:00-04:00",
+      "consumption": 18.966,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-07-31T00:00:00-04:00",
+      "end_time": "2025-08-01T00:00:00-04:00",
+      "consumption": 24.594,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-08-01T00:00:00-04:00",
+      "end_time": "2025-08-02T00:00:00-04:00",
+      "consumption": 17.454,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-08-02T00:00:00-04:00",
+      "end_time": "2025-08-03T00:00:00-04:00",
+      "consumption": 17.484,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-08-03T00:00:00-04:00",
+      "end_time": "2025-08-04T00:00:00-04:00",
+      "consumption": 19.242,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-08-04T00:00:00-04:00",
+      "end_time": "2025-08-05T00:00:00-04:00",
+      "consumption": 22.689,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-08-05T00:00:00-04:00",
+      "end_time": "2025-08-06T00:00:00-04:00",
+      "consumption": 19.2,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-08-06T00:00:00-04:00",
+      "end_time": "2025-08-07T00:00:00-04:00",
+      "consumption": 14.319,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-08-07T00:00:00-04:00",
+      "end_time": "2025-08-08T00:00:00-04:00",
+      "consumption": 11.112,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-08-08T00:00:00-04:00",
+      "end_time": "2025-08-09T00:00:00-04:00",
+      "consumption": 18.057,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-08-09T00:00:00-04:00",
+      "end_time": "2025-08-10T00:00:00-04:00",
+      "consumption": 20.883,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-08-10T00:00:00-04:00",
+      "end_time": "2025-08-11T00:00:00-04:00",
+      "consumption": 20.685,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-08-11T00:00:00-04:00",
+      "end_time": "2025-08-12T00:00:00-04:00",
+      "consumption": 19.725,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-08-12T00:00:00-04:00",
+      "end_time": "2025-08-13T00:00:00-04:00",
+      "consumption": 20.862,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-08-13T00:00:00-04:00",
+      "end_time": "2025-08-14T00:00:00-04:00",
+      "consumption": 15.54,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-08-14T00:00:00-04:00",
+      "end_time": "2025-08-15T00:00:00-04:00",
+      "consumption": 15.357,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-08-15T00:00:00-04:00",
+      "end_time": "2025-08-16T00:00:00-04:00",
+      "consumption": 28.782,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-08-16T00:00:00-04:00",
+      "end_time": "2025-08-17T00:00:00-04:00",
+      "consumption": 24.915,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-08-17T00:00:00-04:00",
+      "end_time": "2025-08-18T00:00:00-04:00",
+      "consumption": 19.794,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-08-18T00:00:00-04:00",
+      "end_time": "2025-08-19T00:00:00-04:00",
+      "consumption": 15.912,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-08-19T00:00:00-04:00",
+      "end_time": "2025-08-20T00:00:00-04:00",
+      "consumption": 16.767,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-08-20T00:00:00-04:00",
+      "end_time": "2025-08-21T00:00:00-04:00",
+      "consumption": 8.61,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-08-21T00:00:00-04:00",
+      "end_time": "2025-08-22T00:00:00-04:00",
+      "consumption": 12.168,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-08-22T00:00:00-04:00",
+      "end_time": "2025-08-23T00:00:00-04:00",
+      "consumption": 8.61,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-08-23T00:00:00-04:00",
+      "end_time": "2025-08-24T00:00:00-04:00",
+      "consumption": 14.64,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-08-24T00:00:00-04:00",
+      "end_time": "2025-08-25T00:00:00-04:00",
+      "consumption": 13.815,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-08-25T00:00:00-04:00",
+      "end_time": "2025-08-26T00:00:00-04:00",
+      "consumption": 24.465,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-08-26T00:00:00-04:00",
+      "end_time": "2025-08-27T00:00:00-04:00",
+      "consumption": 14.037,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-08-27T00:00:00-04:00",
+      "end_time": "2025-08-28T00:00:00-04:00",
+      "consumption": 11.751,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-08-28T00:00:00-04:00",
+      "end_time": "2025-08-29T00:00:00-04:00",
+      "consumption": 12.387,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-08-29T00:00:00-04:00",
+      "end_time": "2025-08-30T00:00:00-04:00",
+      "consumption": 8.892,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-08-30T00:00:00-04:00",
+      "end_time": "2025-08-31T00:00:00-04:00",
+      "consumption": 15.621,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-08-31T00:00:00-04:00",
+      "end_time": "2025-09-01T00:00:00-04:00",
+      "consumption": 20.244,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-09-01T00:00:00-04:00",
+      "end_time": "2025-09-02T00:00:00-04:00",
+      "consumption": 19.734,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-09-02T00:00:00-04:00",
+      "end_time": "2025-09-03T00:00:00-04:00",
+      "consumption": 18.39,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-09-03T00:00:00-04:00",
+      "end_time": "2025-09-04T00:00:00-04:00",
+      "consumption": 16.068,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-09-04T00:00:00-04:00",
+      "end_time": "2025-09-05T00:00:00-04:00",
+      "consumption": 14.622,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-09-05T00:00:00-04:00",
+      "end_time": "2025-09-06T00:00:00-04:00",
+      "consumption": 16.086,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-09-06T00:00:00-04:00",
+      "end_time": "2025-09-07T00:00:00-04:00",
+      "consumption": 18.507,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-09-07T00:00:00-04:00",
+      "end_time": "2025-09-08T00:00:00-04:00",
+      "consumption": 22.293,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-09-08T00:00:00-04:00",
+      "end_time": "2025-09-09T00:00:00-04:00",
+      "consumption": 21.402,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-09-09T00:00:00-04:00",
+      "end_time": "2025-09-10T00:00:00-04:00",
+      "consumption": 18.591,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-09-10T00:00:00-04:00",
+      "end_time": "2025-09-11T00:00:00-04:00",
+      "consumption": 21.438,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-09-11T00:00:00-04:00",
+      "end_time": "2025-09-12T00:00:00-04:00",
+      "consumption": 18.783,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-09-12T00:00:00-04:00",
+      "end_time": "2025-09-13T00:00:00-04:00",
+      "consumption": 20.01,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-09-13T00:00:00-04:00",
+      "end_time": "2025-09-14T00:00:00-04:00",
+      "consumption": 25.413,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-09-14T00:00:00-04:00",
+      "end_time": "2025-09-15T00:00:00-04:00",
+      "consumption": 24.819,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-09-15T00:00:00-04:00",
+      "end_time": "2025-09-16T00:00:00-04:00",
+      "consumption": 25.269,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-09-16T00:00:00-04:00",
+      "end_time": "2025-09-17T00:00:00-04:00",
+      "consumption": 18.396,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-09-17T00:00:00-04:00",
+      "end_time": "2025-09-18T00:00:00-04:00",
+      "consumption": 12.057,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-09-18T00:00:00-04:00",
+      "end_time": "2025-09-19T00:00:00-04:00",
+      "consumption": 16.848,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-09-19T00:00:00-04:00",
+      "end_time": "2025-09-20T00:00:00-04:00",
+      "consumption": 19.488,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-09-20T00:00:00-04:00",
+      "end_time": "2025-09-21T00:00:00-04:00",
+      "consumption": 21.543,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-09-21T00:00:00-04:00",
+      "end_time": "2025-09-22T00:00:00-04:00",
+      "consumption": 19.245,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-09-22T00:00:00-04:00",
+      "end_time": "2025-09-23T00:00:00-04:00",
+      "consumption": 18.792,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-09-23T00:00:00-04:00",
+      "end_time": "2025-09-24T00:00:00-04:00",
+      "consumption": 24.075,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-09-24T00:00:00-04:00",
+      "end_time": "2025-09-25T00:00:00-04:00",
+      "consumption": 17.55,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-09-25T00:00:00-04:00",
+      "end_time": "2025-09-26T00:00:00-04:00",
+      "consumption": 13.992,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-09-26T00:00:00-04:00",
+      "end_time": "2025-09-27T00:00:00-04:00",
+      "consumption": 21.153,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-09-27T00:00:00-04:00",
+      "end_time": "2025-09-28T00:00:00-04:00",
+      "consumption": 19.107,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-09-28T00:00:00-04:00",
+      "end_time": "2025-09-29T00:00:00-04:00",
+      "consumption": 23.829,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-09-29T00:00:00-04:00",
+      "end_time": "2025-09-30T00:00:00-04:00",
+      "consumption": 22.152,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-09-30T00:00:00-04:00",
+      "end_time": "2025-10-01T00:00:00-04:00",
+      "consumption": 22.491,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-10-01T00:00:00-04:00",
+      "end_time": "2025-10-02T00:00:00-04:00",
+      "consumption": 20.37,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-10-02T00:00:00-04:00",
+      "end_time": "2025-10-03T00:00:00-04:00",
+      "consumption": 18.084,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-10-03T00:00:00-04:00",
+      "end_time": "2025-10-04T00:00:00-04:00",
+      "consumption": 17.028,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-10-04T00:00:00-04:00",
+      "end_time": "2025-10-05T00:00:00-04:00",
+      "consumption": 19.29,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-10-05T00:00:00-04:00",
+      "end_time": "2025-10-06T00:00:00-04:00",
+      "consumption": 23.742,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-10-06T00:00:00-04:00",
+      "end_time": "2025-10-07T00:00:00-04:00",
+      "consumption": 20.778,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-10-07T00:00:00-04:00",
+      "end_time": "2025-10-08T00:00:00-04:00",
+      "consumption": 21.693,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-10-08T00:00:00-04:00",
+      "end_time": "2025-10-09T00:00:00-04:00",
+      "consumption": 14.715,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-10-09T00:00:00-04:00",
+      "end_time": "2025-10-10T00:00:00-04:00",
+      "consumption": 16.467,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-10-10T00:00:00-04:00",
+      "end_time": "2025-10-11T00:00:00-04:00",
+      "consumption": 23.358,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-10-11T00:00:00-04:00",
+      "end_time": "2025-10-12T00:00:00-04:00",
+      "consumption": 27.735,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-10-12T00:00:00-04:00",
+      "end_time": "2025-10-13T00:00:00-04:00",
+      "consumption": 24.294,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-10-13T00:00:00-04:00",
+      "end_time": "2025-10-14T00:00:00-04:00",
+      "consumption": 21.567,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-10-14T00:00:00-04:00",
+      "end_time": "2025-10-15T00:00:00-04:00",
+      "consumption": 19.569,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-10-15T00:00:00-04:00",
+      "end_time": "2025-10-16T00:00:00-04:00",
+      "consumption": 15.597,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-10-16T00:00:00-04:00",
+      "end_time": "2025-10-17T00:00:00-04:00",
+      "consumption": 22.419,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-10-17T00:00:00-04:00",
+      "end_time": "2025-10-18T00:00:00-04:00",
+      "consumption": 31.698,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-10-18T00:00:00-04:00",
+      "end_time": "2025-10-19T00:00:00-04:00",
+      "consumption": 25.395,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-10-19T00:00:00-04:00",
+      "end_time": "2025-10-20T00:00:00-04:00",
+      "consumption": 22.992,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-10-20T00:00:00-04:00",
+      "end_time": "2025-10-21T00:00:00-04:00",
+      "consumption": 20.115,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-10-21T00:00:00-04:00",
+      "end_time": "2025-10-22T00:00:00-04:00",
+      "consumption": 21.138,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-10-22T00:00:00-04:00",
+      "end_time": "2025-10-23T00:00:00-04:00",
+      "consumption": 22.158,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-10-23T00:00:00-04:00",
+      "end_time": "2025-10-24T00:00:00-04:00",
+      "consumption": 24.684,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-10-24T00:00:00-04:00",
+      "end_time": "2025-10-25T00:00:00-04:00",
+      "consumption": 14.937,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-10-25T00:00:00-04:00",
+      "end_time": "2025-10-26T00:00:00-04:00",
+      "consumption": 15.285,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-10-26T00:00:00-04:00",
+      "end_time": "2025-10-27T00:00:00-04:00",
+      "consumption": 29.181,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-10-27T00:00:00-04:00",
+      "end_time": "2025-10-28T00:00:00-04:00",
+      "consumption": 28.35,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-10-28T00:00:00-04:00",
+      "end_time": "2025-10-29T00:00:00-04:00",
+      "consumption": 23.502,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-10-29T00:00:00-04:00",
+      "end_time": "2025-10-30T00:00:00-04:00",
+      "consumption": 23.34,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-10-30T00:00:00-04:00",
+      "end_time": "2025-10-31T00:00:00-04:00",
+      "consumption": 29.481,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-10-31T00:00:00-04:00",
+      "end_time": "2025-11-01T00:00:00-04:00",
+      "consumption": 27.6,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-11-01T00:00:00-04:00",
+      "end_time": "2025-11-02T00:00:00-04:00",
+      "consumption": 32.742,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-11-02T00:00:00-04:00",
+      "end_time": "2025-11-03T00:00:00-05:00",
+      "consumption": 23.181,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-11-03T00:00:00-05:00",
+      "end_time": "2025-11-04T00:00:00-05:00",
+      "consumption": 12.06,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-11-04T00:00:00-05:00",
+      "end_time": "2025-11-05T00:00:00-05:00",
+      "consumption": 22.08,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-11-05T00:00:00-05:00",
+      "end_time": "2025-11-06T00:00:00-05:00",
+      "consumption": 16.377,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-11-06T00:00:00-05:00",
+      "end_time": "2025-11-07T00:00:00-05:00",
+      "consumption": 26.1,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-11-07T00:00:00-05:00",
+      "end_time": "2025-11-08T00:00:00-05:00",
+      "consumption": 18.963,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-11-08T00:00:00-05:00",
+      "end_time": "2025-11-09T00:00:00-05:00",
+      "consumption": 27.792,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-11-09T00:00:00-05:00",
+      "end_time": "2025-11-10T00:00:00-05:00",
+      "consumption": 22.377,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-11-10T00:00:00-05:00",
+      "end_time": "2025-11-11T00:00:00-05:00",
+      "consumption": 24.795,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-11-11T00:00:00-05:00",
+      "end_time": "2025-11-12T00:00:00-05:00",
+      "consumption": 44.739,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-11-12T00:00:00-05:00",
+      "end_time": "2025-11-13T00:00:00-05:00",
+      "consumption": 29.148,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-11-13T00:00:00-05:00",
+      "end_time": "2025-11-14T00:00:00-05:00",
+      "consumption": 28.806,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-11-14T00:00:00-05:00",
+      "end_time": "2025-11-15T00:00:00-05:00",
+      "consumption": 29.799,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-11-15T00:00:00-05:00",
+      "end_time": "2025-11-16T00:00:00-05:00",
+      "consumption": 22.17,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-11-16T00:00:00-05:00",
+      "end_time": "2025-11-17T00:00:00-05:00",
+      "consumption": 35.316,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-11-17T00:00:00-05:00",
+      "end_time": "2025-11-18T00:00:00-05:00",
+      "consumption": 39.057,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-11-18T00:00:00-05:00",
+      "end_time": "2025-11-19T00:00:00-05:00",
+      "consumption": 31.2,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-11-19T00:00:00-05:00",
+      "end_time": "2025-11-20T00:00:00-05:00",
+      "consumption": 27.9,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-11-20T00:00:00-05:00",
+      "end_time": "2025-11-21T00:00:00-05:00",
+      "consumption": 20.955,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-11-21T00:00:00-05:00",
+      "end_time": "2025-11-22T00:00:00-05:00",
+      "consumption": 21.546,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-11-22T00:00:00-05:00",
+      "end_time": "2025-11-23T00:00:00-05:00",
+      "consumption": 26.673,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-11-23T00:00:00-05:00",
+      "end_time": "2025-11-24T00:00:00-05:00",
+      "consumption": 37.134,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-11-24T00:00:00-05:00",
+      "end_time": "2025-11-25T00:00:00-05:00",
+      "consumption": 34.512,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-11-25T00:00:00-05:00",
+      "end_time": "2025-11-26T00:00:00-05:00",
+      "consumption": 27.027,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-11-26T00:00:00-05:00",
+      "end_time": "2025-11-27T00:00:00-05:00",
+      "consumption": 18.351,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-11-27T00:00:00-05:00",
+      "end_time": "2025-11-28T00:00:00-05:00",
+      "consumption": 34.548,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-11-28T00:00:00-05:00",
+      "end_time": "2025-11-29T00:00:00-05:00",
+      "consumption": 31.998,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-11-29T00:00:00-05:00",
+      "end_time": "2025-11-30T00:00:00-05:00",
+      "consumption": 42.696,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-11-30T00:00:00-05:00",
+      "end_time": "2025-12-01T00:00:00-05:00",
+      "consumption": 41.631,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-12-01T00:00:00-05:00",
+      "end_time": "2025-12-02T00:00:00-05:00",
+      "consumption": 45.786,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-12-02T00:00:00-05:00",
+      "end_time": "2025-12-03T00:00:00-05:00",
+      "consumption": 25.377,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-12-03T00:00:00-05:00",
+      "end_time": "2025-12-04T00:00:00-05:00",
+      "consumption": 39.858,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-12-04T00:00:00-05:00",
+      "end_time": "2025-12-05T00:00:00-05:00",
+      "consumption": 39.666,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-12-05T00:00:00-05:00",
+      "end_time": "2025-12-06T00:00:00-05:00",
+      "consumption": 31.548,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-12-06T00:00:00-05:00",
+      "end_time": "2025-12-07T00:00:00-05:00",
+      "consumption": 36.435,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-12-07T00:00:00-05:00",
+      "end_time": "2025-12-08T00:00:00-05:00",
+      "consumption": 41.154,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-12-08T00:00:00-05:00",
+      "end_time": "2025-12-09T00:00:00-05:00",
+      "consumption": 48.519,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-12-09T00:00:00-05:00",
+      "end_time": "2025-12-10T00:00:00-05:00",
+      "consumption": 50.685,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-12-10T00:00:00-05:00",
+      "end_time": "2025-12-11T00:00:00-05:00",
+      "consumption": 35.973,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-12-11T00:00:00-05:00",
+      "end_time": "2025-12-12T00:00:00-05:00",
+      "consumption": 28.398,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-12-12T00:00:00-05:00",
+      "end_time": "2025-12-13T00:00:00-05:00",
+      "consumption": 32.403,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-12-13T00:00:00-05:00",
+      "end_time": "2025-12-14T00:00:00-05:00",
+      "consumption": 29.019,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-12-14T00:00:00-05:00",
+      "end_time": "2025-12-15T00:00:00-05:00",
+      "consumption": 49.638,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-12-15T00:00:00-05:00",
+      "end_time": "2025-12-16T00:00:00-05:00",
+      "consumption": 53.559,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-12-16T00:00:00-05:00",
+      "end_time": "2025-12-17T00:00:00-05:00",
+      "consumption": 41.028,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-12-17T00:00:00-05:00",
+      "end_time": "2025-12-18T00:00:00-05:00",
+      "consumption": 29.061,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-12-18T00:00:00-05:00",
+      "end_time": "2025-12-19T00:00:00-05:00",
+      "consumption": 26.106,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-12-19T00:00:00-05:00",
+      "end_time": "2025-12-20T00:00:00-05:00",
+      "consumption": 24.405,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-12-20T00:00:00-05:00",
+      "end_time": "2025-12-21T00:00:00-05:00",
+      "consumption": 36.426,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-12-21T00:00:00-05:00",
+      "end_time": "2025-12-22T00:00:00-05:00",
+      "consumption": 40.209,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-12-22T00:00:00-05:00",
+      "end_time": "2025-12-23T00:00:00-05:00",
+      "consumption": 43.341,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-12-23T00:00:00-05:00",
+      "end_time": "2025-12-24T00:00:00-05:00",
+      "consumption": 33.957,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-12-24T00:00:00-05:00",
+      "end_time": "2025-12-25T00:00:00-05:00",
+      "consumption": 35.529,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-12-25T00:00:00-05:00",
+      "end_time": "2025-12-26T00:00:00-05:00",
+      "consumption": 35.121,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-12-26T00:00:00-05:00",
+      "end_time": "2025-12-27T00:00:00-05:00",
+      "consumption": 54.357,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-12-27T00:00:00-05:00",
+      "end_time": "2025-12-28T00:00:00-05:00",
+      "consumption": 49.293,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-12-28T00:00:00-05:00",
+      "end_time": "2025-12-29T00:00:00-05:00",
+      "consumption": 50.283,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-12-29T00:00:00-05:00",
+      "end_time": "2025-12-30T00:00:00-05:00",
+      "consumption": 42.858,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-12-30T00:00:00-05:00",
+      "end_time": "2025-12-31T00:00:00-05:00",
+      "consumption": 52.464,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2025-12-31T00:00:00-05:00",
+      "end_time": "2026-01-01T00:00:00-05:00",
+      "consumption": 51.768,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-01-01T00:00:00-05:00",
+      "end_time": "2026-01-02T00:00:00-05:00",
+      "consumption": 49.488,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-01-02T00:00:00-05:00",
+      "end_time": "2026-01-03T00:00:00-05:00",
+      "consumption": 51.972,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-01-03T00:00:00-05:00",
+      "end_time": "2026-01-04T00:00:00-05:00",
+      "consumption": 54.216,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-01-04T00:00:00-05:00",
+      "end_time": "2026-01-05T00:00:00-05:00",
+      "consumption": 54.225,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-01-05T00:00:00-05:00",
+      "end_time": "2026-01-06T00:00:00-05:00",
+      "consumption": 36.852,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-01-06T00:00:00-05:00",
+      "end_time": "2026-01-07T00:00:00-05:00",
+      "consumption": 39.036,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-01-07T00:00:00-05:00",
+      "end_time": "2026-01-08T00:00:00-05:00",
+      "consumption": 27.012,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-01-08T00:00:00-05:00",
+      "end_time": "2026-01-09T00:00:00-05:00",
+      "consumption": 30.597,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-01-09T00:00:00-05:00",
+      "end_time": "2026-01-10T00:00:00-05:00",
+      "consumption": 31.941,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-01-10T00:00:00-05:00",
+      "end_time": "2026-01-11T00:00:00-05:00",
+      "consumption": 39.354,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-01-11T00:00:00-05:00",
+      "end_time": "2026-01-12T00:00:00-05:00",
+      "consumption": 34.206,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-01-12T00:00:00-05:00",
+      "end_time": "2026-01-13T00:00:00-05:00",
+      "consumption": 57.984,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-01-13T00:00:00-05:00",
+      "end_time": "2026-01-14T00:00:00-05:00",
+      "consumption": 30.756,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-01-14T00:00:00-05:00",
+      "end_time": "2026-01-15T00:00:00-05:00",
+      "consumption": 23.964,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-01-15T00:00:00-05:00",
+      "end_time": "2026-01-16T00:00:00-05:00",
+      "consumption": 29.457,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-01-16T00:00:00-05:00",
+      "end_time": "2026-01-17T00:00:00-05:00",
+      "consumption": 55.335,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-01-17T00:00:00-05:00",
+      "end_time": "2026-01-18T00:00:00-05:00",
+      "consumption": 51.534,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-01-18T00:00:00-05:00",
+      "end_time": "2026-01-19T00:00:00-05:00",
+      "consumption": 43.725,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-01-19T00:00:00-05:00",
+      "end_time": "2026-01-20T00:00:00-05:00",
+      "consumption": 57.663,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-01-20T00:00:00-05:00",
+      "end_time": "2026-01-21T00:00:00-05:00",
+      "consumption": 60.441,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-01-21T00:00:00-05:00",
+      "end_time": "2026-01-22T00:00:00-05:00",
+      "consumption": 47.169,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-01-22T00:00:00-05:00",
+      "end_time": "2026-01-23T00:00:00-05:00",
+      "consumption": 32.973,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-01-23T00:00:00-05:00",
+      "end_time": "2026-01-24T00:00:00-05:00",
+      "consumption": 35.793,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-01-24T00:00:00-05:00",
+      "end_time": "2026-01-25T00:00:00-05:00",
+      "consumption": 60.951,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-01-25T00:00:00-05:00",
+      "end_time": "2026-01-26T00:00:00-05:00",
+      "consumption": 82.086,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-01-26T00:00:00-05:00",
+      "end_time": "2026-01-27T00:00:00-05:00",
+      "consumption": 69.576,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-01-27T00:00:00-05:00",
+      "end_time": "2026-01-28T00:00:00-05:00",
+      "consumption": 63.021,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-01-28T00:00:00-05:00",
+      "end_time": "2026-01-29T00:00:00-05:00",
+      "consumption": 57.321,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-01-29T00:00:00-05:00",
+      "end_time": "2026-01-30T00:00:00-05:00",
+      "consumption": 60.666,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-01-30T00:00:00-05:00",
+      "end_time": "2026-01-31T00:00:00-05:00",
+      "consumption": 60.147,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-01-31T00:00:00-05:00",
+      "end_time": "2026-02-01T00:00:00-05:00",
+      "consumption": 54.807,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-01T00:00:00-05:00",
+      "end_time": "2026-02-02T00:00:00-05:00",
+      "consumption": 72.714,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-02T00:00:00-05:00",
+      "end_time": "2026-02-03T00:00:00-05:00",
+      "consumption": 59.91,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-03T00:00:00-05:00",
+      "end_time": "2026-02-04T00:00:00-05:00",
+      "consumption": 49.992,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-04T00:00:00-05:00",
+      "end_time": "2026-02-05T00:00:00-05:00",
+      "consumption": 39.936,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-05T00:00:00-05:00",
+      "end_time": "2026-02-06T00:00:00-05:00",
+      "consumption": 47.082,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-06T00:00:00-05:00",
+      "end_time": "2026-02-07T00:00:00-05:00",
+      "consumption": 43.491,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-07T00:00:00-05:00",
+      "end_time": "2026-02-08T00:00:00-05:00",
+      "consumption": 62.976,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-08T00:00:00-05:00",
+      "end_time": "2026-02-09T00:00:00-05:00",
+      "consumption": 78.552,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-09T00:00:00-05:00",
+      "end_time": "2026-02-10T00:00:00-05:00",
+      "consumption": 67.236,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-10T00:00:00-05:00",
+      "end_time": "2026-02-11T00:00:00-05:00",
+      "consumption": 51.303,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-11T00:00:00-05:00",
+      "end_time": "2026-02-12T00:00:00-05:00",
+      "consumption": 37.59,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-12T00:00:00-05:00",
+      "end_time": "2026-02-13T00:00:00-05:00",
+      "consumption": 36.555,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-13T00:00:00-05:00",
+      "end_time": "2026-02-14T00:00:00-05:00",
+      "consumption": 44.898,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-14T00:00:00-05:00",
+      "end_time": "2026-02-15T00:00:00-05:00",
+      "consumption": 45.009,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-15T00:00:00-05:00",
+      "end_time": "2026-02-16T00:00:00-05:00",
+      "consumption": 41.823,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-16T00:00:00-05:00",
+      "end_time": "2026-02-17T00:00:00-05:00",
+      "consumption": 37.002,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-17T00:00:00-05:00",
+      "end_time": "2026-02-18T00:00:00-05:00",
+      "consumption": 35.34,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-18T00:00:00-05:00",
+      "end_time": "2026-02-19T00:00:00-05:00",
+      "consumption": 32.238,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-19T00:00:00-05:00",
+      "end_time": "2026-02-20T00:00:00-05:00",
+      "consumption": 34.38,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-20T00:00:00-05:00",
+      "end_time": "2026-02-21T00:00:00-05:00",
+      "consumption": 33.783,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-21T00:00:00-05:00",
+      "end_time": "2026-02-22T00:00:00-05:00",
+      "consumption": 31.416,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-22T00:00:00-05:00",
+      "end_time": "2026-02-23T00:00:00-05:00",
+      "consumption": 37.446,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-23T00:00:00-05:00",
+      "end_time": "2026-02-24T00:00:00-05:00",
+      "consumption": 61.752,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-24T00:00:00-05:00",
+      "end_time": "2026-02-25T00:00:00-05:00",
+      "consumption": 48.288,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-25T00:00:00-05:00",
+      "end_time": "2026-02-26T00:00:00-05:00",
+      "consumption": 30.357,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-26T00:00:00-05:00",
+      "end_time": "2026-02-27T00:00:00-05:00",
+      "consumption": 31.383,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-27T00:00:00-05:00",
+      "end_time": "2026-02-28T00:00:00-05:00",
+      "consumption": 32.283,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-02-28T00:00:00-05:00",
+      "end_time": "2026-03-01T00:00:00-05:00",
+      "consumption": 29.535,
+      "provided_cost": 0
+    },
+    {
+      "start_time": "2026-03-01T00:00:00-05:00",
+      "end_time": "2026-03-02T00:00:00-05:00",
+      "consumption": 19.638,
+      "provided_cost": 0
+    }
+  ],
+  "bill_reads": [
+    {
+      "start_time": "2025-05-02T00:00:00-04:00",
+      "end_time": "2025-05-16T00:00:00-04:00",
+      "consumption": 246.0,
+      "provided_cost": 93.57
+    },
+    {
+      "start_time": "2025-05-16T00:00:00-04:00",
+      "end_time": "2025-06-17T00:00:00-04:00",
+      "consumption": 617.0,
+      "provided_cost": 235.91
+    },
+    {
+      "start_time": "2025-06-17T00:00:00-04:00",
+      "end_time": "2025-07-17T00:00:00-04:00",
+      "consumption": 825.0,
+      "provided_cost": 318.53
+    },
+    {
+      "start_time": "2025-07-17T00:00:00-04:00",
+      "end_time": "2025-08-15T00:00:00-04:00",
+      "consumption": 597.0,
+      "provided_cost": 230.23
+    },
+    {
+      "start_time": "2025-08-15T00:00:00-04:00",
+      "end_time": "2025-09-16T00:00:00-04:00",
+      "consumption": 573.0,
+      "provided_cost": 222.65
+    },
+    {
+      "start_time": "2025-09-16T00:00:00-04:00",
+      "end_time": "2025-10-16T00:00:00-04:00",
+      "consumption": 595.0,
+      "provided_cost": 217.27
+    },
+    {
+      "start_time": "2025-10-16T00:00:00-04:00",
+      "end_time": "2025-11-14T00:00:00-05:00",
+      "consumption": 714.0,
+      "provided_cost": 264.35
+    },
+    {
+      "start_time": "2025-11-14T00:00:00-05:00",
+      "end_time": "2025-12-17T00:00:00-05:00",
+      "consumption": 1159.0,
+      "provided_cost": 403.65
+    },
+    {
+      "start_time": "2025-12-17T00:00:00-05:00",
+      "end_time": "2026-01-16T00:00:00-05:00",
+      "consumption": 1203.0,
+      "provided_cost": 411.58
+    },
+    {
+      "start_time": "2026-01-16T00:00:00-05:00",
+      "end_time": "2026-02-18T00:00:00-05:00",
+      "consumption": 1744.0,
+      "provided_cost": 614.68
+    }
+  ]
+}
