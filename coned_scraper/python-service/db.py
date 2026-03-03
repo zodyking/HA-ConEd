@@ -161,7 +161,7 @@ async def get_all_bills() -> List[Dict[str, Any]]:
     await ensure_connected()
     
     bills = await db.bill.find_many(
-        order_by={"billCycleDate": "desc"},
+        order={"billCycleDate": "desc"},
         include={"payments": True, "details": True, "document": True}
     )
     
@@ -208,7 +208,7 @@ async def get_latest_bill_with_details() -> Optional[Dict[str, Any]]:
     await ensure_connected()
     
     bill = await db.bill.find_first(
-        order_by={"billCycleDate": "desc"},
+        order={"billCycleDate": "desc"},
         include={"details": True}
     )
     
@@ -256,7 +256,7 @@ async def get_bill_history_for_graph() -> List[Dict[str, Any]]:
     await ensure_connected()
     
     bills = await db.bill.find_many(
-        order_by={"billCycleDate": "asc"},
+        order={"billCycleDate": "asc"},
         include={"details": True}
     )
     
@@ -384,8 +384,13 @@ async def get_all_bill_details() -> List[Dict[str, Any]]:
     await ensure_connected()
     
     details_list = await db.billdetails.find_many(
-        include={"bill": True},
-        order_by={"bill": {"billCycleDate": "desc"}}
+        include={"bill": True}
+    )
+    # Sort by bill cycle date descending in Python (nested order not supported)
+    details_list = sorted(
+        details_list,
+        key=lambda d: d.bill.billCycleDate if d.bill and d.bill.billCycleDate else datetime.min,
+        reverse=True
     )
     
     results = []
@@ -461,8 +466,13 @@ async def get_all_bill_documents_with_periods() -> List[Dict[str, Any]]:
     await ensure_connected()
     
     docs = await db.billdocument.find_many(
-        include={"bill": True},
-        order_by={"bill": {"billCycleDate": "desc"}}
+        include={"bill": True}
+    )
+    # Sort by bill cycle date descending in Python (nested order not supported)
+    docs = sorted(
+        docs,
+        key=lambda d: d.bill.billCycleDate if d.bill and d.bill.billCycleDate else datetime.min,
+        reverse=True
     )
     
     return [
@@ -480,7 +490,7 @@ async def get_latest_bill_id_with_document() -> Optional[int]:
     
     bill = await db.bill.find_first(
         where={"document": {"isNot": None}},
-        order_by={"billCycleDate": "desc"},
+        order={"billCycleDate": "desc"},
         include={"document": True}
     )
     
@@ -554,7 +564,7 @@ async def get_all_payments(bill_id: Optional[int] = None) -> List[Dict[str, Any]
     payments = await db.payment.find_many(
         where=where,
         include={"payeeUser": True, "bill": True},
-        order_by={"paymentDate": "desc"}
+        order={"paymentDate": "desc"}
     )
     
     return [
@@ -610,7 +620,7 @@ async def get_latest_payment() -> Optional[Dict[str, Any]]:
     await ensure_connected()
     
     p = await db.payment.find_first(
-        order_by={"paymentDate": "desc"},
+        order={"paymentDate": "desc"},
         include={"payeeUser": True, "bill": True}
     )
     
@@ -632,7 +642,7 @@ async def get_last_payment_for_latest_bill() -> Optional[Dict[str, Any]]:
     await ensure_connected()
     
     # Get the latest bill
-    latest_bill = await db.bill.find_first(order_by={"billCycleDate": "desc"})
+    latest_bill = await db.bill.find_first(order={"billCycleDate": "desc"})
     
     if not latest_bill:
         return None
@@ -640,7 +650,7 @@ async def get_last_payment_for_latest_bill() -> Optional[Dict[str, Any]]:
     # Get the most recent payment for that bill
     p = await db.payment.find_first(
         where={"billId": latest_bill.id},
-        order_by={"paymentDate": "desc"},
+        order={"paymentDate": "desc"},
         include={"payeeUser": True, "bill": True}
     )
     
@@ -666,7 +676,7 @@ async def get_most_recent_bill_payment_count() -> Dict[str, Any]:
     """Get payment count and last payment for the most recent bill"""
     await ensure_connected()
     
-    latest_bill = await db.bill.find_first(order_by={"billCycleDate": "desc"})
+    latest_bill = await db.bill.find_first(order={"billCycleDate": "desc"})
     
     if not latest_bill:
         return {"count": 0, "last_payment": None}
@@ -675,7 +685,7 @@ async def get_most_recent_bill_payment_count() -> Dict[str, Any]:
     
     last_payment = await db.payment.find_first(
         where={"billId": latest_bill.id},
-        order_by=[
+        order=[
             {"manualOrder": "asc"},
             {"paymentDate": "desc"},
             {"firstScrapedAt": "desc"}
@@ -838,7 +848,7 @@ async def get_payee_users() -> List[Dict[str, Any]]:
     
     users = await db.payeeuser.find_many(
         include={"cards": True},
-        order_by={"name": "asc"}
+        order={"name": "asc"}
     )
     
     return [
@@ -1012,7 +1022,7 @@ async def record_account_balance(balance: str) -> bool:
     balance_numeric = parse_amount(balance)
     
     # Get previous balance
-    prev = await db.accountbalancehistory.find_first(order_by={"scrapedAt": "desc"})
+    prev = await db.accountbalancehistory.find_first(order={"scrapedAt": "desc"})
     
     changed = True
     if prev:
@@ -1032,7 +1042,7 @@ async def get_current_balance() -> Optional[Dict[str, Any]]:
     """Get current account balance"""
     await ensure_connected()
     
-    balance = await db.accountbalancehistory.find_first(order_by={"scrapedAt": "desc"})
+    balance = await db.accountbalancehistory.find_first(order={"scrapedAt": "desc"})
     
     if not balance:
         return None
@@ -1071,7 +1081,7 @@ async def get_latest_scraped_data(limit: int = 1) -> List[Dict[str, Any]]:
     await ensure_connected()
     
     records = await db.scrapeddata.find_many(
-        order_by={"timestamp": "desc"},
+        order={"timestamp": "desc"},
         take=limit
     )
     
@@ -1091,7 +1101,7 @@ async def get_all_scraped_data() -> List[Dict[str, Any]]:
     """Get all scraped data"""
     await ensure_connected()
     
-    records = await db.scrapeddata.find_many(order_by={"timestamp": "desc"})
+    records = await db.scrapeddata.find_many(order={"timestamp": "desc"})
     
     return [
         {
@@ -1116,7 +1126,7 @@ async def get_logs(limit: int = 100) -> List[Dict[str, Any]]:
     await ensure_connected()
     
     logs = await db.log.find_many(
-        order_by={"timestamp": "desc"},
+        order={"timestamp": "desc"},
         take=limit
     )
     
@@ -1162,7 +1172,7 @@ async def add_scrape_history(success: bool, error_message: Optional[str] = None,
     count = await db.scrapehistory.count()
     if count > 100:
         oldest = await db.scrapehistory.find_many(
-            order_by={"timestamp": "asc"},
+            order={"timestamp": "asc"},
             take=count - 100
         )
         for record in oldest:
@@ -1173,7 +1183,7 @@ async def get_scrape_history(limit: int = 50) -> List[Dict[str, Any]]:
     await ensure_connected()
     
     history = await db.scrapehistory.find_many(
-        order_by={"timestamp": "desc"},
+        order={"timestamp": "desc"},
         take=limit
     )
     
@@ -1313,15 +1323,16 @@ async def get_ledger_data() -> Dict[str, Any]:
     
     # Get all bills with payments
     bills = await db.bill.find_many(
-        order_by={"billCycleDate": "desc"},
+        order={"billCycleDate": "desc"},
         include={
-            "payments": {
-                "include": {"payeeUser": True},
-                "order_by": [{"paymentDate": "desc"}]
-            },
+            "payments": {"include": {"payeeUser": True}},
             "details": True
         }
     )
+    # Sort payments within each bill by date descending (nested order not supported in include)
+    for bill in bills:
+        if bill.payments:
+            bill.payments.sort(key=lambda p: p.paymentDate if p.paymentDate else datetime.min, reverse=True)
     
     bills_data = []
     for bill in bills:
@@ -1355,7 +1366,7 @@ async def get_ledger_data() -> Dict[str, Any]:
     orphan_payments = await db.payment.find_many(
         where={"billId": None},
         include={"payeeUser": True},
-        order_by={"paymentDate": "desc"}
+        order={"paymentDate": "desc"}
     )
     
     orphans = [
@@ -1391,7 +1402,7 @@ async def calculate_all_payee_balances() -> List[Dict[str, Any]]:
     
     # Get all bills
     bills = await db.bill.find_many(
-        order_by={"billCycleDate": "desc"},
+        order={"billCycleDate": "desc"},
         include={"payments": True}
     )
     
@@ -1487,7 +1498,7 @@ async def get_all_bills_with_payments() -> List[Dict[str, Any]]:
     await ensure_connected()
     
     bills = await db.bill.find_many(
-        order_by={"billCycleDate": "desc"},
+        order={"billCycleDate": "desc"},
         include={"payments": {"include": {"payeeUser": True}}}
     )
     
@@ -1517,7 +1528,7 @@ async def get_payments_by_user(user_id: int) -> List[Dict[str, Any]]:
     payments = await db.payment.find_many(
         where={"payeeUserId": user_id},
         include={"bill": True},
-        order_by={"paymentDate": "desc"}
+        order={"paymentDate": "desc"}
     )
     
     return [
