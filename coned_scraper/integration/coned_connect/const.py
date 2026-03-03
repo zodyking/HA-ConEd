@@ -1,8 +1,8 @@
 """Constants for the Con Edison integration."""
 from datetime import timedelta
 
-DOMAIN = "conedison"
-DEFAULT_NAME = "Con Edison"
+DOMAIN = "coned_connect"
+DEFAULT_NAME = "ConEd Connect"
 DEFAULT_URL = "http://localhost:8000"
 
 CONF_ADDON_URL = "addon_url"

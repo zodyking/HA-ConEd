@@ -76,9 +76,9 @@ class ConEdisonSensor(CoordinatorEntity[ConEdisonDataUpdateCoordinator], SensorE
         
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)},
-            name="Con Edison",
+            name="ConEd Connect",
             manufacturer="HA-ConEd",
-            model="Con Edison Account",
+            model="ConEd Connect Account",
         )
 
     @property

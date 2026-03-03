@@ -1,6 +1,6 @@
 {
-  "domain": "conedison",
-  "name": "Con Edison",
+  "domain": "coned_connect",
+  "name": "ConEd Connect",
   "version": "1.0.0",
   "documentation": "https://github.com/zodyking/HA-ConEd",
   "issue_tracker": "https://github.com/zodyking/HA-ConEd/issues",

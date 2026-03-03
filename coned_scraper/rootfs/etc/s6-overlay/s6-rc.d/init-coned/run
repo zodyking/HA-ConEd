@@ -20,11 +20,11 @@ chown -R postgres:postgres /config/postgres 2>/dev/null || true
 # ==============================================================================
 # Install Con Edison integration to Home Assistant custom_components
 # ==============================================================================
-INTEGRATION_SRC="/app/integration/conedison"
-INTEGRATION_DST="/homeassistant/custom_components/conedison"
+INTEGRATION_SRC="/app/integration/coned_connect"
+INTEGRATION_DST="/homeassistant/custom_components/coned_connect"
 
 if [ -d "$INTEGRATION_SRC" ]; then
-    bashio::log.info "Installing Con Edison integration..."
+    bashio::log.info "Installing ConEd Connect integration..."
     mkdir -p /homeassistant/custom_components
     cp -r "$INTEGRATION_SRC" "$INTEGRATION_DST"
     bashio::log.info "Integration installed to $INTEGRATION_DST"
