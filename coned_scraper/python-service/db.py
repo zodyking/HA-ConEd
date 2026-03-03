@@ -1368,7 +1368,7 @@ async def sync_from_scrape(data: Dict[str, Any]):
         if "account_balance" in data:
             await record_account_balance(data["account_balance"])
         
-        # Process bills
+        # Process bills (nested format: bills with payments inside)
         if "bills" in data:
             for bill_data in data["bills"]:
                 bill = await upsert_bill(
@@ -1389,7 +1389,56 @@ async def sync_from_scrape(data: Dict[str, Any]):
                             scrape_order=i
                         )
         
-        logger.info("Synced scraped data to normalized tables")
+        # Process bill_history.ledger format (flat list from ConEd scraper)
+        bill_history = data.get("bill_history") or {}
+        ledger = bill_history.get("ledger") or []
+        if ledger:
+            # Build map: (bill_cycle_date, month_range) -> bill_id for payments
+            cycle_to_bill: Dict[str, int] = {}
+            
+            # First pass: upsert all bills
+            for item in ledger:
+                if item.get("type") != "bill":
+                    continue
+                bill_cycle = item.get("bill_cycle_date") or ""
+                month_range = item.get("month_range") or ""
+                if not bill_cycle and not item.get("bill_total"):
+                    continue
+                bill = await upsert_bill(
+                    bill_cycle_date=bill_cycle,
+                    bill_date=item.get("bill_date"),
+                    month_range=month_range,
+                    bill_total=item.get("bill_total")
+                )
+                key = f"{bill_cycle}|{month_range}"
+                if key not in cycle_to_bill:
+                    cycle_to_bill[key] = bill.id
+                # Also map by cycle only for payments that may not have month_range
+                cycle_key = bill_cycle
+                if cycle_key not in cycle_to_bill:
+                    cycle_to_bill[cycle_key] = bill.id
+            
+            # Second pass: upsert all payments, link to bills by bill_cycle_date
+            payment_order = 0
+            for item in ledger:
+                if item.get("type") != "payment":
+                    continue
+                bill_cycle = item.get("bill_cycle_date") or ""
+                if not bill_cycle and not item.get("amount"):
+                    continue
+                bill_id = cycle_to_bill.get(bill_cycle)
+                await upsert_payment(
+                    payment_date=item.get("payment_date") or "",
+                    description=item.get("description") or "Payment Received",
+                    amount=item.get("amount") or "0",
+                    bill_id=bill_id,
+                    scrape_order=payment_order
+                )
+                payment_order += 1
+            
+            logger.info(f"Synced {len([i for i in ledger if i.get('type')=='bill'])} bills and {len([i for i in ledger if i.get('type')=='payment'])} payments from ledger")
+        elif "bills" in data:
+            logger.info("Synced scraped data to normalized tables")
     except Exception as e:
         logger.warning(f"Failed to sync scraped data: {e}")
 

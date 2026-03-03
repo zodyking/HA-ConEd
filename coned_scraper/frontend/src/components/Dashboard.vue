@@ -217,7 +217,8 @@ watch(logs, () => {
 }, { immediate: true })
 
 watch(logs, () => {
-  if (logContainerRef.value) {
+  // Only auto-scroll to bottom while scraping
+  if (isRunning.value && logContainerRef.value) {
     logContainerRef.value.scrollTop = logContainerRef.value.scrollHeight
   }
 })
