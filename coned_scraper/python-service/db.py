@@ -703,7 +703,7 @@ async def get_most_recent_bill_payment_count() -> Dict[str, Any]:
     latest_bill = await db.bill.find_first(order={"billCycleDate": "desc"})
     
     if not latest_bill:
-        return {"count": 0, "last_payment": None}
+        return {"bill_id": None, "payment_count": 0, "last_payment": None}
     
     count = await db.payment.count(where={"billId": latest_bill.id})
     
@@ -728,7 +728,7 @@ async def get_most_recent_bill_payment_count() -> Dict[str, Any]:
             "payee_name": last_payment.payeeUser.name if last_payment.payeeUser else None,
         }
     
-    return {"count": count, "last_payment": last_payment_dict}
+    return {"bill_id": latest_bill.id, "payment_count": count, "last_payment": last_payment_dict}
 
 async def update_payment_bill(payment_id: int, bill_id: Optional[int], manually_set: bool = False) -> bool:
     """Update payment's bill association"""

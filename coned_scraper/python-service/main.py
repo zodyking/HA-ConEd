@@ -29,7 +29,7 @@ import db
 app = FastAPI(title="Con Edison API")
 
 # Code version for deployment verification
-CODE_VERSION = "1.3.31"
+CODE_VERSION = "1.3.32"
 
 @app.on_event("startup")
 async def startup():
@@ -535,6 +535,9 @@ async def should_trigger_payment_tts() -> tuple:
     previous_count = previous_state.get("payment_count", 0)
     previous_last_payment_id = previous_state.get("last_payment_id")
     
+    # Debug logging
+    await db.add_log("debug", f"Payment TTS check: current_bill={current_bill_id}, prev_bill={previous_bill_id}, current_count={current_count}, prev_count={previous_count}")
+    
     should_trigger = False
     reason = ""
     
@@ -565,8 +568,9 @@ async def should_trigger_payment_tts() -> tuple:
             should_trigger = True
             reason = f"New payment in new billing cycle"
     
-    # Case 3: First time with state - don't trigger to avoid false positives on first run
-    # (User may have existing payments we shouldn't announce)
+    # Case 3: Same bill, same count - no change
+    elif current_bill_id == previous_bill_id and current_count == previous_count:
+        reason = f"No new payments (count unchanged: {current_count})"
     
     # Update state
     new_state = {
@@ -575,6 +579,9 @@ async def should_trigger_payment_tts() -> tuple:
         "last_payment_id": current_last_id
     }
     await save_tts_payment_state(new_state)
+    
+    if should_trigger:
+        await db.add_log("debug", f"Payment TTS WILL trigger: {reason}")
     
     return should_trigger, latest_payment if should_trigger else None, reason
 
