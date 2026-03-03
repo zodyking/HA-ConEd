@@ -29,7 +29,7 @@ import db
 app = FastAPI(title="Con Edison API")
 
 # Code version for deployment verification
-CODE_VERSION = "1.3.10-postgres"
+CODE_VERSION = "1.3.11-postgres"
 
 @app.on_event("startup")
 async def startup():
@@ -285,8 +285,8 @@ async def run_scheduled_scrape():
                     await db.add_log("info", f"Triggering new bill TTS: {tts_bill_reason}")
                     from tts_scheduler import trigger_new_bill_tts
                     await trigger_new_bill_tts(
-                        month_range=tts_bill_data.get("month_range", ""),
-                        amount=tts_bill_data.get("bill_total", ""),
+                        bill_month_range=tts_bill_data.get("month_range", ""),
+                        bill_total=tts_bill_data.get("bill_total", ""),
                         due_date=tts_bill_data.get("due_date", "")
                     )
                 else:
@@ -1124,8 +1124,8 @@ async def start_scraper():
                     await db.add_log("info", f"Triggering new bill TTS: {tts_bill_reason}")
                     from tts_scheduler import trigger_new_bill_tts
                     await trigger_new_bill_tts(
-                        month_range=tts_bill_data.get("month_range", ""),
-                        amount=tts_bill_data.get("bill_total", ""),
+                        bill_month_range=tts_bill_data.get("month_range", ""),
+                        bill_total=tts_bill_data.get("bill_total", ""),
                         due_date=tts_bill_data.get("due_date", "")
                     )
                 else:

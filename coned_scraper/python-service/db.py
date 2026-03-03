@@ -1469,6 +1469,8 @@ async def sync_from_scrape(data: Dict[str, Any]):
                 )
             
             # Second pass: upsert payments (bill_id assigned by relink after)
+            # Use bill_cycle_date as fallback for payment_date - ConEd often doesn't show
+            # exact payment date in description, so without this we'd default to utc_now()
             payment_order = 0
             for item in ledger:
                 if item.get("type") != "payment":
@@ -1476,8 +1478,9 @@ async def sync_from_scrape(data: Dict[str, Any]):
                 bill_cycle = item.get("bill_cycle_date") or ""
                 if not bill_cycle and not item.get("amount"):
                     continue
+                payment_date = item.get("payment_date") or bill_cycle
                 await upsert_payment(
-                    payment_date=item.get("payment_date") or "",
+                    payment_date=payment_date,
                     description=item.get("description") or "Payment Received",
                     amount=item.get("amount") or "0",
                     bill_id=None,  # Relink assigns by date logic
