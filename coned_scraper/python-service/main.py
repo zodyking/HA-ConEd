@@ -29,7 +29,7 @@ import db
 app = FastAPI(title="Con Edison API")
 
 # Code version for deployment verification
-CODE_VERSION = "1.3.26"
+CODE_VERSION = "1.3.27"
 
 @app.on_event("startup")
 async def startup():

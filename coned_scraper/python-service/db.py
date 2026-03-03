@@ -1787,7 +1787,7 @@ async def get_ledger_data() -> Dict[str, Any]:
         if bill.payments:
             bill.payments.sort(key=lambda p: p.paymentDate if p.paymentDate else datetime.min, reverse=True)
     
-        bills_data = []
+    bills_data = []
     for bill in bills:
         pdf_exists = False
         pdf_source_url = None
