@@ -16,7 +16,12 @@
           | Due: <span class="due">${{ summary.bill_balance?.toFixed(2) }}</span>
         </template>
       </span>
-      <span class="ha-payee-toggle">{{ expanded ? '▼' : '▶' }}</span>
+      <span class="ha-payee-header-right">
+        <span class="ha-payee-mode-toggle" @click.stop>
+          <label><input type="checkbox" v-model="showCumulative" /> {{ showCumulative ? 'Rollover' : 'Bill only' }}</label>
+        </span>
+        <span class="ha-payee-toggle">{{ expanded ? '▼' : '▶' }}</span>
+      </span>
     </div>
     <div v-if="expanded" class="ha-payee-rows">
       <div
@@ -30,7 +35,7 @@
         </div>
         <div class="ha-payee-fraction">
           <span class="ha-payee-paid">${{ (payee.amount_paid || 0).toFixed(2) }}</span>
-          <span class="ha-payee-share">${{ (payee.share_of_bill || 0).toFixed(2) }}</span>
+          <span class="ha-payee-share">${{ (effectiveShare(payee) || 0).toFixed(2) }}</span>
         </div>
         <div class="ha-payee-status">
           <template v-if="isPaid(payee)">
@@ -64,6 +69,7 @@ interface PayeeSummary {
   amount_owed: number
   amount_paid: number
   share_of_bill?: number
+  share_of_bill_cumulative?: number
   rollover_from_previous: number
   current_balance: number
   status: 'paid' | 'partial' | 'unpaid'
@@ -84,8 +90,13 @@ const props = defineProps<{
 }>()
 
 const expanded = ref(true)
+const showCumulative = ref(false)
 
 const summary = computed(() => props.billSummaries[props.billId])
+
+function effectiveShare(payee: PayeeSummary) {
+  return showCumulative.value ? (payee.share_of_bill_cumulative ?? payee.share_of_bill ?? 0) : (payee.share_of_bill ?? 0)
+}
 
 const hasResponsibilities = computed(() =>
   summary.value?.payee_summaries?.some((p) => p.responsibility_percent > 0)
@@ -96,7 +107,7 @@ const filteredPayees = computed(() =>
 )
 
 function diff(payee: PayeeSummary) {
-  return (payee.amount_paid || 0) - (payee.share_of_bill || 0)
+  return (payee.amount_paid || 0) - effectiveShare(payee)
 }
 
 function isPaid(payee: PayeeSummary) {
@@ -142,6 +153,7 @@ function isOverPaid(payee: PayeeSummary) {
   cursor: pointer;
   font-size: 0.7rem;
 }
+.ha-payee-header-right { display: flex; align-items: center; gap: 0.5rem; }
 .ha-payee-header.paid { background: #e8f5e9; }
 .ha-payee-header.partial { background: #fff8e1; }
 .ha-payee-header.unpaid { background: #ffebee; }
@@ -149,6 +161,13 @@ function isOverPaid(payee: PayeeSummary) {
 .ha-payee-header-text .paid { color: #4caf50; }
 .ha-payee-header-text .due { color: #f44336; }
 .ha-payee-toggle { font-size: 0.65rem; color: #666; }
+.ha-payee-mode-toggle {
+  margin-left: 0.5rem;
+  font-size: 0.65rem;
+  font-weight: 400;
+  color: #888;
+}
+.ha-payee-mode-toggle label { cursor: pointer; display: inline-flex; align-items: center; gap: 0.25rem; }
 .ha-payee-rows { padding: 0.4rem; }
 .ha-payee-row {
   display: flex;

@@ -197,7 +197,7 @@
                           <div>
                             <div class="ha-payment-desc">
                               {{ payment.description || 'Payment Received' }}
-                              <span v-if="(payment.payee_status === 'confirmed' || payment.payee_status === 'auto_assigned') && payment.payee_name" class="ha-payee-badge">
+                              <span v-if="payment.payee_user_id && payment.payee_name" class="ha-payee-badge">
                                 {{ payment.payee_name }}
                               </span>
                               <span
@@ -251,7 +251,7 @@
                     <div>
                       <div class="ha-payment-desc">
                         {{ payment.description || 'Payment Received' }}
-                        <span v-if="(payment.payee_status === 'confirmed' || payment.payee_status === 'auto_assigned') && payment.payee_name" class="ha-payee-badge">
+                        <span v-if="payment.payee_user_id && payment.payee_name" class="ha-payee-badge">
                           {{ payment.payee_name }}
                         </span>
                         <span v-else-if="payment.payee_status === 'pending'" class="ha-payee-pending">

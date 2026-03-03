@@ -86,6 +86,7 @@ interface Bill {
   month_range: string
   bill_cycle_date: string
   pdf_exists?: boolean
+  pdf_source_url?: string | null
 }
 
 const currentTime = ref('')
@@ -144,7 +145,7 @@ async function loadBills() {
       bills.value = data.bills || []
       const next: Record<number, string> = {}
       for (const b of bills.value) {
-        next[b.id] = pdfUrls.value[b.id] ?? ''
+        next[b.id] = pdfUrls.value[b.id] ?? (b.pdf_source_url || '')
       }
       pdfUrls.value = next
     } else {

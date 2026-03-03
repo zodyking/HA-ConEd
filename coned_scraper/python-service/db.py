@@ -1525,17 +1525,19 @@ async def sync_from_scrape(data: Dict[str, Any]):
 async def get_ledger_data() -> Dict[str, Any]:
     """Get complete ledger data for UI"""
     await ensure_connected()
-    
+    from data_config import DATA_DIR
+
     # Get current balance
     balance_record = await get_current_balance()
     account_balance = balance_record["balance"] if balance_record else "$0.00"
     
-    # Get all bills with payments
+    # Get all bills with payments and documents
     bills = await db.bill.find_many(
         order={"billCycleDate": "desc"},
         include={
             "payments": {"include": {"payeeUser": True}},
-            "details": True
+            "details": True,
+            "document": True,
         }
     )
     # Sort payments within each bill by date descending (nested order not supported in include)
@@ -1545,6 +1547,12 @@ async def get_ledger_data() -> Dict[str, Any]:
     
         bills_data = []
     for bill in bills:
+        pdf_exists = False
+        pdf_source_url = None
+        if bill.document:
+            full_path = DATA_DIR / bill.document.pdfPath
+            pdf_exists = full_path.is_file() if full_path else False
+            pdf_source_url = bill.document.sourceUrl
         bill_dict = {
             "id": bill.id,
             "bill_cycle_date": bill.billCycleDate.strftime("%m/%d/%Y") if bill.billCycleDate else None,
@@ -1552,6 +1560,8 @@ async def get_ledger_data() -> Dict[str, Any]:
             "month_range": bill.monthRange,
             "bill_total": f"${decimal_to_float(bill.billTotal):.2f}" if bill.billTotal else None,
             "amount_numeric": decimal_to_float(bill.billTotal),
+            "pdf_exists": pdf_exists,
+            "pdf_source_url": pdf_source_url,
             "payments": [
                 {
                     "id": p.id,
@@ -1676,7 +1686,8 @@ async def calculate_all_payee_balances() -> List[Dict[str, Any]]:
         # Calculate per-user status
         for user in users:
             responsibility = user.responsibilityPercent / 100.0
-            amount_due = bill_total * responsibility + rollover_by_user[user.id]
+            share_current = bill_total * responsibility  # Current bill only - default view
+            amount_due = bill_total * responsibility + rollover_by_user[user.id]  # Cumulative with rollover
             amount_paid = payments_by_user.get(user.id, 0)
             difference = amount_paid - amount_due
             
@@ -1694,6 +1705,8 @@ async def calculate_all_payee_balances() -> List[Dict[str, Any]]:
                 "name": user.name,
                 "responsibility_percent": user.responsibilityPercent,
                 "amount_due": round(amount_due, 2),
+                "share_of_bill": round(share_current, 2),
+                "share_of_bill_cumulative": round(amount_due, 2),
                 "amount_paid": round(amount_paid, 2),
                 "difference": round(difference, 2),
                 "status": status
@@ -1725,9 +1738,10 @@ def _format_payee_summaries_for_frontend(raw: List[Dict[str, Any]]) -> Dict[int,
                 "user_id": p["user_id"],
                 "name": p["name"],
                 "responsibility_percent": p["responsibility_percent"],
-                "amount_owed": p.get("amount_due", 0),
+                "amount_owed": p.get("share_of_bill", 0),
                 "amount_paid": p.get("amount_paid", 0),
-                "share_of_bill": p.get("amount_due", 0),
+                "share_of_bill": p.get("share_of_bill", 0),
+                "share_of_bill_cumulative": p.get("share_of_bill_cumulative", 0),
                 "rollover_from_previous": 0,
                 "current_balance": 0,
                 "status": "paid" if p.get("status") == "paid" else "partial" if p.get("status") == "overpaid" else "unpaid",

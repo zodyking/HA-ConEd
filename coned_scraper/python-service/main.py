@@ -29,7 +29,7 @@ import db
 app = FastAPI(title="Con Edison API")
 
 # Code version for deployment verification
-CODE_VERSION = "1.3.14-postgres"
+CODE_VERSION = "1.3.15-postgres"
 
 @app.on_event("startup")
 async def startup():
@@ -1059,6 +1059,12 @@ async def start_scraper():
         
         if success and scraped_data:
             timestamp = scraped_data.get("timestamp")
+            
+            # Publish bill PDF URLs to MQTT (home app) - includes auto-downloaded PDFs
+            try:
+                await _publish_bill_pdf_mqtt()
+            except Exception as pdf_e:
+                await db.add_log("warning", f"Failed to publish bill PDF MQTT: {pdf_e}")
             
             # MQTT: Publish after every successful scrape
             if mqtt_client:
@@ -2143,7 +2149,12 @@ async def remove_card(card_id: int):
 async def attribute_payment_to_user(attribution: PaymentAttributionModel):
     """Attribute a payment to a user"""
     try:
-        success = await db.attribute_payment(attribution.payment_id, attribution.user_id, attribution.method)
+        success = await db.attribute_payment(
+            attribution.payment_id,
+            attribution.user_id,
+            payee_status="verified",
+            verification_method=attribution.method
+        )
         if success:
             await db.add_log("info", f"Attributed payment {attribution.payment_id} to user {attribution.user_id}")
             return {"success": True}
