@@ -56,7 +56,7 @@
       <div class="ha-chart-card ha-chart-tabs-card">
         <div class="ha-chart-tabs">
           <button 
-            v-if="meterEnabled && realtimeData.length"
+            v-if="meterEnabled"
             class="ha-chart-tab" 
             :class="{ active: activeChartTab === 'realtime' }"
             @click="activeChartTab = 'realtime'"
@@ -404,11 +404,11 @@ async function fetchRealtimeData(forceRefresh: boolean = false) {
   realtimeLoading.value = true
   realtimeError.value = null
   try {
-    // First check if meter tracking is enabled
+    // First check if meter tracking is enabled (tab shows when enabled, even if no data yet)
     const statusRes = await fetch(`${getApiBase()}/meter-reading`)
     if (statusRes.ok) {
       const statusData = await statusRes.json()
-      meterEnabled.value = statusData.enabled && statusData.reading !== null
+      meterEnabled.value = statusData.enabled === true
     }
     
     if (!meterEnabled.value) {
@@ -424,7 +424,6 @@ async function fetchRealtimeData(forceRefresh: boolean = false) {
     const res = await fetch(`${getApiBase()}/meter-reading/realtime?hours=24${refreshParam}`)
     if (!res.ok) {
       if (res.status === 400) {
-        meterEnabled.value = false
         realtimeData.value = []
         if (activeChartTab.value === 'realtime') {
           activeChartTab.value = 'billHistory'
@@ -447,7 +446,6 @@ async function fetchRealtimeData(forceRefresh: boolean = false) {
     realtimeData.value = readings
     
     if (!realtimeData.value.length) {
-      meterEnabled.value = false
       if (activeChartTab.value === 'realtime') {
         activeChartTab.value = 'billHistory'
       }
@@ -459,7 +457,6 @@ async function fetchRealtimeData(forceRefresh: boolean = false) {
   } catch (e: any) {
     realtimeError.value = e.message || 'Failed to load real-time data'
     realtimeData.value = []
-    meterEnabled.value = false
   } finally {
     realtimeLoading.value = false
   }

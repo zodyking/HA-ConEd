@@ -1293,12 +1293,49 @@ async def save_meter_forecast_db(forecast: Dict[str, Any]):
     await set_app_setting("meter_forecast_cache", forecast)
 
 async def get_realtime_readings_db() -> Optional[List[Dict[str, Any]]]:
-    """Get cached realtime readings"""
-    return await get_app_setting("realtime_readings_cache")
+    """Get cached realtime readings from dedicated table (last 96 = 24h of 15-min intervals)"""
+    await ensure_connected()
+    rows = await db.realtimereading.find_many(order={"endTime": "desc"}, take=96)
+    if not rows:
+        return None
+    # Return ascending by start_time for chart
+    rows = list(reversed(rows))
+    return [
+        {
+            "start_time": r.startTime.isoformat(),
+            "end_time": r.endTime.isoformat(),
+            "consumption": float(r.consumption),
+        }
+        for r in rows
+    ]
+
 
 async def save_realtime_readings_db(readings: List[Dict[str, Any]]):
-    """Save realtime readings to cache"""
-    await set_app_setting("realtime_readings_cache", readings)
+    """Save realtime readings to dedicated table (replaces previous cache)"""
+    await ensure_connected()
+    from datetime import datetime
+    # Delete all existing readings (we replace with fresh fetch)
+    await db.realtimereading.delete_many()
+    if not readings:
+        return
+    # Limit to last 96 (24h of 15-min intervals)
+    to_save = readings[-96:] if len(readings) > 96 else readings
+    data_list = []
+    for r in to_save:
+        start_str = r.get("start_time") or ""
+        end_str = r.get("end_time") or ""
+        try:
+            start_dt = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
+            end_dt = datetime.fromisoformat(end_str.replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            continue
+        data_list.append({
+            "startTime": start_dt,
+            "endTime": end_dt,
+            "consumption": float(r.get("consumption", 0) or 0),
+        })
+    if data_list:
+        await db.realtimereading.create_many(data=data_list)
 
 # =============================================================================
 # Credentials (migrated from file to database)
@@ -1555,6 +1592,9 @@ async def get_ledger_data() -> Dict[str, Any]:
             full_path = DATA_DIR / bill.document.pdfPath
             pdf_exists = full_path.is_file() if full_path else False
             pdf_source_url = bill.document.sourceUrl
+        due_date_str = None
+        if bill.details and bill.details.dueDate:
+            due_date_str = bill.details.dueDate.strftime("%b %d, %Y")
         bill_dict = {
             "id": bill.id,
             "bill_cycle_date": bill.billCycleDate.strftime("%m/%d/%Y") if bill.billCycleDate else None,
@@ -1562,6 +1602,7 @@ async def get_ledger_data() -> Dict[str, Any]:
             "month_range": bill.monthRange,
             "bill_total": f"${decimal_to_float(bill.billTotal):.2f}" if bill.billTotal else None,
             "amount_numeric": decimal_to_float(bill.billTotal),
+            "due_date": due_date_str,
             "pdf_exists": pdf_exists,
             "pdf_source_url": pdf_source_url,
             "payments": [

@@ -60,9 +60,9 @@
               <div class="ha-summary-label">Account Balance</div>
               <div class="ha-summary-value ha-balance-text">{{ ledgerData.account_balance || '—' }}</div>
             </div>
-            <div class="ha-summary-box ha-due-box" v-if="latestBillDueDate">
+            <div class="ha-summary-box ha-due-box" v-if="ledgerData?.bills?.length">
               <div class="ha-summary-label">Due Date</div>
-              <div class="ha-summary-value ha-due-text">{{ latestBillDueDate }}</div>
+              <div class="ha-summary-value ha-due-text">{{ latestBillDueDate || '—' }}</div>
             </div>
           </div>
           
