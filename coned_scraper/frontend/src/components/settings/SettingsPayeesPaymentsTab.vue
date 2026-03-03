@@ -37,17 +37,6 @@
 
         <div v-if="totalResponsibility > 0 && Math.abs(totalResponsibility - 100) > 0.1" class="ha-warn">Total: {{ totalResponsibility.toFixed(1) }}% — must equal 100%</div>
         <button v-if="users.length" type="button" class="ha-button ha-button-primary" :disabled="isLoading || (totalResponsibility > 0 && Math.abs(totalResponsibility - 100) > 0.1)" @click="handleSaveResponsibilities">{{ isLoading ? 'Saving...' : 'Save Responsibilities' }}</button>
-
-        <div v-if="unverifiedPayments.length && users.length" class="ha-unverified">
-          <h4>Unverified Payments ({{ unverifiedPayments.length }})</h4>
-          <div v-for="p in unverifiedPayments.slice(0, 5)" :key="p.id" class="ha-unv-row">
-            <span>{{ p.amount }} — {{ p.payment_date }}</span>
-            <select @change="handleAttribute(p.id, ($event.target as HTMLSelectElement).value)">
-              <option value="">Assign...</option>
-              <option v-for="u in users" :key="u.id" :value="u.id">{{ u.name }}</option>
-            </select>
-          </div>
-        </div>
       </div>
     </div>
 
@@ -93,6 +82,13 @@
               <span class="ha-pay-amount">{{ pay.amount }}</span>
               <span class="ha-pay-date">{{ pay.payment_date }}</span>
               <span v-if="pay.payee_name" class="ha-payee">{{ pay.payee_name }}</span>
+              <button
+                v-if="pay.payee_status === 'unverified'"
+                type="button"
+                class="ha-unverified-badge"
+                title="Unverified - click to assign payee"
+                @click.stop="openPayeeAudit(pay)"
+              >Unverified</button>
               <select :value="pay.bill_id ?? ''" @change="onChangeBill(pay.id, $event)" @click.stop>
                 <option v-for="b in allBills" :key="b.id" :value="b.id">{{ b.month_range }}</option>
                 <option value="">Unlinked</option>
@@ -104,6 +100,14 @@
             <div v-for="pay in orphanPayments" :key="pay.id" class="ha-payment-row ha-payment-clickable" @click="openPayeeAudit(pay)">
               <span class="ha-pay-amount">{{ pay.amount }}</span>
               <span class="ha-pay-date">{{ pay.payment_date }}</span>
+              <span v-if="pay.payee_name" class="ha-payee">{{ pay.payee_name }}</span>
+              <button
+                v-if="pay.payee_status === 'unverified'"
+                type="button"
+                class="ha-unverified-badge"
+                title="Unverified - click to assign payee"
+                @click.stop="openPayeeAudit(pay)"
+              >Unverified</button>
               <select :value="pay.bill_id ?? ''" @change="onChangeBill(pay.id, $event)" @click.stop>
                 <option v-for="b in allBills" :key="b.id" :value="b.id">{{ b.month_range }}</option>
                 <option value="">Unlinked</option>
@@ -186,7 +190,6 @@ interface Payment { id: number; payment_date: string; amount: string; descriptio
 interface Bill { id: number; bill_cycle_date: string; month_range: string; bill_total: string; payments: Payment[] }
 
 const users = ref<User[]>([])
-const unverifiedPayments = ref<Payment[]>([])
 const newUserName = ref('')
 const responsibilities = ref<Record<number, number>>({})
 const isLoading = ref(false)
@@ -230,16 +233,6 @@ async function loadUsers() {
   } catch (e) { console.error(e) }
 }
 
-async function loadUnverified() {
-  try {
-    const res = await fetch(`${getApiBase()}/payments/unverified`)
-    if (res.ok) {
-      const d = await res.json()
-      unverifiedPayments.value = d.payments || []
-    }
-  } catch (e) { console.error(e) }
-}
-
 async function loadPaymentsData() {
   paymentsLoading.value = true
   try {
@@ -260,7 +253,7 @@ async function handleAddUser() {
   message.value = null
   try {
     const res = await fetch(`${getApiBase()}/payee-users`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: newUserName.value.trim(), is_default: users.value.length === 0 }) })
-    if (res.ok) { newUserName.value = ''; await loadUsers(); await loadUnverified(); message.value = { type: 'success', text: 'User added' } }
+    if (res.ok) { newUserName.value = ''; await loadUsers(); message.value = { type: 'success', text: 'User added' } }
     else { const e = await res.json().catch(() => ({})); message.value = { type: 'error', text: e.detail || 'Failed' } }
   } catch { message.value = { type: 'error', text: 'Failed to connect' } }
   finally { isLoading.value = false }
@@ -292,14 +285,6 @@ async function handleSaveResponsibilities() {
   finally { isLoading.value = false }
 }
 
-async function handleAttribute(paymentId: number, userId: string) {
-  if (!userId) return
-  try {
-    const res = await fetch(`${getApiBase()}/payments/attribute`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ payment_id: paymentId, user_id: parseInt(userId), method: 'manual' }) })
-    if (res.ok) { await loadUnverified(); await loadPaymentsData(); message.value = { type: 'success', text: 'Assigned' } }
-  } catch { message.value = { type: 'error', text: 'Failed' } }
-}
-
 function openPayeeAudit(pay: Payment) {
   auditPayment.value = pay
   auditPayeeId.value = pay.payee_user_id ?? ''
@@ -312,7 +297,7 @@ async function savePayeeAudit() {
   try {
     if (userId === '' || userId === null) {
       const res = await fetch(`${getApiBase()}/payments/${paymentId}/attribution`, { method: 'DELETE' })
-      if (res.ok) { await loadPaymentsData(); await loadUnverified(); message.value = { type: 'success', text: 'Payee cleared' }; auditPayment.value = null }
+      if (res.ok) { await loadPaymentsData(); message.value = { type: 'success', text: 'Payee cleared' }; auditPayment.value = null }
       else message.value = { type: 'error', text: 'Failed to clear payee' }
     } else {
       const res = await fetch(`${getApiBase()}/payments/attribute`, {
@@ -337,7 +322,6 @@ async function handleWipe() {
       showWipeConfirm.value = false
       await loadPaymentsData()
       await loadUsers()
-      await loadUnverified()
     } else message.value = { type: 'error', text: 'Failed' }
   } catch { message.value = { type: 'error', text: 'Failed' } }
 }
@@ -446,7 +430,6 @@ async function saveEditLabel(cardId: number) {
 
 onMounted(() => {
   loadUsers()
-  loadUnverified()
   loadPaymentsData()
 })
 </script>
@@ -470,9 +453,19 @@ onMounted(() => {
 .ha-responsibility { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
 .ha-responsibility input { width: 60px; }
 .ha-warn { color: #e65100; font-size: 0.85rem; margin: 0.5rem 0; }
-.ha-unverified { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #e0e0e0; }
-.ha-unverified h4 { margin: 0 0 0.75rem 0; font-size: 0.95rem; }
-.ha-unv-row { display: flex; justify-content: space-between; align-items: center; padding: 0.5rem; background: #fff3e0; border-radius: 6px; margin-bottom: 0.5rem; }
+
+.ha-unverified-badge {
+  font-size: 0.65rem;
+  background: #fff3e0;
+  color: #e65100;
+  padding: 0.15rem 0.4rem;
+  border-radius: 3px;
+  border: 1px solid #ffcc80;
+  cursor: pointer;
+}
+.ha-unverified-badge:hover {
+  background: #ffe0b2;
+}
 
 .ha-wipe-section { padding: 1rem; background: #fff3e0; border-radius: 8px; border: 1px solid #ffcc80; margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; }
 .ha-wipe-title { font-weight: 600; color: #e65100; }

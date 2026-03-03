@@ -1,6 +1,7 @@
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
 import asyncio
 import logging
+import re
 import time
 import db
 
@@ -874,20 +875,34 @@ async def scrape_bill_history(page):
                         description_text = (await received_element.inner_text()).strip()
                         item_data["description"] = description_text
                         
-                        # Try to extract payment date from description (e.g., "Payment Received 1/23/2026")
-                        import re
+                        # Extract payment date from description (e.g., "Payment Received 1/23/2026" or "Payment received on 1/23/2026")
                         date_match = re.search(r'(\d{1,2}/\d{1,2}/\d{4})', description_text)
                         if date_match:
                             item_data["payment_date"] = date_match.group(1)
                     else:
                         item_data["description"] = "Payment Received"
                     
-                    # Try to get payment date from data attribute if available
-                    payment_link = item.locator('a[data-payment-date]').first
-                    if await payment_link.count() > 0:
-                        payment_date = await payment_link.get_attribute('data-payment-date')
-                        if payment_date:
-                            item_data["payment_date"] = payment_date
+                    # Try data-payment-date on any element (link, button, span, etc.)
+                    if not item_data.get("payment_date"):
+                        for sel in ['a[data-payment-date]', '[data-payment-date]', 'a.js-payment-link[data-payment-date]']:
+                            el = item.locator(sel).first
+                            if await el.count() > 0:
+                                payment_date = await el.get_attribute('data-payment-date')
+                                if payment_date:
+                                    item_data["payment_date"] = payment_date
+                                    break
+                    
+                    # Fallback: full date block may have both "Bill Cycle: X" and "Received: Y" - find second date
+                    if not item_data.get("payment_date"):
+                        date_block = item.locator('.billing-payment-item__date').first
+                        if await date_block.count() > 0:
+                            full_date_text = await date_block.inner_text()
+                            all_dates = re.findall(r'(\d{1,2}/\d{1,2}/\d{4})', full_date_text)
+                            bill_cycle = item_data.get("bill_cycle_date", "")
+                            for d in all_dates:
+                                if d != bill_cycle:
+                                    item_data["payment_date"] = d
+                                    break
                     
                     # Get payment amount
                     amount_element = item.locator('.billing-payment-item__total-received').first

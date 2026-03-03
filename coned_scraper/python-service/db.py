@@ -1725,6 +1725,8 @@ async def get_all_bills_with_payments() -> Dict[str, Any]:
                     "payment_date": p.paymentDate.strftime("%m/%d/%Y") if p.paymentDate else None,
                     "amount": f"${decimal_to_float(p.amount):.2f}" if p.amount else None,
                     "payee_name": p.payeeUser.name if p.payeeUser else None,
+                    "payee_user_id": p.payeeUserId,
+                    "payee_status": p.payeeStatus or "unverified",
                     "bill_id": p.billId,
                 }
                 for p in b.payments
@@ -1745,6 +1747,8 @@ async def get_all_bills_with_payments() -> Dict[str, Any]:
             "payment_date": p.paymentDate.strftime("%m/%d/%Y") if p.paymentDate else None,
             "amount": f"${decimal_to_float(p.amount):.2f}" if p.amount else None,
             "payee_name": p.payeeUser.name if p.payeeUser else None,
+            "payee_user_id": p.payeeUserId,
+            "payee_status": p.payeeStatus or "unverified",
             "bill_id": None,
         }
         for p in orphan_payments
