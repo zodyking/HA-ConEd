@@ -29,7 +29,7 @@ import db
 app = FastAPI(title="Con Edison API")
 
 # Code version for deployment verification
-CODE_VERSION = "1.3.9-postgres"
+CODE_VERSION = "1.3.10-postgres"
 
 @app.on_event("startup")
 async def startup():
@@ -2217,6 +2217,16 @@ async def wipe_all_data():
         result = {"status": "success", "message": "Database wiped"}
         await db.add_log("warning", f"Database wiped: {result['bills_deleted']} bills, {result['payments_deleted']} payments deleted")
         return {"success": True, **result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/bills/relink-payments")
+async def relink_payments_endpoint():
+    """Relink orphan payments to bills by date logic (bill_date <= payment_date < next_bill_date)"""
+    try:
+        updated = await db.relink_payments_to_bills()
+        await db.add_log("info", f"Relinked {updated} payments to bills by date")
+        return {"success": True, "updated": updated, "message": f"Linked {updated} payments to bills"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

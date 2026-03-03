@@ -1358,6 +1358,66 @@ async def save_tts_bill_state_db(state: Dict[str, Any]):
     await set_app_setting("tts_bill_state", state)
 
 # =============================================================================
+# Payment-to-Bill Relinking (database relational logic)
+# =============================================================================
+
+async def relink_payments_to_bills() -> int:
+    """
+    Assign orphan payments to bills using date logic: a payment belongs to the bill
+    where bill_date <= payment_date < next_bill_date (bill is posted, then payments follow).
+    Persists bill_id in the database.
+    """
+    await ensure_connected()
+    
+    # Bills sorted by marker date ascending (oldest first)
+    bills = await db.bill.find_many(order={"billCycleDate": "asc"}, include={})
+    if not bills:
+        return 0
+    
+    # Build (marker_date, bill_id) - use bill_date as marker, fallback to bill_cycle_date
+    def _marker(b):
+        if b.billDate:
+            d = b.billDate
+        else:
+            d = b.billCycleDate
+        return (d.replace(tzinfo=timezone.utc) if d and d.tzinfo is None else d, b.id)
+    
+    markers = [_marker(b) for b in bills]
+    markers = [(d, bid) for d, bid in markers if d]
+    markers.sort(key=lambda x: x[0])
+    
+    # Get orphan payments (skip manually assigned)
+    orphans = await db.payment.find_many(
+        where={"billId": None, "billManuallySet": False},
+        order={"paymentDate": "asc"}
+    )
+    
+    updated = 0
+    for p in orphans:
+        payment_dt = p.paymentDate
+        if not payment_dt:
+            continue
+        if payment_dt.tzinfo is None:
+            payment_dt = payment_dt.replace(tzinfo=timezone.utc)
+        
+        # Find bill where bill_date <= payment_date < next_bill_date
+        # = largest bill_date <= payment_date
+        candidates = [(d, bid) for d, bid in markers if d <= payment_dt]
+        if candidates:
+            bill_id = candidates[-1][1]
+        else:
+            # Payment before all bills - assign to oldest
+            bill_id = markers[0][1]
+        
+        await db.payment.update(where={"id": p.id}, data={"billId": bill_id})
+        updated += 1
+    
+    if updated:
+        logger.info(f"Relinked {updated} payments to bills by date logic")
+    return updated
+
+
+# =============================================================================
 # Data Sync
 # =============================================================================
 
@@ -1393,8 +1453,7 @@ async def sync_from_scrape(data: Dict[str, Any]):
         bill_history = data.get("bill_history") or {}
         ledger = bill_history.get("ledger") or []
         if ledger:
-            # First pass: upsert all bills, collect (parsed_date, bill_id) for matching
-            bills_by_date: List[tuple] = []  # (datetime, bill_id)
+            # First pass: upsert all bills
             for item in ledger:
                 if item.get("type") != "bill":
                     continue
@@ -1402,21 +1461,14 @@ async def sync_from_scrape(data: Dict[str, Any]):
                 month_range = item.get("month_range") or ""
                 if not bill_cycle and not item.get("bill_total"):
                     continue
-                bill = await upsert_bill(
+                await upsert_bill(
                     bill_cycle_date=bill_cycle,
                     bill_date=item.get("bill_date"),
                     month_range=month_range,
                     bill_total=item.get("bill_total")
                 )
-                parsed = parse_date(bill_cycle)
-                if parsed:
-                    bills_by_date.append((parsed, bill.id))
             
-            # Sort bills by cycle date ascending for "find closest" logic
-            bills_by_date.sort(key=lambda x: x[0])
-            
-            # Second pass: upsert payments, match to bill by date proximity
-            # Payment for cycle X goes to bill with cycle date <= X (most recent such bill)
+            # Second pass: upsert payments (bill_id assigned by relink after)
             payment_order = 0
             for item in ledger:
                 if item.get("type") != "payment":
@@ -1424,24 +1476,17 @@ async def sync_from_scrape(data: Dict[str, Any]):
                 bill_cycle = item.get("bill_cycle_date") or ""
                 if not bill_cycle and not item.get("amount"):
                     continue
-                bill_id = None
-                payment_dt = parse_date(bill_cycle)
-                if payment_dt and bills_by_date:
-                    # Find bill with largest cycle_date <= payment date
-                    candidates = [(d, bid) for d, bid in bills_by_date if d <= payment_dt]
-                    if candidates:
-                        bill_id = candidates[-1][1]
-                    else:
-                        # Payment before any bill cycle - use earliest bill
-                        bill_id = bills_by_date[0][1]
                 await upsert_payment(
                     payment_date=item.get("payment_date") or "",
                     description=item.get("description") or "Payment Received",
                     amount=item.get("amount") or "0",
-                    bill_id=bill_id,
+                    bill_id=None,  # Relink assigns by date logic
                     scrape_order=payment_order
                 )
                 payment_order += 1
+            
+            # Relink: assign payments to bills by database logic (bill_date markers)
+            await relink_payments_to_bills()
             
             logger.info(f"Synced {len([i for i in ledger if i.get('type')=='bill'])} bills and {len([i for i in ledger if i.get('type')=='payment'])} payments from ledger")
         elif "bills" in data:

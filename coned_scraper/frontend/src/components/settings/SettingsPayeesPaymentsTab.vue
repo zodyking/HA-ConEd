@@ -71,6 +71,15 @@
             <button type="button" class="ha-btn ha-btn-gray" @click="showWipeConfirm = false">Cancel</button>
           </div>
         </div>
+        <div class="ha-relink-section" style="margin-top: 1rem;">
+          <div>
+            <div class="ha-wipe-title">Relink Payments</div>
+            <div class="ha-wipe-desc">Assign unlinked payments to bills by date (payment after bill posted, before next bill).</div>
+          </div>
+          <button type="button" class="ha-btn ha-btn-primary" :disabled="relinkLoading" @click="handleRelink">
+            {{ relinkLoading ? 'Linking...' : 'Relink Payments to Bills' }}
+          </button>
+        </div>
         <div class="ha-stats">{{ bills.length }} bill(s) • {{ totalPayments }} payment(s)</div>
         <div v-if="paymentsLoading" class="ha-loading">Loading...</div>
         <template v-else-if="bills.length || orphanPayments.length">
@@ -187,6 +196,7 @@ const bills = ref<Bill[]>([])
 const orphanPayments = ref<Payment[]>([])
 const allBills = ref<{ id: number; month_range: string }[]>([])
 const paymentsLoading = ref(false)
+const relinkLoading = ref(false)
 const showWipeConfirm = ref(false)
 const auditPayment = ref<Payment | null>(null)
 const auditPayeeId = ref<number | string>('')
@@ -330,6 +340,24 @@ async function handleWipe() {
       await loadUnverified()
     } else message.value = { type: 'error', text: 'Failed' }
   } catch { message.value = { type: 'error', text: 'Failed' } }
+}
+
+async function handleRelink() {
+  relinkLoading.value = true
+  message.value = null
+  try {
+    const res = await fetch(`${getApiBase()}/bills/relink-payments`, { method: 'POST' })
+    if (res.ok) {
+      const d = await res.json()
+      message.value = { type: 'success', text: d.message || `Linked ${d.updated} payments to bills` }
+      await loadPaymentsData()
+      await loadUnverified()
+    } else {
+      const e = await res.json().catch(() => ({}))
+      message.value = { type: 'error', text: e.detail || 'Failed to relink' }
+    }
+  } catch { message.value = { type: 'error', text: 'Failed to connect' } }
+  finally { relinkLoading.value = false }
 }
 
 async function onChangeBill(paymentId: number, ev: Event) {
