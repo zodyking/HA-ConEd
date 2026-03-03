@@ -409,14 +409,18 @@ def get_scheduler() -> TTSScheduler:
 
 async def trigger_new_bill_tts(bill_month_range: str, bill_total: str, due_date: str = ""):
     """Trigger TTS for a new bill."""
+    import db
+    
     scheduler = get_scheduler()
     tts_config = await scheduler.load_tts_config()
     
     if not tts_config.get("enabled"):
+        await db.add_log("debug", "New bill TTS skipped: TTS not enabled")
         return
     
     media_player = tts_config.get("media_player", "").strip()
     if not media_player:
+        await db.add_log("debug", "New bill TTS skipped: No media player configured")
         return
     
     template = tts_config.get("messages", {}).get("new_bill", "")
@@ -438,28 +442,38 @@ async def trigger_new_bill_tts(bill_month_range: str, bill_total: str, due_date:
     from ha_tts import send_tts
     
     try:
-        await send_tts(
+        success, err = await send_tts(
             message=message,
             media_player=media_player,
             volume=tts_config.get("volume", 0.7),
             wait_for_idle=tts_config.get("wait_for_idle", True),
             tts_service=tts_config.get("tts_service", "tts.google_translate_say"),
         )
-        logger.info("New bill TTS sent successfully")
+        if success:
+            logger.info("New bill TTS sent successfully")
+            await db.add_log("info", f"New bill TTS sent: {bill_total} for {bill_month_range}")
+        else:
+            logger.error(f"New bill TTS failed: {err}")
+            await db.add_log("error", f"New bill TTS failed: {err}")
     except Exception as e:
         logger.error(f"Error sending new bill TTS: {e}")
+        await db.add_log("error", f"New bill TTS error: {e}")
 
 
 async def trigger_payment_received_tts(amount: str, balance: str, payee_name: str = ""):
     """Trigger TTS for a payment received."""
+    import db
+    
     scheduler = get_scheduler()
     tts_config = await scheduler.load_tts_config()
     
     if not tts_config.get("enabled"):
+        await db.add_log("debug", "Payment TTS skipped: TTS not enabled")
         return
     
     media_player = tts_config.get("media_player", "").strip()
     if not media_player:
+        await db.add_log("debug", "Payment TTS skipped: No media player configured")
         return
     
     template = tts_config.get("messages", {}).get("payment_received", "")
@@ -476,13 +490,19 @@ async def trigger_payment_received_tts(amount: str, balance: str, payee_name: st
     from ha_tts import send_tts
     
     try:
-        await send_tts(
+        success, err = await send_tts(
             message=message,
             media_player=media_player,
             volume=tts_config.get("volume", 0.7),
             wait_for_idle=tts_config.get("wait_for_idle", True),
             tts_service=tts_config.get("tts_service", "tts.google_translate_say"),
         )
-        logger.info("Payment received TTS sent successfully")
+        if success:
+            logger.info("Payment received TTS sent successfully")
+            await db.add_log("info", f"Payment TTS sent: {amount} received, balance {balance}")
+        else:
+            logger.error(f"Payment TTS failed: {err}")
+            await db.add_log("error", f"Payment TTS failed: {err}")
     except Exception as e:
         logger.error(f"Error sending payment TTS: {e}")
+        await db.add_log("error", f"Payment TTS error: {e}")

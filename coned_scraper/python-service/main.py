@@ -29,7 +29,7 @@ import db
 app = FastAPI(title="Con Edison API")
 
 # Code version for deployment verification
-CODE_VERSION = "1.3.32"
+CODE_VERSION = "1.3.33"
 
 @app.on_event("startup")
 async def startup():
@@ -612,6 +612,9 @@ async def should_trigger_new_bill_tts() -> tuple:
     current_bill_id = latest_bill.get("id")
     previous_bill_id = previous_state.get("latest_bill_id")
     
+    # Debug logging
+    await db.add_log("debug", f"Bill TTS check: current_bill_id={current_bill_id}, prev_bill_id={previous_bill_id}")
+    
     should_trigger = False
     reason = ""
     bill_data = None
@@ -629,9 +632,14 @@ async def should_trigger_new_bill_tts() -> tuple:
             "amount_numeric": latest_bill.get("amount_numeric"),
             "due_date": bill_details.get("due_date", "") if bill_details else "",
         }
+        await db.add_log("debug", f"Bill TTS WILL trigger: {reason}")
     
     # Case 2: First time - just initialize state, don't trigger
     # (Avoid announcing existing bills on first run)
+    elif previous_bill_id is None:
+        reason = "First run - initializing state without triggering"
+    else:
+        reason = f"Same bill (ID: {current_bill_id})"
     
     # Update state
     new_state = {
@@ -2602,6 +2610,243 @@ async def test_tts():
         )
         return {"success": True, "message": "TTS request sent via MQTT. Add HA automation if not using addon."}
     raise HTTPException(status_code=400, detail="Not in HA addon and MQTT not configured")
+
+
+@app.post("/api/tts/test-new-bill")
+async def test_new_bill_tts():
+    """Test new bill TTS using the latest bill data"""
+    config = await load_tts_config()
+    if not config.get("enabled"):
+        raise HTTPException(status_code=400, detail="TTS is not enabled")
+    media_player = (config.get("media_player") or "").strip()
+    if not media_player:
+        raise HTTPException(status_code=400, detail="Media player not configured")
+    
+    # Get latest bill data
+    ledger = await db.get_ledger_data()
+    bills = ledger.get("bills", [])
+    if not bills:
+        raise HTTPException(status_code=400, detail="No bills found to test with")
+    
+    latest_bill = bills[0]
+    bill_amount = latest_bill.get("bill_total", "") or latest_bill.get("amount", "N/A")
+    month_range = latest_bill.get("month_range", "this month")
+    
+    # Format due date for TTS
+    due_date_raw = latest_bill.get("due_date", "")
+    due_date = "soon"
+    if due_date_raw:
+        try:
+            from dateutil import parser as date_parser
+            dt = date_parser.parse(due_date_raw)
+            due_date = dt.strftime("%B %d").replace(" 0", " ")
+        except:
+            due_date = due_date_raw
+    
+    # Trigger the TTS
+    from tts_scheduler import trigger_new_bill_tts
+    await trigger_new_bill_tts(
+        bill_month_range=month_range,
+        bill_total=bill_amount,
+        due_date=due_date
+    )
+    
+    # Also send push notification
+    try:
+        from notifications import notify_new_bill
+        sent = await notify_new_bill(
+            amount=bill_amount,
+            due_date=due_date,
+            month_range=month_range
+        )
+        await db.add_log("info", f"Test new bill TTS+notification sent (notifications: {sent})")
+    except Exception as e:
+        await db.add_log("warning", f"Test new bill notification failed: {e}")
+    
+    return {
+        "success": True, 
+        "message": "New bill TTS sent",
+        "data": {
+            "amount": bill_amount,
+            "month_range": month_range,
+            "due_date": due_date
+        }
+    }
+
+
+@app.post("/api/tts/test-payment")
+async def test_payment_tts():
+    """Test payment received TTS using the latest payment data"""
+    config = await load_tts_config()
+    if not config.get("enabled"):
+        raise HTTPException(status_code=400, detail="TTS is not enabled")
+    media_player = (config.get("media_player") or "").strip()
+    if not media_player:
+        raise HTTPException(status_code=400, detail="Media player not configured")
+    
+    # Get latest payment data
+    ledger = await db.get_ledger_data()
+    latest_payment = ledger.get("latest_payment")
+    
+    if not latest_payment:
+        raise HTTPException(status_code=400, detail="No payments found to test with")
+    
+    payment_amount = latest_payment.get("amount", "N/A")
+    payee_name = latest_payment.get("payee_name", "")
+    
+    # Get current balance
+    balance = ledger.get("account_balance") or ledger.get("total_balance", "")
+    if isinstance(balance, (int, float)):
+        balance = f"${balance:.2f}"
+    
+    # Trigger the TTS
+    from tts_scheduler import trigger_payment_received_tts
+    await trigger_payment_received_tts(
+        amount=payment_amount,
+        balance=balance,
+        payee_name=payee_name
+    )
+    
+    # Also send push notification
+    try:
+        from notifications import notify_payment_received
+        sent = await notify_payment_received(
+            amount=payment_amount,
+            balance=balance,
+            payee_name=payee_name
+        )
+        await db.add_log("info", f"Test payment TTS+notification sent (notifications: {sent})")
+    except Exception as e:
+        await db.add_log("warning", f"Test payment notification failed: {e}")
+    
+    return {
+        "success": True, 
+        "message": "Payment received TTS sent",
+        "data": {
+            "amount": payment_amount,
+            "balance": balance,
+            "payee_name": payee_name
+        }
+    }
+
+
+@app.post("/api/notifications/test-new-bill")
+async def test_new_bill_notification():
+    """Test new bill push notification only (no TTS)"""
+    ledger = await db.get_ledger_data()
+    bills = ledger.get("bills", [])
+    if not bills:
+        raise HTTPException(status_code=400, detail="No bills found to test with")
+    
+    latest_bill = bills[0]
+    bill_amount = latest_bill.get("bill_total", "") or latest_bill.get("amount", "N/A")
+    month_range = latest_bill.get("month_range", "this month")
+    
+    due_date_raw = latest_bill.get("due_date", "")
+    due_date = "soon"
+    if due_date_raw:
+        try:
+            from dateutil import parser as date_parser
+            dt = date_parser.parse(due_date_raw)
+            due_date = dt.strftime("%B %d").replace(" 0", " ")
+        except:
+            due_date = due_date_raw
+    
+    from notifications import notify_new_bill
+    sent = await notify_new_bill(
+        amount=bill_amount,
+        due_date=due_date,
+        month_range=month_range
+    )
+    
+    return {
+        "success": True,
+        "sent_count": sent,
+        "message": f"New bill notification sent to {sent} device(s)",
+        "data": {
+            "amount": bill_amount,
+            "month_range": month_range,
+            "due_date": due_date
+        }
+    }
+
+
+@app.post("/api/notifications/test-payment")
+async def test_payment_notification():
+    """Test payment received push notification only (no TTS)"""
+    ledger = await db.get_ledger_data()
+    latest_payment = ledger.get("latest_payment")
+    
+    if not latest_payment:
+        raise HTTPException(status_code=400, detail="No payments found to test with")
+    
+    payment_amount = latest_payment.get("amount", "N/A")
+    payee_name = latest_payment.get("payee_name", "")
+    
+    balance = ledger.get("account_balance") or ledger.get("total_balance", "")
+    if isinstance(balance, (int, float)):
+        balance = f"${balance:.2f}"
+    
+    from notifications import notify_payment_received
+    sent = await notify_payment_received(
+        amount=payment_amount,
+        balance=balance,
+        payee_name=payee_name
+    )
+    
+    return {
+        "success": True,
+        "sent_count": sent,
+        "message": f"Payment notification sent to {sent} device(s)",
+        "data": {
+            "amount": payment_amount,
+            "balance": balance,
+            "payee_name": payee_name
+        }
+    }
+
+
+@app.post("/api/notifications/test-due-reminder")
+async def test_due_reminder_notification():
+    """Test due date reminder push notification"""
+    ledger = await db.get_ledger_data()
+    bills = ledger.get("bills", [])
+    if not bills:
+        raise HTTPException(status_code=400, detail="No bills found to test with")
+    
+    latest_bill = bills[0]
+    bill_amount = latest_bill.get("bill_total", "") or latest_bill.get("amount", "N/A")
+    
+    due_date_raw = latest_bill.get("due_date", "")
+    due_date = "soon"
+    days_until = 3
+    if due_date_raw:
+        try:
+            from dateutil import parser as date_parser
+            from datetime import datetime
+            dt = date_parser.parse(due_date_raw)
+            due_date = dt.strftime("%B %d").replace(" 0", " ")
+            days_until = max(0, (dt - datetime.now()).days)
+        except:
+            due_date = due_date_raw
+    
+    from notifications import notify_due_reminder
+    sent = await notify_due_reminder(
+        amount=bill_amount,
+        due_date=due_date,
+        days_until=days_until
+    )
+    
+    return {
+        "success": True,
+        "sent_count": sent,
+        "message": f"Due reminder notification sent to {sent} device(s)",
+        "data": {
+            "amount": bill_amount,
+            "due_date": due_date,
+            "days_until": days_until
+        }
+    }
 
 
 # ========== TTS Schedule Endpoints ==========
