@@ -9,7 +9,7 @@ COPY frontend/package*.json ./
 RUN npm ci
 
 COPY frontend/ ./
-RUN npm run build
+RUN chmod +x node_modules/.bin/* 2>/dev/null || true && npm run build
 
 # Stage 2: Addon image with Python, PostgreSQL, and Node.js for Prisma
 FROM ${BUILD_FROM}
