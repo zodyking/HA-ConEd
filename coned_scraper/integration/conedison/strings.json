@@ -1,0 +1,20 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Con Edison Addon",
+        "description": "Enter the URL of your Con Edison addon. If running as a Home Assistant addon, the default should work.",
+        "data": {
+          "addon_url": "Addon URL"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to the addon. Please check the URL and ensure the addon is running.",
+      "unknown": "An unexpected error occurred."
+    },
+    "abort": {
+      "already_configured": "This addon is already configured."
+    }
+  }
+}

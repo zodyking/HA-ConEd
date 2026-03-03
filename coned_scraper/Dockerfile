@@ -49,6 +49,9 @@ RUN npm install -g prisma --force
 # Copy full Python service
 COPY python-service/ /app/python-service/
 
+# Copy Home Assistant integration
+COPY integration/ /app/integration/
+
 # Copy Vue SPA build output into python-service for FastAPI to serve
 COPY --from=vue-builder /app/frontend/dist /app/python-service/frontend/dist
 

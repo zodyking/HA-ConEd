@@ -133,7 +133,6 @@
         <Dashboard v-if="currentPage === 'console'" />
         <SettingsCredentialsTab v-else-if="currentPage === 'credentials'" />
         <SettingsAutomatedTab v-else-if="currentPage === 'automated'" />
-        <SettingsMqttTab v-else-if="currentPage === 'mqtt'" />
         <SettingsBillTab v-else-if="currentPage === 'bill-settings'" />
         <SettingsAppTab v-else-if="currentPage === 'app-settings'" />
         <SettingsPayeesPaymentsTab v-else-if="currentPage === 'payees-payments'" />
@@ -152,7 +151,6 @@ import { waitForAdminResetVisibility } from '../lib/ha-user-admin'
 import Dashboard from './Dashboard.vue'
 import SettingsCredentialsTab from './settings/SettingsCredentialsTab.vue'
 import SettingsAutomatedTab from './settings/SettingsAutomatedTab.vue'
-import SettingsMqttTab from './settings/SettingsMqttTab.vue'
 import SettingsBillTab from './settings/SettingsBillTab.vue'
 import SettingsAppTab from './settings/SettingsAppTab.vue'
 import SettingsPayeesPaymentsTab from './settings/SettingsPayeesPaymentsTab.vue'
@@ -165,7 +163,6 @@ type Page =
   | 'console'
   | 'credentials'
   | 'automated'
-  | 'mqtt'
   | 'bill-settings'
   | 'app-settings'
   | 'payees-payments'
@@ -194,7 +191,6 @@ const menuItems = [
   { id: 'console' as Page, icon: '📊', label: 'Console', description: 'View logs and system status' },
   { id: 'credentials' as Page, icon: '🔐', label: 'Credentials & Meter', description: 'Con Edison login and meter tracking' },
   { id: 'automated' as Page, icon: '⏰', label: 'Automated Scrape', description: 'Schedule automatic data scraping' },
-  { id: 'mqtt' as Page, icon: '📡', label: 'MQTT', description: 'Home Assistant MQTT integration' },
   { id: 'bill-settings' as Page, icon: '📄', label: 'Bill Settings', description: 'Bill PDFs, auto-download, re-parse' },
   { id: 'payees-payments' as Page, icon: '👥', label: 'Payees & Payments', description: 'Users, bill split, cards, and payment audit' },
   { id: 'notifications' as Page, icon: '🔔', label: 'Notifications', description: 'Mobile push notifications for bill events' },

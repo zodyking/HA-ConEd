@@ -402,12 +402,12 @@ class MeterService:
             while self._running:
                 try:
                     if self.is_enabled():
-                        # Latest hourly reading (for Account Summary, MQTT)
-                        reading = await self.fetch_reading()
-                        if reading:
-                            await self._publish_reading(reading)
+                        # Latest hourly reading (data saved to DB for integration to poll)
+                        await self.fetch_reading()
                         # 24-hour data for History chart (quarter-hour or hourly fallback)
                         await self.fetch_quarter_hour_reads(24)
+                        # Also fetch forecast data
+                        await self.fetch_forecast()
                 except Exception as e:
                     logger.error(f"Meter polling error: {e}")
                 
@@ -433,41 +433,6 @@ class MeterService:
             self._session = None
         
         logger.info("Meter polling stopped")
-    
-    async def _publish_reading(self, reading: Dict[str, Any]):
-        """Publish meter reading to MQTT sensors."""
-        try:
-            from mqtt_client import get_mqtt_client
-            import db
-            
-            mqtt_client = get_mqtt_client()
-            if not mqtt_client:
-                return
-            
-            value = reading.get('value')
-            unit = reading.get('unit', 'kWh')
-            timestamp = reading.get('fetched_at')
-            
-            if value is None:
-                return
-            
-            # Publish current meter usage
-            await mqtt_client.publish_current_meter_usage(value, unit, timestamp)
-            
-            # Calculate and publish cost
-            latest_bill = await db.get_latest_bill_with_details()
-            if latest_bill and latest_bill.get('kwh_cost'):
-                kwh_cost = float(latest_bill['kwh_cost'])
-                usage_cost = value * kwh_cost
-                await mqtt_client.publish_current_usage_cost(usage_cost, timestamp)
-            
-            # Also fetch and publish forecast data
-            forecast = await self.fetch_forecast()
-            if forecast:
-                await mqtt_client.publish_forecast_sensors(forecast, timestamp)
-            
-        except Exception as e:
-            logger.error(f"Failed to publish meter reading to MQTT: {e}")
 
 
 def get_meter_service() -> MeterService:

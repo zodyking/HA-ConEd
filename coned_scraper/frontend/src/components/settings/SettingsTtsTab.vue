@@ -234,7 +234,7 @@
             <!-- Usage Sensors - Only show when meter tracking is NOT enabled -->
             <div v-if="!meterTrackingEnabled" class="tts-subsection">
               <h4 class="tts-subsection-title">Usage Projection Sensors</h4>
-              <p class="tts-hint">Configure Home Assistant sensors for real-time usage projections. The app will multiply these values by the kWh cost sensor (automatically published via MQTT).</p>
+              <p class="tts-hint">Configure Home Assistant sensors for real-time usage projections. The app will multiply these values by the kWh cost sensor (from the Con Edison integration).</p>
 
               <div class="tts-form-group">
                 <label class="tts-label">Current Usage Sensor (kWh)</label>
@@ -265,7 +265,7 @@
                 <span class="tts-meter-icon">⚡</span>
                 <div>
                   <strong>Meter Tracking Active</strong>
-                  <p>Usage data is automatically sourced from your Con Edison meter via the addon's MQTT sensors.</p>
+                  <p>Usage data is automatically sourced from your Con Edison meter via the Con Edison integration sensors.</p>
                 </div>
               </div>
             </div>

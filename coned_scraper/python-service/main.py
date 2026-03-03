@@ -29,7 +29,7 @@ import db
 app = FastAPI(title="Con Edison API")
 
 # Code version for deployment verification
-CODE_VERSION = "1.3.18-postgres"
+CODE_VERSION = "1.3.22"
 
 @app.on_event("startup")
 async def startup():
@@ -90,7 +90,6 @@ app.add_middleware(
 from data_config import DATA_DIR
 
 CREDENTIALS_FILE = DATA_DIR / "credentials.json"
-MQTT_CONFIG_FILE = DATA_DIR / "mqtt_config.json"
 SETTINGS_FILE = DATA_DIR / "app_settings.json"
 IMAP_CONFIG_FILE = DATA_DIR / "imap_config.json"
 LAST_PAYMENT_STATE_FILE = DATA_DIR / "last_payment_state.json"
@@ -206,61 +205,9 @@ async def run_scheduled_scrape():
         success = result.get('success', False)
         scraped_data = result.get('data', {})
         
-        # Send notifications via MQTT
-        from mqtt_client import get_mqtt_client
-        mqtt_client = get_mqtt_client()
-        
         if success and scraped_data:
-            timestamp = scraped_data.get("timestamp")
-            
-            # MQTT: Always publish after every successful scrape
-            if mqtt_client:
-                if scraped_data.get("account_balance"):
-                    await mqtt_client.publish_account_balance(scraped_data["account_balance"], timestamp)
-                
-                if scraped_data.get("bill_history"):
-                    bill_history = scraped_data["bill_history"]
-                    ledger = bill_history.get("ledger", [])
-                    bills = [item for item in ledger if item.get("type") == "bill"]
-                    
-                    if len(bills) > 0:
-                        await mqtt_client.publish_latest_bill(bills[0], timestamp)
-                    if len(bills) >= 2:
-                        await mqtt_client.publish_previous_bill(bills[1], timestamp)
-                    
-                    # Smart last payment detection for MQTT only
-                    should_pub, last_payment, reason = await should_publish_last_payment()
-                    if should_pub and last_payment:
-                        await db.add_log("info", f"Publishing last_payment to MQTT: {reason}")
-                        await mqtt_client.publish_last_payment(last_payment, timestamp)
-                    else:
-                        await db.add_log("debug", f"Skipping last_payment MQTT: {reason if reason else 'no change'}")
-                
-                # Publish payee summary for the most recent bill (scheduled scrape)
-                try:
-                    # Using db module for database operations
-                    all_summaries = await db.calculate_all_payee_balances()
-                    all_bills = await db.get_all_bills()
-                    if all_bills and len(all_bills) > 0:
-                        most_recent_bill = all_bills[0]
-                        bill_id = most_recent_bill.get('id')
-                        if bill_id and bill_id in all_summaries:
-                            summary = all_summaries[bill_id]
-                            bill_info = {
-                                'bill_cycle_date': most_recent_bill.get('bill_cycle_date', ''),
-                                'bill_total': summary.get('bill_total', 0),
-                                'total_paid': summary.get('total_paid', 0),
-                                'bill_balance': summary.get('bill_balance', 0),
-                                'bill_status': summary.get('bill_status', 'unknown')
-                            }
-                            payee_summaries = summary.get('payee_summaries', [])
-                            await mqtt_client.publish_payee_summary(payee_summaries, bill_info, timestamp)
-                            await db.add_log("info", "Published payee summary to MQTT")
-                except Exception as e:
-                    await db.add_log("warning", f"Failed to publish payee summary: {e}")
-            
             # ==========================================
-            # INDEPENDENT TTS TRIGGERS (not tied to MQTT)
+            # TTS TRIGGERS AND NOTIFICATIONS
             # ==========================================
             
             # Check for new payment TTS trigger
@@ -421,24 +368,6 @@ async def restart_scheduler():
 async def startup_event():
     global _scheduler_task
     
-    # Initialize MQTT client from saved configuration
-    try:
-        from mqtt_client import init_mqtt_client
-        mqtt_config = await load_mqtt_config()
-        if mqtt_config.get("mqtt_url"):
-            init_mqtt_client(
-                mqtt_config.get("mqtt_url", ""),
-                mqtt_config.get("mqtt_username", ""),
-                mqtt_config.get("mqtt_password", ""),
-                mqtt_config.get("mqtt_base_topic", "coned"),
-                mqtt_config.get("mqtt_qos", 1),
-                mqtt_config.get("mqtt_retain", True),
-                mqtt_config.get("mqtt_discovery", True),
-            )
-            await db.add_log("info", "MQTT client initialized")
-    except Exception as e:
-        await db.add_log("warning", f"MQTT initialization failed: {e}")
-    
     schedule = await load_schedule()
     if schedule["enabled"]:
         _scheduler_task = asyncio.create_task(scheduler_loop())
@@ -452,12 +381,6 @@ async def startup_event():
         await db.add_log("info", "TTS scheduler started")
     except Exception as e:
         await db.add_log("warning", f"TTS scheduler initialization failed: {e}")
-    
-    # Publish bill details sensors on startup (due date, kWh cost)
-    try:
-        await _publish_bill_details_sensors()
-    except Exception as e:
-        await db.add_log("warning", f"Failed to publish bill details sensors on startup: {e}")
     
     # Initialize meter tracking service
     try:
@@ -503,15 +426,6 @@ class LoginRequest(BaseModel):
     password: Optional[str] = None
     totp_code: Optional[str] = None
 
-class MQTTConfigModel(BaseModel):
-    mqtt_url: str = ""
-    mqtt_username: str = ""
-    mqtt_password: str = ""
-    mqtt_base_topic: str = "coned"
-    mqtt_qos: int = 1
-    mqtt_retain: bool = True
-    mqtt_discovery: bool = True
-
 class AppSettingsModel(BaseModel):
     time_offset_hours: float = 0.0
     settings_password: str = "0000"
@@ -550,155 +464,8 @@ async def load_credentials() -> Optional[dict]:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to load credentials: {str(e)}")
 
-async def save_mqtt_config(mqtt_config: dict):
-    """Save MQTT configuration to database"""
-    config_data = {
-        "mqtt_url": mqtt_config.get("mqtt_url", ""),
-        "mqtt_username": mqtt_config.get("mqtt_username", ""),
-        "mqtt_password": encrypt_data(mqtt_config.get("mqtt_password", "")),
-        "mqtt_base_topic": mqtt_config.get("mqtt_base_topic", "coned"),
-        "mqtt_qos": mqtt_config.get("mqtt_qos", 1),
-        "mqtt_retain": mqtt_config.get("mqtt_retain", True),
-        "mqtt_discovery": mqtt_config.get("mqtt_discovery", True),
-        "updated_at": utc_now_iso()
-    }
-    await db.save_mqtt_config_db(config_data)
-
-async def load_mqtt_config() -> dict:
-    """Load MQTT configuration from database"""
-    try:
-        data = await db.get_mqtt_config_db()
-        if not data:
-            return {}
-        
-        return {
-            "mqtt_url": data.get("mqtt_url", ""),
-            "mqtt_username": data.get("mqtt_username", ""),
-            "mqtt_password": decrypt_data(data.get("mqtt_password", "")) if data.get("mqtt_password") else "",
-            "mqtt_base_topic": data.get("mqtt_base_topic", "coned"),
-            "mqtt_qos": data.get("mqtt_qos", 1),
-            "mqtt_retain": data.get("mqtt_retain", True),
-            "mqtt_discovery": data.get("mqtt_discovery", True),
-        }
-    except Exception as e:
-        logging.warning(f"Failed to load MQTT config: {str(e)}")
-        return {}
-
-async def load_last_payment_state() -> dict:
-    """Load the last known payment state for MQTT change detection from database"""
-    try:
-        data = await db.get_payment_state_db()
-        if not data:
-            return {"bill_id": None, "payment_count": 0, "last_payment_id": None, "last_payment_amount": None}
-        return data
-    except Exception as e:
-        logging.warning(f"Failed to load last payment state: {str(e)}")
-        return {"bill_id": None, "payment_count": 0, "last_payment_id": None, "last_payment_amount": None}
-
-async def save_last_payment_state(state: dict):
-    """Save the last known payment state for MQTT change detection to database"""
-    try:
-        await db.save_payment_state_db(state)
-    except Exception as e:
-        logging.warning(f"Failed to save last payment state: {str(e)}")
-
-async def should_publish_last_payment() -> tuple:
-    """
-    Check if we should publish last_payment to MQTT.
-    Returns (should_publish: bool, last_payment_data: dict or None, reason: str)
-    
-    Last payment is ALWAYS from the most recent billing cycle only.
-    
-    Only publish when:
-    1. Payment count for most recent bill increased (new payment added)
-    2. Manual audit changed WHICH payment is the "last" one (different payment ID)
-    3. New billing cycle started
-    4. First time publishing (no previous state) - including "no payment" state
-    
-    Does NOT publish when:
-    - Just payee attribution changed (payee doesn't affect last_payment MQTT)
-    - Order changed but same payment is still "last"
-    """
-    current_state = await db.get_most_recent_bill_payment_count()
-    previous_state = await load_last_payment_state()
-    
-    current_bill_id = current_state.get("bill_id")
-    current_count = current_state.get("payment_count", 0)
-    
-    # Use last payment from the MOST RECENT billing cycle only (not across all bills)
-    latest_payment = current_state.get("last_payment")
-    bill_cycle_date = current_state.get("bill_cycle_date", "")
-    
-    previous_bill_id = previous_state.get("bill_id")
-    previous_count = previous_state.get("payment_count", 0)
-    previous_last_payment_id = previous_state.get("last_payment_id")
-    previous_last_amount = previous_state.get("last_payment_amount")
-    
-    should_publish = False
-    reason = ""
-    
-    # Handle no payments case
-    if not latest_payment:
-        # Check if we've published "no payment" state before
-        if previous_last_payment_id is None and previous_state.get("bill_id") is not None:
-            return False, None, "No payments found (already published)"
-        # First time or state reset - publish "no payment" state
-        if current_bill_id is not None:
-            new_state = {
-                "bill_id": current_bill_id,
-                "payment_count": 0,
-                "last_payment_id": None,
-                "last_payment_amount": None
-            }
-            await save_last_payment_state(new_state)
-            return True, None, "No payments - publishing empty state"
-        return False, None, "No bills or payments found"
-    
-    current_last_id = latest_payment.get("id")
-    current_last_amount = latest_payment.get("amount")
-    
-    # Case 1: New billing cycle
-    if current_bill_id != previous_bill_id:
-        should_publish = True
-        reason = "New billing cycle detected"
-    
-    # Case 2: Payment count increased (new payment added)
-    elif current_count > previous_count:
-        should_publish = True
-        reason = f"Payment count increased from {previous_count} to {current_count}"
-    
-    # Case 3: Different payment is now the "last" one (manual audit reordered)
-    elif current_last_id != previous_last_payment_id:
-        should_publish = True
-        reason = "Last payment changed (different payment is now first)"
-    
-    # Case 4: Same payment but amount changed (shouldn't happen normally)
-    elif current_last_amount != previous_last_amount:
-        should_publish = True
-        reason = "Last payment amount changed"
-    
-    # NOTE: Payee changes do NOT trigger MQTT - last_payment only cares about amount/date
-    
-    # Update stored state
-    new_state = {
-        "bill_id": current_bill_id,
-        "payment_count": current_count,
-        "last_payment_id": current_last_id,
-        "last_payment_amount": current_last_amount
-    }
-    await save_last_payment_state(new_state)
-    
-    # Augment payment with bill_cycle_date for MQTT payload
-    payment_to_publish = dict(latest_payment) if latest_payment else None
-    if payment_to_publish and bill_cycle_date:
-        payment_to_publish["bill_cycle_date"] = bill_cycle_date
-    
-    return should_publish, payment_to_publish, reason
-
-
 # ==========================================
-# INDEPENDENT TTS TRIGGER DETECTION
-# These functions detect changes independently of MQTT
+# TTS TRIGGER DETECTION
 # ==========================================
 
 async def load_tts_payment_state() -> dict:
@@ -1086,67 +853,9 @@ async def start_scraper():
         success = result.get('success', False)
         scraped_data = result.get('data', {})
         
-        # Send notifications via MQTT
-        from mqtt_client import get_mqtt_client
-        mqtt_client = get_mqtt_client()
-        
         if success and scraped_data:
-            timestamp = scraped_data.get("timestamp")
-            
-            # Publish bill PDF URLs to MQTT (home app) - includes auto-downloaded PDFs
-            try:
-                await _publish_bill_pdf_mqtt()
-            except Exception as pdf_e:
-                await db.add_log("warning", f"Failed to publish bill PDF MQTT: {pdf_e}")
-            
-            # MQTT: Publish after every successful scrape
-            if mqtt_client:
-                if scraped_data.get("account_balance"):
-                    await mqtt_client.publish_account_balance(scraped_data["account_balance"], timestamp)
-                
-                if scraped_data.get("bill_history"):
-                    bill_history = scraped_data["bill_history"]
-                    ledger = bill_history.get("ledger", [])
-                    bills = [item for item in ledger if item.get("type") == "bill"]
-                    
-                    if len(bills) > 0:
-                        await mqtt_client.publish_latest_bill(bills[0], timestamp)
-                    if len(bills) >= 2:
-                        await mqtt_client.publish_previous_bill(bills[1], timestamp)
-                    
-                    # Smart last payment detection for MQTT only
-                    should_pub, last_payment, reason = await should_publish_last_payment()
-                    if should_pub and last_payment:
-                        await db.add_log("info", f"Publishing last_payment to MQTT: {reason}")
-                        await mqtt_client.publish_last_payment(last_payment, timestamp)
-                    else:
-                        await db.add_log("debug", f"Skipping last_payment MQTT: {reason if reason else 'no change'}")
-                
-                # Publish payee summary for the most recent bill (manual scrape)
-                try:
-                    # Using db module for database operations
-                    all_summaries = await db.calculate_all_payee_balances()
-                    all_bills = await db.get_all_bills()
-                    if all_bills and len(all_bills) > 0:
-                        most_recent_bill = all_bills[0]
-                        bill_id = most_recent_bill.get('id')
-                        if bill_id and bill_id in all_summaries:
-                            summary = all_summaries[bill_id]
-                            bill_info = {
-                                'bill_cycle_date': most_recent_bill.get('bill_cycle_date', ''),
-                                'bill_total': summary.get('bill_total', 0),
-                                'total_paid': summary.get('total_paid', 0),
-                                'bill_balance': summary.get('bill_balance', 0),
-                                'bill_status': summary.get('bill_status', 'unknown')
-                            }
-                            payee_summaries = summary.get('payee_summaries', [])
-                            await mqtt_client.publish_payee_summary(payee_summaries, bill_info, timestamp)
-                            await db.add_log("info", "Published payee summary to MQTT")
-                except Exception as e:
-                    await db.add_log("warning", f"Failed to publish payee summary: {e}")
-            
             # ==========================================
-            # INDEPENDENT TTS TRIGGERS (not tied to MQTT)
+            # TTS TRIGGERS AND NOTIFICATIONS
             # ==========================================
             
             # Check for new payment TTS trigger
@@ -1218,81 +927,8 @@ async def start_scraper():
         await db.add_log("error", f"Scraper failed: {error_msg}")
         raise HTTPException(status_code=500, detail=error_msg)
 
-@app.post("/api/mqtt-config")
-async def configure_mqtt(config: MQTTConfigModel):
-    """Configure MQTT settings"""
-    try:
-        from mqtt_client import init_mqtt_client
-        
-        # Build MQTT config dict
-        mqtt_config = {
-            "mqtt_url": config.mqtt_url.strip(),
-            "mqtt_username": config.mqtt_username.strip(),
-            "mqtt_password": config.mqtt_password.strip(),
-            "mqtt_base_topic": config.mqtt_base_topic.strip() or "coned",
-            "mqtt_qos": config.mqtt_qos,
-            "mqtt_retain": config.mqtt_retain,
-            "mqtt_discovery": config.mqtt_discovery,
-        }
-        
-        # Save to database for persistence
-        await save_mqtt_config(mqtt_config)
-        
-        # Initialize MQTT client with new config
-        if mqtt_config.get("mqtt_url"):
-            init_mqtt_client(
-                mqtt_config["mqtt_url"],
-                mqtt_config["mqtt_username"],
-                mqtt_config["mqtt_password"],
-                mqtt_config["mqtt_base_topic"],
-                mqtt_config["mqtt_qos"],
-                mqtt_config["mqtt_retain"],
-                mqtt_config.get("mqtt_discovery", True),
-            )
-            await db.add_log("success", "MQTT configured successfully")
-            # Trigger connect + discovery so sensors appear immediately
-            from mqtt_client import get_mqtt_client
-            mqtt_client = get_mqtt_client()
-            if mqtt_client:
-                await mqtt_client.connect()
-                await mqtt_client.publish_discovery()
-        else:
-            await db.add_log("info", "MQTT disabled (no URL provided)")
-        
-        return {"message": "MQTT configured successfully"}
-    except Exception as e:
-        error_msg = f"Failed to configure MQTT: {str(e)}"
-        await db.add_log("error", error_msg)
-        raise HTTPException(status_code=500, detail=error_msg)
 
-@app.get("/api/mqtt-config")
-async def get_mqtt_config_endpoint():
-    """Get current MQTT configuration"""
-    try:
-        mqtt_config = await load_mqtt_config()
-        # Don't return the password
-        return {
-            "mqtt_url": mqtt_config.get("mqtt_url", ""),
-            "mqtt_username": mqtt_config.get("mqtt_username", ""),
-            "mqtt_password": "***" * (len(mqtt_config.get("mqtt_password", "")) if mqtt_config.get("mqtt_password") else 0),
-            "mqtt_base_topic": mqtt_config.get("mqtt_base_topic", "coned"),
-            "mqtt_qos": mqtt_config.get("mqtt_qos", 1),
-            "mqtt_retain": mqtt_config.get("mqtt_retain", True),
-            "mqtt_discovery": mqtt_config.get("mqtt_discovery", True),
-        }
-    except Exception as e:
-        await db.add_log("error", f"Failed to get MQTT config: {str(e)}")
-        return {
-            "mqtt_url": "",
-            "mqtt_username": "",
-            "mqtt_password": "",
-            "mqtt_base_topic": "coned",
-            "mqtt_qos": 1,
-            "mqtt_retain": True,
-            "mqtt_discovery": True,
-        }
-
-@app.post("/api/mqtt-cleanup")
+@app.post("/api/app-settings")
 async def cleanup_mqtt_sensors():
     """Remove all MQTT discovery messages (clears retained sensors from broker).
     
@@ -1659,8 +1295,6 @@ async def download_bill_pdf_for_period(bill_id: int, request: PdfDownloadRequest
     if not pdf_url:
         raise HTTPException(status_code=400, detail="PDF URL is required")
     result = await _download_and_store_pdf(pdf_url, bill_id)
-    await _publish_bill_pdf_mqtt()
-    await _publish_bill_details_sensors()
     return result
 
 @app.post("/api/latest-bill-pdf/download")
@@ -1674,94 +1308,8 @@ async def download_bill_pdf(request: PdfDownloadRequest):
         raise HTTPException(status_code=400, detail="No bills in ledger. Run scraper first.")
     bill_id = bills[0]['id']
     result = await _download_and_store_pdf(pdf_url, bill_id)
-    await _publish_bill_pdf_mqtt()
-    await _publish_bill_details_sensors()
     return result
 
-
-async def _publish_bill_details_sensors():
-    """Publish due_date, kwh_cost, kwh_used sensors via MQTT"""
-    from mqtt_client import get_mqtt_client
-    client = get_mqtt_client()
-    if client and client.enabled:
-        try:
-            await client.publish_bill_details_sensors()
-        except Exception as e:
-            await db.add_log("warning", f"Failed to publish bill details sensors: {e}")
-
-async def _get_ha_external_base_url() -> str | None:
-    """Get Home Assistant external URL when running as addon. Returns base URL for addon ingress or None."""
-    token = os.environ.get("SUPERVISOR_TOKEN")
-    if not token:
-        return None
-    try:
-        import aiohttp
-        async with aiohttp.ClientSession() as session:
-            # Get external URL from HA config
-            async with session.get(
-                "http://supervisor/core/api/config",
-                headers={"Authorization": f"Bearer {token}"},
-            ) as resp:
-                if resp.status != 200:
-                    return None
-                data = await resp.json()
-                external = (data.get("external_url") or "").rstrip("/")
-                if not external:
-                    return None
-            
-            # Get the addon's ingress token from supervisor
-            async with session.get(
-                "http://supervisor/addons/self/info",
-                headers={"Authorization": f"Bearer {token}"},
-            ) as resp:
-                if resp.status != 200:
-                    await db.add_log("debug", f"Could not get addon info: HTTP {resp.status}")
-                    return None
-                addon_data = await resp.json()
-                addon_info = addon_data.get("data", {})
-                ingress_entry = addon_info.get("ingress_entry", "")
-                
-                # ingress_entry is like "/api/hassio_ingress/glF8P3O4ySwGrxsHqRBRAOBvR1VRauNQXhAfmqyCCSs"
-                if ingress_entry:
-                    return f"{external}{ingress_entry}"
-                
-                # Fallback: try ingress_token directly
-                ingress_token = addon_info.get("ingress_token", "")
-                if ingress_token:
-                    return f"{external}/api/hassio_ingress/{ingress_token}"
-                
-                await db.add_log("debug", "No ingress_entry or ingress_token found in addon info")
-                return None
-    except Exception as e:
-        await db.add_log("debug", f"Could not get HA external URL: {e}")
-        return None
-
-
-async def _publish_bill_pdf_mqtt():
-    """Publish bill PDF URLs to MQTT (state=latest, attributes=all). Uses HA external URL."""
-    from mqtt_client import get_mqtt_client
-    mqtt_client = get_mqtt_client()
-    if not mqtt_client:
-        return
-    base_url = await _get_ha_external_base_url()
-    if not base_url:
-        await db.add_log("warning", "Could not get Home Assistant external URL (addon only), skipping MQTT PDF publish")
-        return
-    await mqtt_client.publish_bill_pdf_url_all(base_url, utc_now_iso())
-
-@app.post("/api/latest-bill-pdf/send-mqtt")
-async def send_pdf_url_mqtt():
-    """Manually send bill PDF URLs to Home Assistant via MQTT"""
-    if await db.get_latest_bill_id_with_document() is None:
-        raise HTTPException(status_code=404, detail="No PDF available to send")
-    try:
-        await _publish_bill_pdf_mqtt()
-        return {"success": True, "message": "PDF URLs sent to MQTT"}
-    except HTTPException:
-        raise
-    except Exception as e:
-        await db.add_log("error", f"Failed to send PDF URL via MQTT: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to send: {str(e)}")
 
 @app.delete("/api/latest-bill-pdf")
 async def delete_latest_bill_pdf():
@@ -1892,9 +1440,6 @@ async def reparse_all_bill_pdfs():
         except Exception as e:
             results["failed"] += 1
             results["errors"].append(f"Bill {bill_id}: {str(e)}")
-    
-    # Publish updated sensors
-    await _publish_bill_details_sensors()
     
     return {
         "success": True,

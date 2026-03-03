@@ -1565,18 +1565,6 @@ async def save_credentials_db(credentials: Dict[str, Any]):
     await set_app_setting("credentials", credentials)
 
 # =============================================================================
-# MQTT Config (migrated from file to database)
-# =============================================================================
-
-async def get_mqtt_config_db() -> Optional[Dict[str, Any]]:
-    """Get MQTT config from database"""
-    return await get_app_setting("mqtt_config")
-
-async def save_mqtt_config_db(config: Dict[str, Any]):
-    """Save MQTT config to database"""
-    await set_app_setting("mqtt_config", config)
-
-# =============================================================================
 # App Settings (time offset, etc.) - migrated from file to database
 # =============================================================================
 

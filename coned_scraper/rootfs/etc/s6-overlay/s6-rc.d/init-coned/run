@@ -17,4 +17,19 @@ mkdir -p /config/bill_documents
 # Set permissions for postgres
 chown -R postgres:postgres /config/postgres 2>/dev/null || true
 
+# ==============================================================================
+# Install Con Edison integration to Home Assistant custom_components
+# ==============================================================================
+INTEGRATION_SRC="/app/integration/conedison"
+INTEGRATION_DST="/homeassistant/custom_components/conedison"
+
+if [ -d "$INTEGRATION_SRC" ]; then
+    bashio::log.info "Installing Con Edison integration..."
+    mkdir -p /homeassistant/custom_components
+    cp -r "$INTEGRATION_SRC" "$INTEGRATION_DST"
+    bashio::log.info "Integration installed to $INTEGRATION_DST"
+else
+    bashio::log.warning "Integration source not found at $INTEGRATION_SRC"
+fi
+
 bashio::log.info "Environment configured, waiting for services to start..."
