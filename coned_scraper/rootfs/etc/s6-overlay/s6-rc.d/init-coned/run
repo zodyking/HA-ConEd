@@ -26,6 +26,8 @@ INTEGRATION_DST="/homeassistant/custom_components/coned_connect"
 if [ -d "$INTEGRATION_SRC" ]; then
     bashio::log.info "Installing ConEd Connect integration..."
     mkdir -p /homeassistant/custom_components
+    # Remove existing to avoid nested folder issue, then copy fresh
+    rm -rf "$INTEGRATION_DST"
     cp -r "$INTEGRATION_SRC" "$INTEGRATION_DST"
     bashio::log.info "Integration installed to $INTEGRATION_DST"
 else
