@@ -131,7 +131,7 @@ class TTSScheduler:
         - start_time/end_time: Active hours window
         - days_of_week: Active days
         """
-        schedule_config = self.load_schedule_config()
+        schedule_config = await self.load_schedule_config()
         tts_config = await self.load_tts_config()
         
         if not schedule_config.get("enabled"):

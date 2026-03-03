@@ -10,8 +10,6 @@ exec 2>&1
 PRISMA_STUDIO_PORT=$(bashio::config 'prisma_studio_port' 2>/dev/null || echo "5555")
 POSTGRES_PORT=$(bashio::config 'postgres_port' 2>/dev/null || echo "5432")
 
-export DATABASE_URL="postgresql://coned:coned@localhost:${POSTGRES_PORT}/coned"
-
 cd /app/python-service
 
 # Wait for PostgreSQL and coned database to be ready
@@ -21,4 +19,6 @@ until PGPASSWORD=coned psql -h localhost -p "${POSTGRES_PORT}" -U coned -d coned
 done
 sleep 2
 bashio::log.info "PostgreSQL is ready, starting Prisma Studio on port ${PRISMA_STUDIO_PORT}..."
-exec prisma studio --port "${PRISMA_STUDIO_PORT}" --browser none
+
+# Pass DATABASE_URL directly via --url argument (more reliable than export)
+exec prisma studio --port "${PRISMA_STUDIO_PORT}" --browser none --url "postgresql://coned:coned@localhost:${POSTGRES_PORT}/coned"
