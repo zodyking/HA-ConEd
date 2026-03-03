@@ -1711,7 +1711,9 @@ async def calculate_expected_balance() -> Optional[float]:
 async def validate_and_record_balance(scraped_balance: str) -> bool:
     """
     Validate scraped balance against expected balance before recording.
-    Only records if the scraped balance looks reasonable.
+    
+    Logic: expected_balance = latest_bill_amount - payments_for_that_bill
+    If scraped balance doesn't match expected, don't update.
     
     Returns True if balance was recorded, False if rejected.
     """
@@ -1720,43 +1722,32 @@ async def validate_and_record_balance(scraped_balance: str) -> bool:
     # Get expected balance based on bill - payments
     expected = await calculate_expected_balance()
     
-    # Get previous balance for comparison
-    prev_balance = await get_current_balance()
-    prev_numeric = prev_balance["balance_numeric"] if prev_balance else None
-    
-    # Validation rules:
-    # 1. If scraped balance is 0 or negative but we have a positive expected balance, reject
-    # 2. If scraped balance differs from expected by more than 50%, be suspicious
-    # 3. If scraped balance drops to 0 from a non-zero value, reject (likely scrape error)
-    
-    should_record = True
-    reason = ""
-    
-    if expected is not None:
-        # If expected balance is positive but scraped is 0, likely error
-        if expected > 10 and scraped_numeric <= 0:
-            should_record = False
-            reason = f"Scraped balance $0 but expected ${expected:.2f} based on bill-payments"
-        
-        # If scraped differs from expected by more than 100%, suspicious
-        # (Allow some variance for fees, adjustments, etc.)
-        elif expected > 0:
-            diff_pct = abs(scraped_numeric - expected) / expected
-            if diff_pct > 1.0 and scraped_numeric <= 0:
-                should_record = False
-                reason = f"Scraped ${scraped_numeric:.2f} differs too much from expected ${expected:.2f}"
-    
-    # If previous balance was significant and now it's 0, likely error
-    if prev_numeric is not None and prev_numeric > 50 and scraped_numeric <= 0:
-        should_record = False
-        reason = f"Balance dropped from ${prev_numeric:.2f} to $0 - likely scrape error"
-    
-    if should_record:
+    if expected is None:
+        # No bill data to validate against, accept the scraped balance
         await record_account_balance(scraped_balance)
+        logger.info(f"Recorded balance ${scraped_numeric:.2f} (no bill data to validate against)")
+        return True
+    
+    # Allow small tolerance for rounding, fees, etc. ($1 tolerance)
+    tolerance = 1.0
+    diff = abs(scraped_numeric - expected)
+    
+    if diff <= tolerance:
+        # Scraped balance matches expected, record it
+        await record_account_balance(scraped_balance)
+        logger.info(f"Recorded balance ${scraped_numeric:.2f} (matches expected ${expected:.2f})")
         return True
     else:
-        logger.warning(f"Rejected scraped balance ${scraped_numeric:.2f}: {reason}")
-        await add_log("warning", f"Balance validation failed: {reason}. Keeping previous balance.")
+        # Scraped balance doesn't match expected - don't update
+        logger.warning(
+            f"Rejected scraped balance ${scraped_numeric:.2f}: "
+            f"expected ${expected:.2f} (latest bill - payments). Keeping previous balance."
+        )
+        await add_log(
+            "warning", 
+            f"Balance validation failed: scraped ${scraped_numeric:.2f} != expected ${expected:.2f}. "
+            f"Keeping previous balance."
+        )
         return False
 
 
