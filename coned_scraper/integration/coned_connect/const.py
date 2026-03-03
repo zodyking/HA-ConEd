@@ -3,7 +3,7 @@ from datetime import timedelta
 
 DOMAIN = "coned_connect"
 DEFAULT_NAME = "ConEd Connect"
-DEFAULT_URL = "http://localhost:8000"
+DEFAULT_URL = "http://9a4bbad0-coned-scraper:8000"
 
 CONF_ADDON_URL = "addon_url"
 

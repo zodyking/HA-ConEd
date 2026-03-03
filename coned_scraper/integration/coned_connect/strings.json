@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Connect to Con Edison Addon",
-        "description": "Enter the URL of your Con Edison addon. If running as a Home Assistant addon, use the addon's web UI URL or Ingress URL.",
+        "description": "Enter the internal addon URL. For Home Assistant addons, use the format: http://{addon-slug}:8000 (e.g. http://9a4bbad0-coned-scraper:8000). Find your addon slug in Settings > Add-ons > Con Edison > Info.",
         "data": {
           "addon_url": "Addon URL"
         }
