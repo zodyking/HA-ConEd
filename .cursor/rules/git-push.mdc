@@ -1,0 +1,16 @@
+---
+description: Git push workflow - version bump required, push directly to main
+alwaysApply: true
+---
+
+# Git Push
+
+When the user asks to push, ship, or publish to GitHub:
+
+- **ALWAYS version bump first** — increment the app version before committing/pushing:
+  - `config.yaml` → version
+  - `main.py` → CODE_VERSION
+  - `rootfs/etc/s6-overlay/s6-rc.d/api/run` → log message (vX.Y.Z)
+  - Increment PATCH (+0.0.1) unless user requests MINOR or MAJOR
+- **Push directly to main** — commit changes and `git push origin main`
+- **Do NOT**: create branches, open PRs, create tags, or create releases
