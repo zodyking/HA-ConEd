@@ -29,7 +29,7 @@ import db
 app = FastAPI(title="Con Edison API")
 
 # Code version for deployment verification
-CODE_VERSION = "1.3.4-postgres"
+CODE_VERSION = "1.3.5-postgres"
 
 @app.on_event("startup")
 async def startup():
@@ -137,13 +137,13 @@ class ScheduleModel(BaseModel):
     enabled: bool
     frequency: int  # Frequency in seconds
 
-def load_schedule() -> dict:
-    """Load automated scraping schedule"""
-    if not SCHEDULE_FILE.exists():
-        return {"enabled": False, "frequency": 3600, "last_scrape_end": None, "next_run": None}
-    
+async def load_schedule() -> dict:
+    """Load automated scraping schedule from database"""
     try:
-        data = json.loads(SCHEDULE_FILE.read_text())
+        data = await db.get_schedule_config_db()
+        if not data:
+            return {"enabled": False, "frequency": 3600, "last_scrape_end": None, "next_run": None}
+        
         return {
             "enabled": data.get("enabled", False),
             "frequency": data.get("frequency", 3600),
@@ -154,10 +154,10 @@ def load_schedule() -> dict:
         logging.error(f"Failed to load schedule: {str(e)}")
         return {"enabled": False, "frequency": 3600, "last_scrape_end": None, "next_run": None}
 
-def save_schedule(enabled: bool, frequency: int, last_scrape_end: str = None, next_run: str = None):
-    """Save automated scraping schedule"""
+async def save_schedule(enabled: bool, frequency: int, last_scrape_end: str = None, next_run: str = None):
+    """Save automated scraping schedule to database"""
     # Load existing to preserve last_scrape_end if not provided
-    existing = load_schedule()
+    existing = await load_schedule()
     
     schedule = {
         "enabled": enabled,
@@ -166,19 +166,19 @@ def save_schedule(enabled: bool, frequency: int, last_scrape_end: str = None, ne
         "next_run": next_run or existing.get("next_run"),
         "updated_at": utc_now_iso()
     }
-    SCHEDULE_FILE.write_text(json.dumps(schedule))
+    await db.save_schedule_config_db(schedule)
     logging.info(f"Schedule saved: enabled={enabled}, frequency={frequency}s")
 
-def update_last_scrape_time():
+async def update_last_scrape_time():
     """Update last_scrape_end and calculate next_run after a successful scrape"""
-    schedule = load_schedule()
+    schedule = await load_schedule()
     now = datetime.now(timezone.utc)
     next_run = now + timedelta(seconds=schedule["frequency"])
     
     schedule["last_scrape_end"] = now.isoformat()
     schedule["next_run"] = next_run.isoformat()
     schedule["updated_at"] = utc_now_iso()
-    SCHEDULE_FILE.write_text(json.dumps(schedule))
+    await db.save_schedule_config_db(schedule)
 
 async def run_scheduled_scrape():
     """Run a scheduled scrape"""
@@ -188,7 +188,7 @@ async def run_scheduled_scrape():
     
     _scrape_running = True
     try:
-        credentials = load_credentials()
+        credentials = await load_credentials()
         if not credentials:
             await db.add_log("warning", "Scheduled scrape skipped: No credentials found")
             await db.add_scrape_history(False, "No credentials found", "credentials_check", 0)
@@ -331,7 +331,7 @@ async def scheduler_loop():
     """Background scheduler loop - runs scrapes based on last_scrape_end + frequency"""
     while True:
         try:
-            schedule = load_schedule()
+            schedule = await load_schedule()
             
             if schedule["enabled"]:
                 frequency = schedule["frequency"]
@@ -355,11 +355,11 @@ async def scheduler_loop():
                     continue  # Re-check if it's time
                 
                 # Time to run!
-                current_schedule = load_schedule()
+                current_schedule = await load_schedule()
                 if current_schedule["enabled"]:
                     await run_scheduled_scrape()
                     # Update next run time after scrape completes
-                    update_last_scrape_time()
+                    await update_last_scrape_time()
             else:
                 # If disabled, check every 60 seconds
                 await asyncio.sleep(60)
@@ -382,7 +382,7 @@ async def restart_scheduler():
             pass
     
     # Start new scheduler task
-    schedule = load_schedule()
+    schedule = await load_schedule()
     if schedule["enabled"]:
         _scheduler_task = asyncio.create_task(scheduler_loop())
         await db.add_log("info", "Scheduler restarted")
@@ -397,7 +397,7 @@ async def startup_event():
     # Initialize MQTT client from saved configuration
     try:
         from mqtt_client import init_mqtt_client
-        mqtt_config = load_mqtt_config()
+        mqtt_config = await load_mqtt_config()
         if mqtt_config.get("mqtt_url"):
             init_mqtt_client(
                 mqtt_config.get("mqtt_url", ""),
@@ -412,7 +412,7 @@ async def startup_event():
     except Exception as e:
         await db.add_log("warning", f"MQTT initialization failed: {e}")
     
-    schedule = load_schedule()
+    schedule = await load_schedule()
     if schedule["enabled"]:
         _scheduler_task = asyncio.create_task(scheduler_loop())
         await db.add_log("info", f"Scheduler started with {schedule['frequency']}s frequency")
@@ -497,22 +497,23 @@ def decrypt_data(encrypted_data: str) -> str:
     """Decrypt sensitive data"""
     return cipher.decrypt(encrypted_data.encode()).decode()
 
-def save_credentials(username: str, password: str, totp_secret: str):
-    """Save encrypted credentials"""
+async def save_credentials(username: str, password: str, totp_secret: str):
+    """Save encrypted credentials to database"""
     credentials = {
         "username": encrypt_data(username),
         "password": encrypt_data(password),
-        "totp_secret": encrypt_data(totp_secret)
+        "totp_secret": encrypt_data(totp_secret),
+        "updated_at": utc_now_iso()
     }
-    CREDENTIALS_FILE.write_text(json.dumps(credentials))
+    await db.save_credentials_db(credentials)
 
-def load_credentials() -> Optional[dict]:
-    """Load and decrypt credentials"""
-    if not CREDENTIALS_FILE.exists():
-        return None
-    
+async def load_credentials() -> Optional[dict]:
+    """Load and decrypt credentials from database"""
     try:
-        data = json.loads(CREDENTIALS_FILE.read_text())
+        data = await db.get_credentials_db()
+        if not data:
+            return None
+        
         return {
             "username": decrypt_data(data["username"]),
             "password": decrypt_data(data["password"]),
@@ -521,27 +522,27 @@ def load_credentials() -> Optional[dict]:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to load credentials: {str(e)}")
 
-def save_mqtt_config(mqtt_config: dict):
-    """Save MQTT configuration to file"""
+async def save_mqtt_config(mqtt_config: dict):
+    """Save MQTT configuration to database"""
     config_data = {
         "mqtt_url": mqtt_config.get("mqtt_url", ""),
         "mqtt_username": mqtt_config.get("mqtt_username", ""),
-        "mqtt_password": encrypt_data(mqtt_config.get("mqtt_password", "")),  # Encrypt password
+        "mqtt_password": encrypt_data(mqtt_config.get("mqtt_password", "")),
         "mqtt_base_topic": mqtt_config.get("mqtt_base_topic", "coned"),
         "mqtt_qos": mqtt_config.get("mqtt_qos", 1),
         "mqtt_retain": mqtt_config.get("mqtt_retain", True),
         "mqtt_discovery": mqtt_config.get("mqtt_discovery", True),
         "updated_at": utc_now_iso()
     }
-    MQTT_CONFIG_FILE.write_text(json.dumps(config_data))
+    await db.save_mqtt_config_db(config_data)
 
-def load_mqtt_config() -> dict:
-    """Load MQTT configuration from file"""
-    if not MQTT_CONFIG_FILE.exists():
-        return {}
-    
+async def load_mqtt_config() -> dict:
+    """Load MQTT configuration from database"""
     try:
-        data = json.loads(MQTT_CONFIG_FILE.read_text())
+        data = await db.get_mqtt_config_db()
+        if not data:
+            return {}
+        
         return {
             "mqtt_url": data.get("mqtt_url", ""),
             "mqtt_username": data.get("mqtt_username", ""),
@@ -555,21 +556,21 @@ def load_mqtt_config() -> dict:
         logging.warning(f"Failed to load MQTT config: {str(e)}")
         return {}
 
-def load_last_payment_state() -> dict:
-    """Load the last known payment state for MQTT change detection"""
-    if not LAST_PAYMENT_STATE_FILE.exists():
-        return {"bill_id": None, "payment_count": 0, "last_payment_id": None, "last_payment_amount": None}
-    
+async def load_last_payment_state() -> dict:
+    """Load the last known payment state for MQTT change detection from database"""
     try:
-        return json.loads(LAST_PAYMENT_STATE_FILE.read_text())
+        data = await db.get_payment_state_db()
+        if not data:
+            return {"bill_id": None, "payment_count": 0, "last_payment_id": None, "last_payment_amount": None}
+        return data
     except Exception as e:
         logging.warning(f"Failed to load last payment state: {str(e)}")
         return {"bill_id": None, "payment_count": 0, "last_payment_id": None, "last_payment_amount": None}
 
-def save_last_payment_state(state: dict):
-    """Save the last known payment state for MQTT change detection"""
+async def save_last_payment_state(state: dict):
+    """Save the last known payment state for MQTT change detection to database"""
     try:
-        LAST_PAYMENT_STATE_FILE.write_text(json.dumps(state))
+        await db.save_payment_state_db(state)
     except Exception as e:
         logging.warning(f"Failed to save last payment state: {str(e)}")
 
@@ -591,7 +592,7 @@ async def should_publish_last_payment() -> tuple:
     - Order changed but same payment is still "last"
     """
     current_state = await db.get_most_recent_bill_payment_count()
-    previous_state = load_last_payment_state()
+    previous_state = await load_last_payment_state()
     
     current_bill_id = current_state.get("bill_id")
     current_count = current_state.get("payment_count", 0)
@@ -621,7 +622,7 @@ async def should_publish_last_payment() -> tuple:
                 "last_payment_id": None,
                 "last_payment_amount": None
             }
-            save_last_payment_state(new_state)
+            await save_last_payment_state(new_state)
             return True, None, "No payments - publishing empty state"
         return False, None, "No bills or payments found"
     
@@ -657,7 +658,7 @@ async def should_publish_last_payment() -> tuple:
         "last_payment_id": current_last_id,
         "last_payment_amount": current_last_amount
     }
-    save_last_payment_state(new_state)
+    await save_last_payment_state(new_state)
     
     # Augment payment with bill_cycle_date for MQTT payload
     payment_to_publish = dict(latest_payment) if latest_payment else None
@@ -672,37 +673,39 @@ async def should_publish_last_payment() -> tuple:
 # These functions detect changes independently of MQTT
 # ==========================================
 
-def load_tts_payment_state() -> dict:
-    """Load the last known payment state for TTS trigger detection"""
-    if not TTS_PAYMENT_STATE_FILE.exists():
-        return {"bill_id": None, "payment_count": 0, "last_payment_id": None}
+async def load_tts_payment_state() -> dict:
+    """Load the last known payment state for TTS trigger detection from database"""
     try:
-        return json.loads(TTS_PAYMENT_STATE_FILE.read_text())
+        data = await db.get_tts_payment_state_db()
+        if not data:
+            return {"bill_id": None, "payment_count": 0, "last_payment_id": None}
+        return data
     except Exception as e:
         logging.warning(f"Failed to load TTS payment state: {str(e)}")
         return {"bill_id": None, "payment_count": 0, "last_payment_id": None}
 
-def save_tts_payment_state(state: dict):
-    """Save the TTS payment state"""
+async def save_tts_payment_state(state: dict):
+    """Save the TTS payment state to database"""
     try:
-        TTS_PAYMENT_STATE_FILE.write_text(json.dumps(state))
+        await db.save_tts_payment_state_db(state)
     except Exception as e:
         logging.warning(f"Failed to save TTS payment state: {str(e)}")
 
-def load_tts_bill_state() -> dict:
-    """Load the last known bill state for TTS trigger detection"""
-    if not TTS_BILL_STATE_FILE.exists():
-        return {"latest_bill_id": None, "bill_total": None}
+async def load_tts_bill_state() -> dict:
+    """Load the last known bill state for TTS trigger detection from database"""
     try:
-        return json.loads(TTS_BILL_STATE_FILE.read_text())
+        data = await db.get_tts_bill_state_db()
+        if not data:
+            return {"latest_bill_id": None, "bill_total": None}
+        return data
     except Exception as e:
         logging.warning(f"Failed to load TTS bill state: {str(e)}")
         return {"latest_bill_id": None, "bill_total": None}
 
-def save_tts_bill_state(state: dict):
-    """Save the TTS bill state"""
+async def save_tts_bill_state(state: dict):
+    """Save the TTS bill state to database"""
     try:
-        TTS_BILL_STATE_FILE.write_text(json.dumps(state))
+        await db.save_tts_bill_state_db(state)
     except Exception as e:
         logging.warning(f"Failed to save TTS bill state: {str(e)}")
 
@@ -725,7 +728,7 @@ async def should_trigger_payment_tts() -> tuple:
     - Reordering existing payments
     """
     current_state = await db.get_most_recent_bill_payment_count()
-    previous_state = load_tts_payment_state()
+    previous_state = await load_tts_payment_state()
     
     current_bill_id = current_state.get("bill_id")
     current_count = current_state.get("payment_count", 0)
@@ -748,7 +751,7 @@ async def should_trigger_payment_tts() -> tuple:
             "payment_count": 0,
             "last_payment_id": None
         }
-        save_tts_payment_state(new_state)
+        await save_tts_payment_state(new_state)
         return False, None, "No payments found"
     
     current_last_id = latest_payment.get("id")
@@ -776,7 +779,7 @@ async def should_trigger_payment_tts() -> tuple:
         "payment_count": current_count,
         "last_payment_id": current_last_id
     }
-    save_tts_payment_state(new_state)
+    await save_tts_payment_state(new_state)
     
     return should_trigger, latest_payment if should_trigger else None, reason
 
@@ -798,7 +801,7 @@ async def should_trigger_new_bill_tts() -> tuple:
     # Using db module for database operations
     
     all_bills = await db.get_all_bills()
-    previous_state = load_tts_bill_state()
+    previous_state = await load_tts_bill_state()
     
     if not all_bills or len(all_bills) == 0:
         return False, None, "No bills found"
@@ -833,33 +836,33 @@ async def should_trigger_new_bill_tts() -> tuple:
         "latest_bill_id": current_bill_id,
         "bill_total": latest_bill.get("bill_total")
     }
-    save_tts_bill_state(new_state)
+    await save_tts_bill_state(new_state)
     
     return should_trigger, bill_data, reason
 
 
-def save_app_settings(settings: dict):
-    """Save app settings (time offset, password) to file"""
+async def save_app_settings(settings: dict):
+    """Save app settings (time offset, password) to database"""
     settings_data = {
         "time_offset_hours": float(settings.get("time_offset_hours", 0.0)),
         "settings_password": encrypt_data(settings.get("settings_password", "0000")),
         "updated_at": utc_now_iso()
     }
-    SETTINGS_FILE.write_text(json.dumps(settings_data))
+    await db.save_app_settings_db(settings_data)
 
-def load_app_settings() -> dict:
-    """Load app settings from file"""
-    if not SETTINGS_FILE.exists():
-        # Create default settings
-        default_settings = {
-            "time_offset_hours": 0.0,
-            "settings_password": "0000",
-        }
-        save_app_settings(default_settings)
-        return default_settings
-    
+async def load_app_settings() -> dict:
+    """Load app settings from database"""
     try:
-        data = json.loads(SETTINGS_FILE.read_text())
+        data = await db.get_app_settings_db()
+        if not data:
+            # Create default settings
+            default_settings = {
+                "time_offset_hours": 0.0,
+                "settings_password": "0000",
+            }
+            await save_app_settings(default_settings)
+            return default_settings
+        
         return {
             "time_offset_hours": float(data.get("time_offset_hours", 0.0)),
             "settings_password": decrypt_data(data.get("settings_password", encrypt_data("0000"))) if data.get("settings_password") else "0000",
@@ -868,9 +871,9 @@ def load_app_settings() -> dict:
         logging.warning(f"Failed to load app settings: {str(e)}")
         return {"time_offset_hours": 0.0, "settings_password": "0000"}
 
-def verify_settings_password(password: str) -> bool:
+async def verify_settings_password(password: str) -> bool:
     """Verify settings password"""
-    settings = load_app_settings()
+    settings = await load_app_settings()
     return settings.get("settings_password") == password
 
 # Frontend SPA - path to Vue build output (set by Dockerfile or dev)
@@ -883,7 +886,7 @@ if not FRONTEND_DIST.exists():
 async def get_totp():
     """Get current TOTP code"""
     try:
-        credentials = load_credentials()
+        credentials = await load_credentials()
         if not credentials:
             raise HTTPException(status_code=404, detail="No credentials found. Please configure settings first.")
         
@@ -933,7 +936,7 @@ async def save_settings(credentials: CredentialsModel):
         
         # If password is not provided, use existing password
         if credentials.password is None or credentials.password == "":
-            existing_creds = load_credentials()
+            existing_creds = await load_credentials()
             if existing_creds:
                 password = existing_creds["password"]
                 await db.add_log("info", "Using existing password")
@@ -943,7 +946,7 @@ async def save_settings(credentials: CredentialsModel):
             password = credentials.password
         
         # Save credentials
-        save_credentials(
+        await save_credentials(
             credentials.username.strip(),
             password,
             totp_secret
@@ -962,7 +965,7 @@ async def save_settings(credentials: CredentialsModel):
 async def get_settings():
     """Get saved credentials (without sensitive data)"""
     try:
-        credentials = load_credentials()
+        credentials = await load_credentials()
         if not credentials:
             return {"username": "", "password": "", "totp_secret": ""}
         
@@ -980,7 +983,7 @@ async def test_login():
     """Test ConEd login credentials without performing full scrape"""
     from browser_automation import perform_login
     
-    credentials = load_credentials()
+    credentials = await load_credentials()
     if not credentials:
         raise HTTPException(status_code=404, detail="No credentials found. Please save credentials first.")
     
@@ -1158,8 +1161,8 @@ async def configure_mqtt(config: MQTTConfigModel):
             "mqtt_discovery": config.mqtt_discovery,
         }
         
-        # Save to file for persistence
-        save_mqtt_config(mqtt_config)
+        # Save to database for persistence
+        await save_mqtt_config(mqtt_config)
         
         # Initialize MQTT client with new config
         if mqtt_config.get("mqtt_url"):
@@ -1189,10 +1192,10 @@ async def configure_mqtt(config: MQTTConfigModel):
         raise HTTPException(status_code=500, detail=error_msg)
 
 @app.get("/api/mqtt-config")
-async def get_mqtt_config():
+async def get_mqtt_config_endpoint():
     """Get current MQTT configuration"""
     try:
-        mqtt_config = load_mqtt_config()
+        mqtt_config = await load_mqtt_config()
         # Don't return the password
         return {
             "mqtt_url": mqtt_config.get("mqtt_url", ""),
@@ -1224,7 +1227,7 @@ async def cleanup_mqtt_sensors():
     After running this, restart the addon to re-register sensors cleanly.
     """
     try:
-        mqtt_config = load_mqtt_config()
+        mqtt_config = await load_mqtt_config()
         if not mqtt_config.get("mqtt_url"):
             raise HTTPException(status_code=400, detail="MQTT not configured")
         
@@ -1260,7 +1263,7 @@ async def save_app_settings_endpoint(settings: AppSettingsModel):
             "time_offset_hours": settings.time_offset_hours,
             "settings_password": settings.settings_password.strip() if settings.settings_password else "0000",
         }
-        save_app_settings(settings_dict)
+        await save_app_settings(settings_dict)
         await db.add_log("success", "App settings saved successfully")
         return {"message": "Settings saved successfully"}
     except Exception as e:
@@ -1272,7 +1275,7 @@ async def save_app_settings_endpoint(settings: AppSettingsModel):
 async def get_app_settings_endpoint():
     """Get app settings"""
     try:
-        settings = load_app_settings()
+        settings = await load_app_settings()
         # Don't return the actual password, just whether one exists
         return {
             "time_offset_hours": settings.get("time_offset_hours", 0.0),
@@ -1290,7 +1293,7 @@ class PasswordVerifyModel(BaseModel):
 async def verify_password_endpoint(data: PasswordVerifyModel):
     """Verify settings password"""
     try:
-        is_valid = verify_settings_password(data.password)
+        is_valid = await verify_settings_password(data.password)
         return {"valid": is_valid}
     except Exception as e:
         await db.add_log("error", f"Failed to verify password: {str(e)}")
@@ -1315,9 +1318,9 @@ async def admin_reset_password_endpoint(data: AdminResetPasswordModel):
         raise HTTPException(status_code=400, detail="Password must be at least 4 characters")
     
     try:
-        settings = load_app_settings()
+        settings = await load_app_settings()
         settings['settings_password'] = data.new_password
-        save_app_settings(settings)
+        await save_app_settings(settings)
         await db.add_log("info", f"Settings password reset by admin user {data.user_id}")
         return {"success": True, "message": "Password reset successfully"}
     except Exception as e:
@@ -1363,9 +1366,9 @@ async def ha_admin_reset_password(data: HaAdminResetPasswordModel, request: Requ
         raise HTTPException(status_code=400, detail="PIN must be at least 4 characters")
     
     try:
-        settings = load_app_settings()
+        settings = await load_app_settings()
         settings['settings_password'] = data.new_password
-        save_app_settings(settings)
+        await save_app_settings(settings)
         await db.add_log("info", "Settings PIN reset via HA addon")
         return {"success": True, "message": "PIN reset successfully"}
     except Exception as e:
@@ -1851,7 +1854,7 @@ async def get_live_preview():
 async def get_automated_schedule():
     """Get automated scraping schedule"""
     global _scrape_running
-    schedule = load_schedule()
+    schedule = await load_schedule()
     
     # Check if a scrape is currently running
     if _scrape_running:
@@ -1897,7 +1900,7 @@ async def save_automated_schedule(schedule: ScheduleModel):
             raise HTTPException(status_code=400, detail="Frequency must be greater than 0")
         
         # Load existing schedule to get last_scrape_end
-        existing = load_schedule()
+        existing = await load_schedule()
         last_scrape_end = existing.get("last_scrape_end")
         
         # Calculate next_run based on last_scrape_end + new frequency
@@ -1913,7 +1916,7 @@ async def save_automated_schedule(schedule: ScheduleModel):
                 # No previous scrape, run based on now
                 next_run = (datetime.now(timezone.utc) + timedelta(seconds=schedule.frequency)).isoformat()
         
-        save_schedule(schedule.enabled, schedule.frequency, last_scrape_end, next_run)
+        await save_schedule(schedule.enabled, schedule.frequency, last_scrape_end, next_run)
         
         # Restart scheduler with new settings
         await restart_scheduler()
@@ -2481,7 +2484,7 @@ async def get_meter_config():
     
     # If no meter config exists, try to pre-populate from main credentials
     if not config:
-        main_creds = load_credentials()
+        main_creds = await load_credentials()
         config = {
             "enabled": False,
             "email": main_creds.get('username', '') if main_creds else "",
@@ -2506,7 +2509,7 @@ async def save_meter_config_endpoint(config: MeterConfigModel):
     existing = await db.get_meter_config_db() or {}
     
     # Fall back to main credentials if meter-specific fields are empty
-    main_creds = load_credentials()
+    main_creds = await load_credentials()
     
     email = config.email.strip()
     totp_secret = config.totp_secret.strip()
@@ -2567,7 +2570,7 @@ async def test_meter_connection():
     
     # Fall back to main credentials if no meter config
     if not config or not config.get('email'):
-        main_creds = load_credentials()
+        main_creds = await load_credentials()
         if not main_creds:
             raise HTTPException(status_code=400, detail="No credentials found. Please save credentials first.")
         
@@ -2787,13 +2790,7 @@ async def load_tts_config() -> dict:
 
 async def save_tts_config(config: dict):
     """Save TTS configuration to database"""
-    # Using db module for database operations
     await db.save_tts_config_db(config)
-    # Also write to file for backward compatibility
-    try:
-        TTS_CONFIG_FILE.write_text(json.dumps(config))
-    except:
-        pass
 
 
 class TTSConfigModel(BaseModel):

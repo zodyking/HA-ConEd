@@ -1278,6 +1278,86 @@ async def save_realtime_readings_db(readings: List[Dict[str, Any]]):
     await set_app_setting("realtime_readings_cache", readings)
 
 # =============================================================================
+# Credentials (migrated from file to database)
+# =============================================================================
+
+async def get_credentials_db() -> Optional[Dict[str, Any]]:
+    """Get encrypted credentials from database"""
+    return await get_app_setting("credentials")
+
+async def save_credentials_db(credentials: Dict[str, Any]):
+    """Save encrypted credentials to database"""
+    await set_app_setting("credentials", credentials)
+
+# =============================================================================
+# MQTT Config (migrated from file to database)
+# =============================================================================
+
+async def get_mqtt_config_db() -> Optional[Dict[str, Any]]:
+    """Get MQTT config from database"""
+    return await get_app_setting("mqtt_config")
+
+async def save_mqtt_config_db(config: Dict[str, Any]):
+    """Save MQTT config to database"""
+    await set_app_setting("mqtt_config", config)
+
+# =============================================================================
+# App Settings (time offset, etc.) - migrated from file to database
+# =============================================================================
+
+async def get_app_settings_db() -> Optional[Dict[str, Any]]:
+    """Get app settings from database"""
+    return await get_app_setting("app_settings")
+
+async def save_app_settings_db(settings: Dict[str, Any]):
+    """Save app settings to database"""
+    await set_app_setting("app_settings", settings)
+
+# =============================================================================
+# Schedule Config (migrated from file to database)
+# =============================================================================
+
+async def get_schedule_config_db() -> Optional[Dict[str, Any]]:
+    """Get schedule config from database"""
+    return await get_app_setting("schedule_config")
+
+async def save_schedule_config_db(config: Dict[str, Any]):
+    """Save schedule config to database"""
+    await set_app_setting("schedule_config", config)
+
+# =============================================================================
+# Payment State (migrated from file to database)
+# =============================================================================
+
+async def get_payment_state_db() -> Optional[Dict[str, Any]]:
+    """Get last payment state from database"""
+    return await get_app_setting("payment_state")
+
+async def save_payment_state_db(state: Dict[str, Any]):
+    """Save payment state to database"""
+    await set_app_setting("payment_state", state)
+
+# =============================================================================
+# TTS States (migrated from file to database)
+# =============================================================================
+
+async def get_tts_payment_state_db() -> Optional[Dict[str, Any]]:
+    """Get TTS payment state from database"""
+    return await get_app_setting("tts_payment_state")
+
+async def save_tts_payment_state_db(state: Dict[str, Any]):
+    """Save TTS payment state to database"""
+    await set_app_setting("tts_payment_state", state)
+
+async def get_tts_bill_state_db() -> Optional[Dict[str, Any]]:
+    """Get TTS bill state from database"""
+    return await get_app_setting("tts_bill_state")
+
+async def save_tts_bill_state_db(state: Dict[str, Any]):
+    """Save TTS bill state to database"""
+    await set_app_setting("tts_bill_state", state)
+
+# =============================================================================
 # Data Sync
 # =============================================================================
 
