@@ -17,6 +17,15 @@
       </div>
 
       <template v-else>
+        <!-- Test recipient selector -->
+        <div v-if="payeesWithNotify.length" class="notify-test-select-row">
+          <label class="notify-label">Send test notifications to:</label>
+          <select v-model="testPayeeId" class="notify-select">
+            <option value="">All payees with notifications</option>
+            <option v-for="p in payeesWithNotify" :key="p.id" :value="p.id">{{ p.name }}</option>
+          </select>
+        </div>
+
         <!-- New Bill Posted -->
         <div class="notify-section">
           <div class="notify-section-header" @click="toggleSection('new_bill')">
@@ -265,6 +274,7 @@ const newBillInput = ref<HTMLTextAreaElement | null>(null)
 const paymentReceivedInput = ref<HTMLTextAreaElement | null>(null)
 const dueReminderInput = ref<HTMLTextAreaElement | null>(null)
 const balanceChangeInput = ref<HTMLTextAreaElement | null>(null)
+const testPayeeId = ref<number | ''>('')
 
 function toggleSection(section: string) {
   expandedSections[section as keyof typeof expandedSections] = !expandedSections[section as keyof typeof expandedSections]
@@ -297,6 +307,8 @@ function insertVar(eventType: string, variable: string) {
   }, 0)
 }
 
+const payeesWithNotify = ref<{ id: number; name: string; notify_service: string | null }[]>([])
+
 async function loadConfigs() {
   loading.value = true
   try {
@@ -305,6 +317,13 @@ async function loadConfigs() {
     if (haRes.ok) {
       const d = await haRes.json()
       isAddon.value = d.is_addon === true
+    }
+
+    // Load payees with notify service for test dropdown
+    const payeesRes = await fetch(`${getApiBase()}/payee-users`)
+    if (payeesRes.ok) {
+      const d = await payeesRes.json()
+      payeesWithNotify.value = (d.users || []).filter((u: { notify_service: string | null }) => u.notify_service)
     }
 
     // Load notification configs
@@ -368,7 +387,11 @@ async function testNotification(eventType: string) {
   message.value = null
   
   try {
-    const res = await fetch(`${getApiBase()}/notification-config/test/${eventType}`, {
+    let url = `${getApiBase()}/notification-config/test/${eventType}`
+    if (testPayeeId.value !== '') {
+      url += `?payee_id=${testPayeeId.value}`
+    }
+    const res = await fetch(url, {
       method: 'POST'
     })
     const d = await res.json()
@@ -400,6 +423,10 @@ onMounted(() => {
 .notify-addon-notice { display: flex; gap: 1rem; padding: 1.25rem; background: #fff3e0; border: 1px solid #ffcc80; border-radius: 12px; }
 .notify-notice-icon { font-size: 1.5rem; }
 .notify-addon-notice p { margin: 0.5rem 0 0; font-size: 0.9rem; color: #666; }
+
+.notify-test-select-row { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem; padding: 0.75rem 1rem; background: #e3f2fd; border-radius: 8px; border: 1px solid #90caf9; }
+.notify-test-select-row .notify-label { margin: 0; font-weight: 500; white-space: nowrap; }
+.notify-select { padding: 0.4rem 0.75rem; border: 1px solid #ddd; border-radius: 6px; font-size: 0.9rem; min-width: 200px; }
 
 .notify-section { background: white; border: 1px solid #e0e0e0; border-radius: 12px; overflow: hidden; }
 .notify-section-header { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; padding: 1rem 1.25rem; cursor: pointer; background: #fafafa; border-bottom: 1px solid transparent; transition: background 0.15s; }
