@@ -1393,10 +1393,8 @@ async def sync_from_scrape(data: Dict[str, Any]):
         bill_history = data.get("bill_history") or {}
         ledger = bill_history.get("ledger") or []
         if ledger:
-            # Build map: (bill_cycle_date, month_range) -> bill_id for payments
-            cycle_to_bill: Dict[str, int] = {}
-            
-            # First pass: upsert all bills
+            # First pass: upsert all bills, collect (parsed_date, bill_id) for matching
+            bills_by_date: List[tuple] = []  # (datetime, bill_id)
             for item in ledger:
                 if item.get("type") != "bill":
                     continue
@@ -1410,15 +1408,15 @@ async def sync_from_scrape(data: Dict[str, Any]):
                     month_range=month_range,
                     bill_total=item.get("bill_total")
                 )
-                key = f"{bill_cycle}|{month_range}"
-                if key not in cycle_to_bill:
-                    cycle_to_bill[key] = bill.id
-                # Also map by cycle only for payments that may not have month_range
-                cycle_key = bill_cycle
-                if cycle_key not in cycle_to_bill:
-                    cycle_to_bill[cycle_key] = bill.id
+                parsed = parse_date(bill_cycle)
+                if parsed:
+                    bills_by_date.append((parsed, bill.id))
             
-            # Second pass: upsert all payments, link to bills by bill_cycle_date
+            # Sort bills by cycle date ascending for "find closest" logic
+            bills_by_date.sort(key=lambda x: x[0])
+            
+            # Second pass: upsert payments, match to bill by date proximity
+            # Payment for cycle X goes to bill with cycle date <= X (most recent such bill)
             payment_order = 0
             for item in ledger:
                 if item.get("type") != "payment":
@@ -1426,7 +1424,16 @@ async def sync_from_scrape(data: Dict[str, Any]):
                 bill_cycle = item.get("bill_cycle_date") or ""
                 if not bill_cycle and not item.get("amount"):
                     continue
-                bill_id = cycle_to_bill.get(bill_cycle)
+                bill_id = None
+                payment_dt = parse_date(bill_cycle)
+                if payment_dt and bills_by_date:
+                    # Find bill with largest cycle_date <= payment date
+                    candidates = [(d, bid) for d, bid in bills_by_date if d <= payment_dt]
+                    if candidates:
+                        bill_id = candidates[-1][1]
+                    else:
+                        # Payment before any bill cycle - use earliest bill
+                        bill_id = bills_by_date[0][1]
                 await upsert_payment(
                     payment_date=item.get("payment_date") or "",
                     description=item.get("description") or "Payment Received",
@@ -1626,8 +1633,8 @@ async def wipe_bills_and_payments():
     
     logger.info("Wiped all bills and payments")
 
-async def get_all_bills_with_payments() -> List[Dict[str, Any]]:
-    """Get all bills with their payments for audit"""
+async def get_all_bills_with_payments() -> Dict[str, Any]:
+    """Get all bills with their payments and orphan payments for audit tab"""
     await ensure_connected()
     
     bills = await db.bill.find_many(
@@ -1635,7 +1642,7 @@ async def get_all_bills_with_payments() -> List[Dict[str, Any]]:
         include={"payments": {"include": {"payeeUser": True}}}
     )
     
-    return [
+    bills_data = [
         {
             "id": b.id,
             "month_range": b.monthRange,
@@ -1647,12 +1654,32 @@ async def get_all_bills_with_payments() -> List[Dict[str, Any]]:
                     "payment_date": p.paymentDate.strftime("%m/%d/%Y") if p.paymentDate else None,
                     "amount": f"${decimal_to_float(p.amount):.2f}" if p.amount else None,
                     "payee_name": p.payeeUser.name if p.payeeUser else None,
+                    "bill_id": p.billId,
                 }
                 for p in b.payments
             ]
         }
         for b in bills
     ]
+    
+    orphan_payments = await db.payment.find_many(
+        where={"billId": None},
+        include={"payeeUser": True},
+        order={"paymentDate": "desc"}
+    )
+    
+    orphan_data = [
+        {
+            "id": p.id,
+            "payment_date": p.paymentDate.strftime("%m/%d/%Y") if p.paymentDate else None,
+            "amount": f"${decimal_to_float(p.amount):.2f}" if p.amount else None,
+            "payee_name": p.payeeUser.name if p.payeeUser else None,
+            "bill_id": None,
+        }
+        for p in orphan_payments
+    ]
+    
+    return {"bills": bills_data, "orphan_payments": orphan_data}
 
 async def get_payments_by_user(user_id: int) -> List[Dict[str, Any]]:
     """Get all payments for a specific user"""
