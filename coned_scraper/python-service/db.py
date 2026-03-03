@@ -10,6 +10,7 @@ from typing import Optional, List, Dict, Any
 from decimal import Decimal
 
 from prisma import Prisma
+from prisma import Json
 from prisma.models import (
     Bill, Payment, BillDetails, BillDocument, PayeeUser, UserCard,
     AccountBalanceHistory, ScrapedData, Log, ScrapeHistory, AppSetting
@@ -337,8 +338,8 @@ async def upsert_bill_details(
         "totalFromBillingPeriod": Decimal(str(total_from_billing_period)) if total_from_billing_period is not None else None,
         "balanceFromPreviousBill": Decimal(str(balance_from_previous_bill)) if balance_from_previous_bill is not None else None,
         "billingDays": billing_days,
-        "supplyCharges": supply_charges,
-        "deliveryCharges": delivery_charges,
+        "supplyCharges": Json(supply_charges) if supply_charges is not None else None,
+        "deliveryCharges": Json(delivery_charges) if delivery_charges is not None else None,
         "billingPeriodStart": start_dt,
         "billingPeriodEnd": end_dt,
     }
@@ -1063,7 +1064,7 @@ async def save_scraped_data(data: Dict[str, Any], status: str, error_message: Op
     
     record = await db.scrapeddata.create(
         data={
-            "data": data,
+            "data": Json(data),
             "status": status,
             "errorMessage": error_message,
             "screenshotPath": screenshot_path
@@ -1220,10 +1221,13 @@ async def set_app_setting(key: str, value: Any):
     
     existing = await db.appsetting.find_unique(where={"key": key})
     
+    # Wrap value with Json() for Prisma JSON fields
+    json_value = Json(value)
+    
     if existing:
-        await db.appsetting.update(where={"key": key}, data={"value": value})
+        await db.appsetting.update(where={"key": key}, data={"value": json_value})
     else:
-        await db.appsetting.create(data={"key": key, "value": value})
+        await db.appsetting.create(data={"key": key, "value": json_value})
 
 async def get_tts_config_db() -> Optional[Dict[str, Any]]:
     """Get TTS config from database"""

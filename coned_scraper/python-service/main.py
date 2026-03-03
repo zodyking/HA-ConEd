@@ -29,7 +29,7 @@ import db
 app = FastAPI(title="Con Edison API")
 
 # Code version for deployment verification
-CODE_VERSION = "1.3.1-postgres"
+CODE_VERSION = "1.3.2-postgres"
 
 @app.on_event("startup")
 async def startup():
@@ -2590,13 +2590,12 @@ async def test_meter_connection():
 async def get_meter_reading():
     """Get latest meter reading with forecast data - uses cached data for immediate load"""
     from meter_service import get_meter_service
-    # Using db module for database operations
     
     service = get_meter_service()
-    reading = service.get_cached_reading()
+    reading = await service.get_cached_reading()
     
     # Get cached forecast for immediate load (no network call)
-    forecast = service.get_cached_forecast() if service.is_enabled() else None
+    forecast = await service.get_cached_forecast() if service.is_enabled() else None
     
     # Calculate cost using kwh_cost from latest bill
     cost = None
