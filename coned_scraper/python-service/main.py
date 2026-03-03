@@ -29,7 +29,7 @@ import db
 app = FastAPI(title="Con Edison API")
 
 # Code version for deployment verification
-CODE_VERSION = "1.3.5-postgres"
+CODE_VERSION = "1.3.6-postgres"
 
 @app.on_event("startup")
 async def startup():
@@ -1023,7 +1023,7 @@ async def start_scraper():
     
     from browser_automation import perform_login
     
-    credentials = load_credentials()
+    credentials = await load_credentials()
     if not credentials:
         await db.add_scrape_history(False, "No credentials found", "credentials_check", 0)
         raise HTTPException(status_code=404, detail="No credentials found. Please configure settings first.")
@@ -2545,11 +2545,11 @@ async def save_meter_config_endpoint(config: MeterConfigModel):
     await service.stop_polling()
     
     if new_config['enabled']:
-        # Decrypt password for initialization
+        # Decrypt password for initialization and mark as plain
         init_config = new_config.copy()
         if init_config.get('password'):
             try:
-                init_config['password'] = decrypt_data(init_config['password'])
+                init_config['password'] = 'plain:' + decrypt_data(init_config['password'])
             except:
                 pass
         
@@ -2574,18 +2574,20 @@ async def test_meter_connection():
         if not main_creds:
             raise HTTPException(status_code=400, detail="No credentials found. Please save credentials first.")
         
+        # Password from load_credentials() is already decrypted, mark as plain
         config = {
             'email': main_creds.get('username', ''),
-            'password': main_creds.get('password', ''),
+            'password': 'plain:' + main_creds.get('password', ''),
             'totp_secret': main_creds.get('totp_secret', ''),
             'enabled': True,
             'polling_interval': 15
         }
     else:
-        # Decrypt password
+        # Decrypt password from database and mark as plain
         if config.get('password'):
             try:
-                config['password'] = decrypt_data(config['password'])
+                decrypted = decrypt_data(config['password'])
+                config['password'] = 'plain:' + decrypted
             except:
                 raise HTTPException(status_code=400, detail="Failed to decrypt password")
 

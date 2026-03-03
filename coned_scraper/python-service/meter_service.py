@@ -63,13 +63,18 @@ class MeterService:
                 logger.warning("Meter service not fully configured")
                 return False
             
-            # Decrypt password if encrypted
+            # Handle password - may be plain text (prefixed with 'plain:') or encrypted
             password = config.get('password', '')
-            if password and not password.startswith('plain:'):
+            if password.startswith('plain:'):
+                # Already decrypted, strip the prefix
+                password = password[6:]
+            elif password:
+                # Try to decrypt
                 try:
                     from main import decrypt_data
                     password = decrypt_data(password)
                 except Exception:
+                    # Failed to decrypt, use as-is
                     pass
             
             # Close existing session if any
@@ -446,11 +451,11 @@ async def init_meter_service():
     config = await db.get_meter_config_db()
     
     if config and config.get('enabled'):
-        # Decrypt password for opower
+        # Decrypt password for opower and mark as plain
         if config.get('password'):
             try:
                 from main import decrypt_data
-                config['password'] = decrypt_data(config['password'])
+                config['password'] = 'plain:' + decrypt_data(config['password'])
             except Exception:
                 pass
         
