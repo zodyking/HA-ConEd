@@ -29,7 +29,7 @@ import db
 app = FastAPI(title="Con Edison API")
 
 # Code version for deployment verification
-CODE_VERSION = "1.3.3-postgres"
+CODE_VERSION = "1.3.4-postgres"
 
 @app.on_event("startup")
 async def startup():
@@ -2476,18 +2476,23 @@ class MeterConfigModel(BaseModel):
 @app.get("/api/meter-config")
 async def get_meter_config():
     """Get meter tracking configuration (password masked)"""
-    # Using db module for database operations
     
-    config = await db.get_meter_config_db() or {
-        "enabled": False,
-        "email": "",
-        "password": "",
-        "totp_secret": "",
-        "polling_interval": 15
-    }
+    config = await db.get_meter_config_db()
     
-    if config.get('password'):
-        config['password'] = '••••••••'
+    # If no meter config exists, try to pre-populate from main credentials
+    if not config:
+        main_creds = load_credentials()
+        config = {
+            "enabled": False,
+            "email": main_creds.get('username', '') if main_creds else "",
+            "password": "••••••••" if main_creds and main_creds.get('password') else "",
+            "totp_secret": main_creds.get('totp_secret', '') if main_creds else "",
+            "polling_interval": 15,
+            "uses_main_credentials": True
+        }
+    else:
+        if config.get('password'):
+            config['password'] = '••••••••'
     
     return config
 
@@ -2495,25 +2500,38 @@ async def get_meter_config():
 @app.post("/api/meter-config")
 async def save_meter_config_endpoint(config: MeterConfigModel):
     """Save meter tracking configuration"""
-    # Using db module for database operations, save_meter_config_db
     from meter_service import get_meter_service
     
     # Load existing config to preserve password if not provided
     existing = await db.get_meter_config_db() or {}
     
+    # Fall back to main credentials if meter-specific fields are empty
+    main_creds = load_credentials()
+    
+    email = config.email.strip()
+    totp_secret = config.totp_secret.strip()
+    
+    # Use main credentials as fallback
+    if not email and main_creds:
+        email = main_creds.get('username', '')
+    if not totp_secret and main_creds:
+        totp_secret = main_creds.get('totp_secret', '')
+    
     new_config = {
         "enabled": config.enabled,
-        "email": config.email.strip(),
-        "totp_secret": config.totp_secret.strip(),
+        "email": email,
+        "totp_secret": totp_secret,
         "polling_interval": config.polling_interval,
         "updated_at": utc_now_iso()
     }
     
-    # Handle password - keep existing if masked or empty
+    # Handle password - keep existing if masked or empty, or use main credentials
     if config.password and config.password != '••••••••':
         new_config['password'] = encrypt_data(config.password)
     elif existing.get('password'):
         new_config['password'] = existing['password']
+    elif main_creds and main_creds.get('password'):
+        new_config['password'] = encrypt_data(main_creds['password'])
     else:
         new_config['password'] = ''
     
@@ -2546,15 +2564,27 @@ async def test_meter_connection():
     from meter_service import get_meter_service
 
     config = await db.get_meter_config_db()
-    if not config:
-        raise HTTPException(status_code=400, detail="Meter not configured")
-
-    # Decrypt password
-    if config.get('password'):
-        try:
-            config['password'] = decrypt_data(config['password'])
-        except:
-            raise HTTPException(status_code=400, detail="Failed to decrypt password")
+    
+    # Fall back to main credentials if no meter config
+    if not config or not config.get('email'):
+        main_creds = load_credentials()
+        if not main_creds:
+            raise HTTPException(status_code=400, detail="No credentials found. Please save credentials first.")
+        
+        config = {
+            'email': main_creds.get('username', ''),
+            'password': main_creds.get('password', ''),
+            'totp_secret': main_creds.get('totp_secret', ''),
+            'enabled': True,
+            'polling_interval': 15
+        }
+    else:
+        # Decrypt password
+        if config.get('password'):
+            try:
+                config['password'] = decrypt_data(config['password'])
+            except:
+                raise HTTPException(status_code=400, detail="Failed to decrypt password")
 
     service = get_meter_service()
     
