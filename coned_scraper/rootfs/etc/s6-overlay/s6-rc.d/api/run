@@ -4,12 +4,12 @@
 # ConEd Scraper - Python API (FastAPI + Playwright)
 # ==============================================================================
 
-# Read configurable ports with defaults
-API_PORT=$(bashio::config 'api_port' 2>/dev/null || echo "8000")
-POSTGRES_PORT=$(bashio::config 'postgres_port' 2>/dev/null || echo "5432")
+# Fixed ports (internal use)
+API_PORT="8000"
+POSTGRES_PORT="5432"
 
 bashio::log.info "============================================"
-bashio::log.info "CON EDISON API SERVICE v1.2.1"
+bashio::log.info "CON EDISON API SERVICE v1.3.0"
 bashio::log.info "============================================"
 bashio::log.info "API Port: ${API_PORT}, PostgreSQL Port: ${POSTGRES_PORT}"
 

@@ -6,14 +6,9 @@
 
 bashio::log.info "ConEd Scraper initializing..."
 
-# Read configurable ports with defaults
-POSTGRES_PORT=$(bashio::config 'postgres_port' 2>/dev/null || echo "5432")
-
 # Set up environment variables
-export DATABASE_URL="postgresql://coned:coned@localhost:${POSTGRES_PORT}/coned"
+export DATABASE_URL="postgresql://coned:coned@localhost:5432/coned"
 export DATA_DIR=/config
-
-bashio::log.info "PostgreSQL port: ${POSTGRES_PORT}"
 
 # Create necessary directories
 mkdir -p /config/postgres/data

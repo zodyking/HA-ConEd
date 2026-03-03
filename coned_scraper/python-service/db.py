@@ -478,12 +478,13 @@ async def get_latest_bill_id_with_document() -> Optional[int]:
     """Get the most recent bill ID that has a document"""
     await ensure_connected()
     
-    doc = await db.billdocument.find_first(
-        include={"bill": True},
-        order_by={"bill": {"billCycleDate": "desc"}}
+    bill = await db.bill.find_first(
+        where={"document": {"isNot": None}},
+        order_by={"billCycleDate": "desc"},
+        include={"document": True}
     )
     
-    return doc.billId if doc else None
+    return bill.id if bill else None
 
 async def delete_bill_document(bill_id: int) -> bool:
     """Delete bill document"""

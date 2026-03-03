@@ -6,8 +6,8 @@
 
 exec 2>&1
 
-# Read configurable port with default
-POSTGRES_PORT=$(bashio::config 'postgres_port' 2>/dev/null || echo "5432")
+# Fixed port (internal use)
+POSTGRES_PORT="5432"
 
 bashio::log.info "============================================"
 bashio::log.info "POSTGRESQL SERVICE STARTING"

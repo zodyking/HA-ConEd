@@ -6,9 +6,9 @@
 
 exec 2>&1
 
-# Read configurable ports with defaults
-PRISMA_STUDIO_PORT=$(bashio::config 'prisma_studio_port' 2>/dev/null || echo "5555")
-POSTGRES_PORT=$(bashio::config 'postgres_port' 2>/dev/null || echo "5432")
+# Fixed ports (internal use)
+PRISMA_STUDIO_PORT="5555"
+POSTGRES_PORT="5432"
 
 cd /app/python-service
 
