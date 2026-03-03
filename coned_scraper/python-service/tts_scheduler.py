@@ -231,6 +231,7 @@ class TTSScheduler:
             import db
             import aiohttp
             import os
+            from meter_service import get_meter_service
             
             schedule_config = await self.load_schedule_config()
             tts_config = await self.load_tts_config()
@@ -285,66 +286,91 @@ class TTSScheduler:
             if bill_details:
                 kwh_val = bill_details.get("kwh_used")
                 if kwh_val:
-                    last_bill_kwh = f"{kwh_val} kWh"
+                    # Format as whole number for TTS readability
+                    last_bill_kwh = f"{int(round(kwh_val))} kWh"
                 kwh_cost = bill_details.get("kwh_cost")
                 # Use due_date from bill_details if not already set
                 if not due_date:
-                    due_date = bill_details.get("due_date", "") or ""
+                    due_date = format_date_for_tts(bill_details.get("due_date", "") or "")
             
-            # Fetch current and future usage from HA sensors
+            # Initialize usage variables
             current_usage_kwh = ""
             current_usage_cost = ""
             projected_usage_kwh = ""
             projected_usage_cost = ""
             
-            token = os.environ.get("SUPERVISOR_TOKEN")
-            if token:
-                async with aiohttp.ClientSession() as session:
-                    # Fetch current usage sensor
-                    if current_usage_sensor and current_usage_sensor.strip():
-                        try:
-                            async with session.get(
-                                f"http://supervisor/core/api/states/{current_usage_sensor.strip()}",
-                                headers={"Authorization": f"Bearer {token}"},
-                            ) as resp:
-                                if resp.status == 200:
-                                    state_data = await resp.json()
-                                    sensor_state = state_data.get("state", "")
-                                    unit = state_data.get("attributes", {}).get("unit_of_measurement", "kWh")
-                                    if sensor_state and sensor_state not in ("unknown", "unavailable"):
-                                        try:
-                                            kwh_value = float(sensor_state)
-                                            current_usage_kwh = f"{kwh_value:.1f} {unit}"
-                                            if kwh_cost:
-                                                cost_value = kwh_value * kwh_cost
-                                                current_usage_cost = f"${cost_value:.2f}"
-                                        except ValueError:
-                                            current_usage_kwh = f"{sensor_state} {unit}"
-                        except Exception as e:
-                            logger.warning(f"Failed to fetch current usage sensor: {e}")
-                    
-                    # Fetch future usage projection sensor
-                    if future_usage_sensor and future_usage_sensor.strip():
-                        try:
-                            async with session.get(
-                                f"http://supervisor/core/api/states/{future_usage_sensor.strip()}",
-                                headers={"Authorization": f"Bearer {token}"},
-                            ) as resp:
-                                if resp.status == 200:
-                                    state_data = await resp.json()
-                                    sensor_state = state_data.get("state", "")
-                                    unit = state_data.get("attributes", {}).get("unit_of_measurement", "kWh")
-                                    if sensor_state and sensor_state not in ("unknown", "unavailable"):
-                                        try:
-                                            kwh_value = float(sensor_state)
-                                            projected_usage_kwh = f"{kwh_value:.1f} {unit}"
-                                            if kwh_cost:
-                                                cost_value = kwh_value * kwh_cost
-                                                projected_usage_cost = f"${cost_value:.2f}"
-                                        except ValueError:
-                                            projected_usage_kwh = f"{sensor_state} {unit}"
-                        except Exception as e:
-                            logger.warning(f"Failed to fetch future usage sensor: {e}")
+            # Check if meter tracking is enabled - use addon's meter data directly
+            meter_service = get_meter_service()
+            if meter_service.is_enabled():
+                try:
+                    forecast = await meter_service.get_cached_forecast()
+                    if forecast:
+                        # Current cycle usage (usage_to_date)
+                        usage_to_date = forecast.get("usage_to_date")
+                        if usage_to_date is not None:
+                            current_usage_kwh = f"{int(round(usage_to_date))} kWh"
+                            if kwh_cost:
+                                cost_val = usage_to_date * kwh_cost
+                                current_usage_cost = f"${cost_val:.2f}"
+                        
+                        # Forecasted usage
+                        forecasted = forecast.get("forecasted_usage")
+                        if forecasted is not None:
+                            projected_usage_kwh = f"{int(round(forecasted))} kWh"
+                            if kwh_cost:
+                                cost_val = forecasted * kwh_cost
+                                projected_usage_cost = f"${cost_val:.2f}"
+                except Exception as e:
+                    logger.warning(f"Failed to get meter service data: {e}")
+            
+            # Fallback to custom sensors if meter tracking not enabled
+            elif current_usage_sensor or future_usage_sensor:
+                token = os.environ.get("SUPERVISOR_TOKEN")
+                if token:
+                    async with aiohttp.ClientSession() as session:
+                        # Fetch current usage sensor
+                        if current_usage_sensor and current_usage_sensor.strip():
+                            try:
+                                async with session.get(
+                                    f"http://supervisor/core/api/states/{current_usage_sensor.strip()}",
+                                    headers={"Authorization": f"Bearer {token}"},
+                                ) as resp:
+                                    if resp.status == 200:
+                                        state_data = await resp.json()
+                                        sensor_state = state_data.get("state", "")
+                                        if sensor_state and sensor_state not in ("unknown", "unavailable"):
+                                            try:
+                                                kwh_value = float(sensor_state)
+                                                current_usage_kwh = f"{int(round(kwh_value))} kWh"
+                                                if kwh_cost:
+                                                    cost_value = kwh_value * kwh_cost
+                                                    current_usage_cost = f"${cost_value:.2f}"
+                                            except ValueError:
+                                                current_usage_kwh = f"{sensor_state} kWh"
+                            except Exception as e:
+                                logger.warning(f"Failed to fetch current usage sensor: {e}")
+                        
+                        # Fetch future usage projection sensor
+                        if future_usage_sensor and future_usage_sensor.strip():
+                            try:
+                                async with session.get(
+                                    f"http://supervisor/core/api/states/{future_usage_sensor.strip()}",
+                                    headers={"Authorization": f"Bearer {token}"},
+                                ) as resp:
+                                    if resp.status == 200:
+                                        state_data = await resp.json()
+                                        sensor_state = state_data.get("state", "")
+                                        if sensor_state and sensor_state not in ("unknown", "unavailable"):
+                                            try:
+                                                kwh_value = float(sensor_state)
+                                                projected_usage_kwh = f"{int(round(kwh_value))} kWh"
+                                                if kwh_cost:
+                                                    cost_value = kwh_value * kwh_cost
+                                                    projected_usage_cost = f"${cost_value:.2f}"
+                                            except ValueError:
+                                                projected_usage_kwh = f"{sensor_state} kWh"
+                            except Exception as e:
+                                logger.warning(f"Failed to fetch future usage sensor: {e}")
             
             # Build placeholder values
             placeholders = {

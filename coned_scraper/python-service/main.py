@@ -29,7 +29,7 @@ import db
 app = FastAPI(title="Con Edison API")
 
 # Code version for deployment verification
-CODE_VERSION = "1.3.30"
+CODE_VERSION = "1.3.31"
 
 @app.on_event("startup")
 async def startup():
@@ -2509,14 +2509,67 @@ def build_tts_message(config: dict, key: str, **kwargs) -> str:
 
 @app.post("/api/tts/test")
 async def test_tts():
-    """Send test TTS: direct HA API when addon, else MQTT fallback"""
+    """Send test TTS using real account data: direct HA API when addon, else MQTT fallback"""
     config = await load_tts_config()
     if not config.get("enabled"):
         raise HTTPException(status_code=400, detail="TTS is not enabled")
     media_player = (config.get("media_player") or "").strip()
     if not media_player:
         raise HTTPException(status_code=400, detail="Media player not configured")
-    full_msg = f"{config.get('prefix', DEFAULT_TTS_PREFIX)}, Con Edison test message."
+    
+    # Build test message using real account data
+    prefix = config.get('prefix', DEFAULT_TTS_PREFIX)
+    
+    try:
+        ledger = await db.get_ledger_data()
+        bills = ledger.get("bills", [])
+        latest_bill = bills[0] if bills else {}
+        
+        # Get balance
+        balance = ledger.get("account_balance") or ledger.get("total_balance", "")
+        if isinstance(balance, (int, float)):
+            balance = f"${balance:.2f}"
+        
+        # Get latest bill amount
+        bill_amount = latest_bill.get("bill_total", "") or latest_bill.get("amount", "N/A")
+        
+        # Get due date and format for TTS
+        due_date_raw = latest_bill.get("due_date", "")
+        due_date = ""
+        if due_date_raw:
+            try:
+                from dateutil import parser as date_parser
+                dt = date_parser.parse(due_date_raw)
+                due_date = dt.strftime("%B %d").replace(" 0", " ")
+            except:
+                due_date = due_date_raw
+        
+        # Get kWh used from bill details
+        last_bill_kwh = ""
+        latest_bill_id = latest_bill.get("id")
+        if latest_bill_id:
+            bill_details = await db.get_bill_details(latest_bill_id)
+            if bill_details:
+                kwh_val = bill_details.get("kwh_used")
+                if kwh_val:
+                    last_bill_kwh = f"{int(round(kwh_val))} kWh"
+        
+        # Build message with real data
+        if balance and bill_amount:
+            full_msg = f"{prefix} Your account balance is {balance}."
+            if bill_amount and bill_amount != "N/A":
+                full_msg += f" Your latest bill is {bill_amount}"
+                if last_bill_kwh:
+                    full_msg += f", using {last_bill_kwh}"
+                if due_date:
+                    full_msg += f", due {due_date}"
+                full_msg += "."
+        else:
+            full_msg = f"{prefix} Con Edison test notification. Your account data will appear here."
+    except Exception as e:
+        await db.add_log("warning", f"Test TTS failed to get real data: {e}")
+        full_msg = f"{prefix} Con Edison test notification."
+    
     volume = config.get("volume", 0.7)
     wait_for_idle = config.get("wait_for_idle", True)
     tts_service = config.get("tts_service", "tts.google_translate_say")
