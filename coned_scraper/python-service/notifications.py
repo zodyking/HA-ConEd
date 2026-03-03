@@ -138,17 +138,26 @@ async def notify_due_reminder(
     days_until: int
 ) -> int:
     """Send due date reminder notification to all enabled payees."""
+    days_until_text = "today" if days_until == 0 else f"in {days_until} days"
     return await send_payee_notifications("due_reminder", {
         "amount": amount,
         "due_date": due_date,
         "days_until": str(days_until),
+        "days_until_text": days_until_text,
     })
 
 
 async def check_and_send_due_reminders() -> int:
     """
     Check for upcoming bill due dates and send reminders.
-    Called by scheduler.
+    
+    Sends a reminder every day from (due_date - days_before) through due_date:
+    - Day 3 before: "due in 3 days"
+    - Day 2 before: "due in 2 days"
+    - Day 1 before: "due in 1 day"
+    - Due date: "due today"
+    
+    Skips if already sent for this bill today (avoids duplicates).
     """
     import db
     from datetime import datetime, timedelta
@@ -166,6 +175,7 @@ async def check_and_send_due_reminders() -> int:
         return 0
     
     latest_bill = ledger["latest_bill"]
+    bill_id = latest_bill.get("id")
     due_date_str = latest_bill.get("due_date")
     if not due_date_str:
         return 0
@@ -184,17 +194,32 @@ async def check_and_send_due_reminders() -> int:
             logger.warning(f"Could not parse due date: {due_date_str}")
             return 0
         
-        # Check if we should send reminder
-        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-        reminder_date = due_date - timedelta(days=days_before)
+        # Normalize to date for comparison
+        from datetime import date
+        today = date.today()
+        due_date_date = due_date.date()
+        reminder_start = due_date_date - timedelta(days=days_before)
         
-        if today.date() == reminder_date.date():
-            days_until = (due_date - today).days
-            return await notify_due_reminder(
-                amount=latest_bill.get("bill_total", "N/A"),
-                due_date=due_date_str,
-                days_until=days_until
-            )
+        # Send if today is within [reminder_start, due_date] inclusive
+        if reminder_start <= today <= due_date_date:
+            # Avoid sending twice the same day
+            if bill_id and await db.due_reminder_already_sent_today(bill_id):
+                return 0
+            
+            days_until = (due_date_date - today).days  # 0 = due today
+            days_until_text = "today" if days_until == 0 else f"in {days_until} days"
+            
+            sent = await send_payee_notifications("due_reminder", {
+                "amount": latest_bill.get("bill_total", "N/A"),
+                "due_date": due_date_str,
+                "days_until": str(days_until),
+                "days_until_text": days_until_text,
+            })
+            
+            if sent > 0 and bill_id:
+                await db.record_due_reminder_sent(bill_id)
+            
+            return sent
     except Exception as e:
         logger.error(f"Error checking due reminders: {e}")
     

@@ -33,11 +33,52 @@ def utc_now_iso() -> str:
 # Connection Management
 # =============================================================================
 
+async def run_migrations():
+    """Run pending database migrations on startup."""
+    try:
+        import asyncpg
+        import os
+        
+        database_url = os.environ.get("DATABASE_URL", "")
+        if not database_url:
+            logger.warning("DATABASE_URL not set, skipping migrations")
+            return
+        
+        conn = await asyncpg.connect(database_url)
+        try:
+            # Migration: Add reminder_send_time to notification_configs
+            await conn.execute("""
+                ALTER TABLE notification_configs 
+                ADD COLUMN IF NOT EXISTS reminder_send_time TEXT DEFAULT '09:00'
+            """)
+            
+            # Migration: Create due_reminder_sent table
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS due_reminder_sent (
+                    id SERIAL PRIMARY KEY,
+                    bill_id INTEGER NOT NULL,
+                    sent_date TIMESTAMP(3) NOT NULL,
+                    created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            await conn.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS due_reminder_sent_bill_id_sent_date_key 
+                ON due_reminder_sent(bill_id, sent_date)
+            """)
+            
+            logger.info("Database migrations completed successfully")
+        finally:
+            await conn.close()
+    except Exception as e:
+        logger.warning(f"Migration check failed (may already exist): {e}")
+
+
 async def connect():
     """Connect to the database"""
     if not db.is_connected():
         try:
             logger.info("Connecting to PostgreSQL database...")
+            await run_migrations()
             await db.connect()
             logger.info("SUCCESS: Connected to PostgreSQL database")
         except Exception as e:
@@ -1072,8 +1113,9 @@ DEFAULT_NOTIFICATION_CONFIGS = [
     {
         "event_type": "due_reminder",
         "title": "Con Edison Reminder",
-        "template": "Your bill of {amount} is due in {days_until} days on {due_date}",
+        "template": "Your bill of {amount} is due {days_until_text} on {due_date}",
         "days_before_due": 3,
+        "reminder_send_time": "09:00",
     },
     {
         "event_type": "balance_change",
@@ -1098,6 +1140,7 @@ async def get_notification_config(event_type: str) -> Optional[Dict[str, Any]]:
         "title": config.title,
         "template": config.template,
         "days_before_due": config.daysBeforeDue,
+        "reminder_send_time": getattr(config, "reminderSendTime", None) or "09:00",
     }
 
 async def get_all_notification_configs() -> List[Dict[str, Any]]:
@@ -1108,15 +1151,16 @@ async def get_all_notification_configs() -> List[Dict[str, Any]]:
     
     if not configs:
         for default_config in DEFAULT_NOTIFICATION_CONFIGS:
-            await db.notificationconfig.create(
-                data={
-                    "eventType": default_config["event_type"],
-                    "title": default_config["title"],
-                    "template": default_config["template"],
-                    "daysBeforeDue": default_config.get("days_before_due"),
-                    "enabled": True,
-                }
-            )
+            create_data = {
+                "eventType": default_config["event_type"],
+                "title": default_config["title"],
+                "template": default_config["template"],
+                "daysBeforeDue": default_config.get("days_before_due"),
+                "enabled": True,
+            }
+            if "reminder_send_time" in default_config:
+                create_data["reminderSendTime"] = default_config["reminder_send_time"]
+            await db.notificationconfig.create(data=create_data)
         configs = await db.notificationconfig.find_many()
     
     return [
@@ -1127,6 +1171,7 @@ async def get_all_notification_configs() -> List[Dict[str, Any]]:
             "title": c.title,
             "template": c.template,
             "days_before_due": c.daysBeforeDue,
+            "reminder_send_time": getattr(c, "reminderSendTime", None) or "09:00",
         }
         for c in configs
     ]
@@ -1136,7 +1181,8 @@ async def update_notification_config(
     enabled: Optional[bool] = None,
     title: Optional[str] = None,
     template: Optional[str] = None,
-    days_before_due: Optional[int] = None
+    days_before_due: Optional[int] = None,
+    reminder_send_time: Optional[str] = None
 ) -> bool:
     """Update a notification config"""
     await ensure_connected()
@@ -1150,6 +1196,8 @@ async def update_notification_config(
         data["template"] = template
     if days_before_due is not None:
         data["daysBeforeDue"] = days_before_due
+    if reminder_send_time is not None:
+        data["reminderSendTime"] = reminder_send_time
     
     if not data:
         return False
@@ -1172,15 +1220,49 @@ async def ensure_notification_configs_exist():
             where={"eventType": default_config["event_type"]}
         )
         if not existing:
-            await db.notificationconfig.create(
-                data={
-                    "eventType": default_config["event_type"],
-                    "title": default_config["title"],
-                    "template": default_config["template"],
-                    "daysBeforeDue": default_config.get("days_before_due"),
-                    "enabled": True,
-                }
-            )
+            create_data = {
+                "eventType": default_config["event_type"],
+                "title": default_config["title"],
+                "template": default_config["template"],
+                "daysBeforeDue": default_config.get("days_before_due"),
+                "enabled": True,
+            }
+            if "reminder_send_time" in default_config:
+                create_data["reminderSendTime"] = default_config["reminder_send_time"]
+            await db.notificationconfig.create(data=create_data)
+
+
+async def due_reminder_already_sent_today(bill_id: int) -> bool:
+    """Check if we already sent a due reminder for this bill today."""
+    await ensure_connected()
+    try:
+        now = datetime.now(timezone.utc)
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        tomorrow_start = today_start + timedelta(days=1)
+        existing = await db.dueremindersent.find_first(
+            where={
+                "billId": bill_id,
+                "sentDate": {"gte": today_start, "lt": tomorrow_start}
+            }
+        )
+        return existing is not None
+    except Exception as e:
+        logger.warning(f"due_reminder_already_sent_today check failed (table may not exist): {e}")
+        return False
+
+
+async def record_due_reminder_sent(bill_id: int) -> None:
+    """Record that we sent a due reminder for this bill today."""
+    await ensure_connected()
+    try:
+        now = datetime.now(timezone.utc)
+        today_noon = now.replace(hour=12, minute=0, second=0, microsecond=0)
+        await db.dueremindersent.create(
+            data={"billId": bill_id, "sentDate": today_noon}
+        )
+    except Exception as e:
+        logger.warning(f"record_due_reminder_sent failed: {e}")
+
 
 # =============================================================================
 # User Cards
@@ -1290,6 +1372,24 @@ async def get_current_balance() -> Optional[Dict[str, Any]]:
         "balance": f"${decimal_to_float(balance.balance):.2f}",
         "balance_numeric": decimal_to_float(balance.balance),
         "scraped_at": balance.scrapedAt.isoformat() if balance.scrapedAt else None,
+    }
+
+
+async def get_previous_balance() -> Optional[Dict[str, Any]]:
+    """Get the balance record before the current one (for balance_change tests)"""
+    await ensure_connected()
+    
+    records = await db.accountbalancehistory.find_many(
+        order={"scrapedAt": "desc"},
+        take=2
+    )
+    if len(records) < 2:
+        return None
+    
+    prev = records[1]
+    return {
+        "balance": f"${decimal_to_float(prev.balance):.2f}",
+        "balance_numeric": decimal_to_float(prev.balance),
     }
 
 # =============================================================================
@@ -1946,11 +2046,19 @@ async def get_ledger_data() -> Dict[str, Any]:
     raw_summaries = await calculate_all_payee_balances()
     payee_summaries = _format_payee_summaries_for_frontend(raw_summaries)
 
+    # Latest payment for current bill (for payment received tests/triggers)
+    latest_payment = await get_last_payment_for_latest_bill()
+
+    # Latest bill (first in list) - for due reminders and convenience
+    latest_bill = bills_data[0] if bills_data else None
+
     return {
         "account_balance": account_balance,
         "bills": bills_data,
+        "latest_bill": latest_bill,
         "orphan_payments": [],  # No separate section - merged into bills
         "payee_summaries": payee_summaries,
+        "latest_payment": latest_payment,
     }
 
 # =============================================================================

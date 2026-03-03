@@ -129,7 +129,7 @@
               <span class="notify-section-icon">⏰</span>
               <span>Due Date Reminder</span>
             </div>
-            <span class="notify-section-sub">Reminder before your bill is due</span>
+            <span class="notify-section-sub">Daily reminder until due; send time configurable</span>
             <span class="notify-section-chevron" :class="{ expanded: expandedSections.due_reminder }">▼</span>
           </div>
           
@@ -144,8 +144,15 @@
 
             <template v-if="configs.due_reminder.enabled">
               <div class="notify-form-group">
-                <label class="notify-label">Days Before Due</label>
+                <label class="notify-label">Days Before Due (start)</label>
                 <input v-model.number="configs.due_reminder.days_before_due" type="number" min="1" max="30" class="notify-input notify-input-small" />
+                <p class="notify-hint">Sends daily from this many days before due through the due date</p>
+              </div>
+
+              <div class="notify-form-group">
+                <label class="notify-label">Send at time (daily)</label>
+                <input v-model="configs.due_reminder.reminder_send_time" type="time" class="notify-input notify-input-small" />
+                <p class="notify-hint">Time each day to send the reminder (e.g. 09:00)</p>
               </div>
 
               <div class="notify-form-group">
@@ -159,6 +166,7 @@
                   <span class="notify-var-chip" @click="insertVar('due_reminder', '{amount}')">{amount}</span>
                   <span class="notify-var-chip" @click="insertVar('due_reminder', '{due_date}')">{due_date}</span>
                   <span class="notify-var-chip" @click="insertVar('due_reminder', '{days_until}')">{days_until}</span>
+                  <span class="notify-var-chip" @click="insertVar('due_reminder', '{days_until_text}')">{days_until_text}</span>
                 </div>
                 <textarea
                   ref="dueReminderInput"
@@ -248,6 +256,7 @@ interface NotificationConfig {
   title: string
   template: string
   days_before_due?: number | null
+  reminder_send_time?: string | null
 }
 
 const loading = ref(true)
@@ -266,7 +275,7 @@ const expandedSections = reactive({
 const configs = reactive<Record<string, NotificationConfig>>({
   new_bill: { event_type: 'new_bill', enabled: true, title: 'Con Edison Billing', template: 'A new bill for {amount} has posted, due {due_date}' },
   payment_received: { event_type: 'payment_received', enabled: true, title: 'Con Edison Payment', template: 'Payment of {amount} received. Remaining balance: {balance}' },
-  due_reminder: { event_type: 'due_reminder', enabled: true, title: 'Con Edison Reminder', template: 'Your bill of {amount} is due in {days_until} days on {due_date}', days_before_due: 3 },
+  due_reminder: { event_type: 'due_reminder', enabled: true, title: 'Con Edison Reminder', template: 'Your bill of {amount} is due {days_until_text} on {due_date}', days_before_due: 3, reminder_send_time: '09:00' },
   balance_change: { event_type: 'balance_change', enabled: true, title: 'Con Edison Balance', template: 'Your account balance changed from {old_balance} to {new_balance}' }
 })
 
@@ -362,7 +371,8 @@ async function saveAll() {
           enabled: cfg.enabled,
           title: cfg.title,
           template: cfg.template,
-          days_before_due: cfg.days_before_due
+          days_before_due: cfg.days_before_due,
+          reminder_send_time: cfg.reminder_send_time ?? undefined
         })
       })
       if (!res.ok) {
@@ -449,6 +459,7 @@ onMounted(() => {
 .notify-toggle-label { font-weight: 500; }
 
 .notify-form-group { margin-bottom: 1rem; }
+.notify-hint { margin: 0.35rem 0 0; font-size: 0.8rem; color: #666; }
 .notify-label { display: block; font-weight: 500; margin-bottom: 0.5rem; font-size: 0.9rem; }
 .notify-input { width: 100%; padding: 0.6rem 0.75rem; border: 1px solid #ddd; border-radius: 6px; font-size: 0.95rem; }
 .notify-input:focus { outline: none; border-color: #03a9f4; box-shadow: 0 0 0 2px rgba(3, 169, 244, 0.15); }

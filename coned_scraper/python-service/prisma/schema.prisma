@@ -181,13 +181,24 @@ model RealtimeReading {
 }
 
 model NotificationConfig {
-  id          Int      @id @default(autoincrement())
-  eventType   String   @unique @map("event_type")
-  enabled     Boolean  @default(true)
-  title       String   @default("Con Edison Billing")
-  template    String
-  daysBeforeDue Int?   @map("days_before_due")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  id               Int      @id @default(autoincrement())
+  eventType        String   @unique @map("event_type")
+  enabled          Boolean  @default(true)
+  title            String   @default("Con Edison Billing")
+  template         String
+  daysBeforeDue    Int?     @map("days_before_due")
+  reminderSendTime String?  @default("09:00") @map("reminder_send_time")
+  updatedAt        DateTime @updatedAt @map("updated_at")
 
   @@map("notification_configs")
+}
+
+model DueReminderSent {
+  id        Int      @id @default(autoincrement())
+  billId    Int      @map("bill_id")
+  sentDate  DateTime @map("sent_date")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([billId, sentDate])
+  @@map("due_reminder_sent")
 }

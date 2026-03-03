@@ -29,7 +29,7 @@ import db
 app = FastAPI(title="Con Edison API")
 
 # Code version for deployment verification
-CODE_VERSION = "1.3.35"
+CODE_VERSION = "1.3.37"
 
 @app.on_event("startup")
 async def startup():
@@ -131,6 +131,8 @@ cipher = Fernet(ENCRYPTION_KEY)
 SCHEDULE_FILE = DATA_DIR / "schedule.json"
 _scheduler_task = None
 _scrape_running = False  # Track if a scrape is currently in progress
+_due_reminder_task = None
+_last_due_reminder_run_date = None
 
 class ScheduleModel(BaseModel):
     enabled: bool
@@ -261,12 +263,7 @@ async def run_scheduled_scrape():
             except Exception as tts_e:
                 await db.add_log("warning", f"Failed to check/trigger bill TTS: {tts_e}")
             
-            # Check for due date reminders
-            try:
-                from notifications import check_and_send_due_reminders
-                await check_and_send_due_reminders()
-            except Exception as remind_e:
-                await db.add_log("warning", f"Failed to check due reminders: {remind_e}")
+        # Due date reminders now run at configured time via due_reminder_scheduler_loop
         
         # Check IMAP for payment attribution if configured
         if success:
@@ -343,6 +340,41 @@ async def scheduler_loop():
             logging.error(error_msg)
             await asyncio.sleep(60)  # Wait before retrying
 
+async def due_reminder_scheduler_loop():
+    """Run due date reminders at the configured time each day."""
+    global _last_due_reminder_run_date
+    while True:
+        try:
+            await asyncio.sleep(60)  # Check every minute
+            config = await db.get_notification_config("due_reminder")
+            if not config or not config.get("enabled"):
+                continue
+            send_time = config.get("reminder_send_time", "09:00")
+            try:
+                h, m = map(int, send_time.split(":")[:2])
+            except (ValueError, IndexError):
+                h, m = 9, 0
+            now = datetime.now()
+            if now.hour != h or now.minute != m:
+                continue
+            today = now.date()
+            if _last_due_reminder_run_date == today:
+                continue
+            _last_due_reminder_run_date = today
+            try:
+                from notifications import check_and_send_due_reminders
+                sent = await check_and_send_due_reminders()
+                if sent > 0:
+                    await db.add_log("info", f"Due reminder sent to {sent} device(s)")
+            except Exception as e:
+                await db.add_log("warning", f"Due reminder check failed: {e}")
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logging.error(f"Due reminder scheduler error: {e}")
+            await asyncio.sleep(60)
+
+
 async def restart_scheduler():
     """Restart the scheduler with current settings"""
     global _scheduler_task
@@ -366,13 +398,16 @@ async def restart_scheduler():
 # Start scheduler on app startup
 @app.on_event("startup")
 async def startup_event():
-    global _scheduler_task
-    
+    global _scheduler_task, _due_reminder_task
+
     schedule = await load_schedule()
     if schedule["enabled"]:
         _scheduler_task = asyncio.create_task(scheduler_loop())
         await db.add_log("info", f"Scheduler started with {schedule['frequency']}s frequency")
-    
+
+    _due_reminder_task = asyncio.create_task(due_reminder_scheduler_loop())
+    await db.add_log("info", "Due reminder scheduler started")
+
     # Start TTS scheduler
     try:
         from tts_scheduler import get_scheduler
@@ -392,14 +427,20 @@ async def startup_event():
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    global _scheduler_task
+    global _scheduler_task, _due_reminder_task
     if _scheduler_task and not _scheduler_task.done():
         _scheduler_task.cancel()
         try:
             await _scheduler_task
         except asyncio.CancelledError:
             pass
-    
+    if _due_reminder_task and not _due_reminder_task.done():
+        _due_reminder_task.cancel()
+        try:
+            await _due_reminder_task
+        except asyncio.CancelledError:
+            pass
+
     # Stop TTS scheduler
     try:
         from tts_scheduler import get_scheduler
@@ -924,12 +965,7 @@ async def start_scraper():
             except Exception as tts_e:
                 await db.add_log("warning", f"Failed to check/trigger bill TTS: {tts_e}")
             
-            # Check for due date reminders
-            try:
-                from notifications import check_and_send_due_reminders
-                await check_and_send_due_reminders()
-            except Exception as remind_e:
-                await db.add_log("warning", f"Failed to check due reminders: {remind_e}")
+        # Due date reminders run at configured time via due_reminder_scheduler_loop
         
         duration = time_module.time() - start_time
         await db.add_scrape_history(success, None if success else "Scrape failed", None, duration)
@@ -3098,6 +3134,7 @@ class NotificationConfigUpdate(BaseModel):
     title: Optional[str] = None
     template: Optional[str] = None
     days_before_due: Optional[int] = None
+    reminder_send_time: Optional[str] = None
 
 
 @app.put("/api/notification-config/{event_type}")
@@ -3108,17 +3145,91 @@ async def update_notification_config_endpoint(event_type: str, data: Notificatio
         enabled=data.enabled,
         title=data.title,
         template=data.template,
-        days_before_due=data.days_before_due
+        days_before_due=data.days_before_due,
+        reminder_send_time=data.reminder_send_time
     )
     if not success:
         raise HTTPException(status_code=404, detail="Notification config not found")
     return {"success": True}
 
 
+async def _get_real_test_data_for_notification(event_type: str) -> dict:
+    """Fetch real account data for notification test."""
+    ledger = await db.get_ledger_data()
+    bills = ledger.get("bills", [])
+    latest_bill = bills[0] if bills else {}
+    latest_payment = ledger.get("latest_payment")  # Latest payment for current bill
+    balance = ledger.get("account_balance") or "$0.00"
+    if isinstance(balance, (int, float)):
+        balance = f"${balance:.2f}"
+
+    if event_type == "new_bill":
+        bill_amount = latest_bill.get("bill_total", "") or latest_bill.get("amount", "N/A")
+        due_date_raw = latest_bill.get("due_date", "")
+        due_date = "soon"
+        if due_date_raw:
+            try:
+                from dateutil import parser as date_parser
+                dt = date_parser.parse(due_date_raw)
+                due_date = dt.strftime("%B %d, %Y").replace(" 0", " ")
+            except Exception:
+                due_date = due_date_raw
+        month_range = latest_bill.get("month_range", "this month")
+        return {
+            "amount": bill_amount,
+            "due_date": due_date,
+            "month_range": month_range,
+        }
+
+    if event_type == "payment_received":
+        if not latest_payment:
+            return {"amount": "N/A", "balance": balance, "payee_name": "Unknown"}
+        return {
+            "amount": latest_payment.get("amount", "N/A"),
+            "balance": balance,
+            "payee_name": latest_payment.get("payee_name", "") or "Unknown",
+        }
+
+    if event_type == "due_reminder":
+        bill_amount = latest_bill.get("bill_total", "") or latest_bill.get("amount", "N/A")
+        due_date_raw = latest_bill.get("due_date", "")
+        due_date = "soon"
+        days_until = 3
+        if due_date_raw:
+            try:
+                from dateutil import parser as date_parser
+                from datetime import datetime
+                dt = date_parser.parse(due_date_raw)
+                due_date = dt.strftime("%B %d, %Y").replace(" 0", " ")
+                days_until = max(0, (dt - datetime.now()).days)
+            except Exception:
+                due_date = due_date_raw
+        days_until_text = "today" if days_until == 0 else f"in {days_until} days"
+        return {
+            "amount": bill_amount,
+            "due_date": due_date,
+            "days_until": str(days_until),
+            "days_until_text": days_until_text,
+        }
+
+    if event_type == "balance_change":
+        prev = await db.get_previous_balance()
+        old_balance = prev["balance"] if prev else "$0.00"
+        curr = await db.get_current_balance()
+        new_balance = curr["balance"] if curr else "$0.00"
+        return {
+            "old_balance": old_balance,
+            "new_balance": new_balance,
+        }
+
+    return {}
+
+
 @app.post("/api/notification-config/test/{event_type}")
 async def test_notification(event_type: str, payee_id: Optional[int] = None):
-    """Send a test notification for a specific event type"""
+    """Send a test notification for a specific event type using REAL account data."""
     import aiohttp
+    from notifications import format_template
     
     token = os.environ.get("SUPERVISOR_TOKEN")
     if not token:
@@ -3141,21 +3252,9 @@ async def test_notification(event_type: str, payee_id: Optional[int] = None):
         if not target_payees:
             raise HTTPException(status_code=400, detail="No payees with notifications enabled")
     
-    # Build test message with sample data
-    test_data = {
-        "amount": "$125.50",
-        "due_date": "March 15, 2026",
-        "month_range": "Feb 1 - Feb 28",
-        "balance": "$0.00",
-        "payee_name": "Test User",
-        "days_until": "3",
-        "old_balance": "$125.50",
-        "new_balance": "$0.00",
-    }
-    
-    message = config["template"]
-    for key, value in test_data.items():
-        message = message.replace(f"{{{key}}}", value)
+    # Build test message with REAL account data (same as real triggers)
+    test_data = await _get_real_test_data_for_notification(event_type)
+    message = format_template(config["template"], test_data)
     
     # Send notifications
     sent_count = 0

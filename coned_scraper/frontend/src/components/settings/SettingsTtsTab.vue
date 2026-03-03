@@ -117,6 +117,14 @@
                   rows="2"
                   placeholder="{prefix} Your new bill for {month_range} is {amount}."
                 ></textarea>
+                <button
+                  type="button"
+                  class="tts-btn tts-btn-test-inline"
+                  :disabled="!config.enabled || !config.media_player || testing === 'new_bill'"
+                  @click="testNewBillTts"
+                >
+                  {{ testing === 'new_bill' ? 'Sending...' : '🔔 Test New Bill TTS' }}
+                </button>
               </div>
 
               <div class="tts-form-group">
@@ -134,6 +142,14 @@
                   rows="2"
                   placeholder="{prefix} Payment of {amount} received. Balance is now {balance}."
                 ></textarea>
+                <button
+                  type="button"
+                  class="tts-btn tts-btn-test-inline"
+                  :disabled="!config.enabled || !config.media_player || testing === 'payment'"
+                  @click="testPaymentTts"
+                >
+                  {{ testing === 'payment' ? 'Sending...' : '💳 Test Payment TTS' }}
+                </button>
               </div>
             </div>
           </template>
@@ -342,7 +358,7 @@ interface HaEntity {
 const loading = ref(true)
 const saving = ref(false)
 const scheduleSaving = ref(false)
-const testing = ref(false)
+const testing = ref<boolean | string>(false)
 const testingSummary = ref(false)
 
 const isAddon = ref(false)
@@ -608,6 +624,42 @@ async function testTts() {
     const data = await res.json().catch(() => ({}))
     if (res.ok) {
       alertMessage.value = { type: 'success', text: data.message || 'TTS sent' }
+    } else {
+      alertMessage.value = { type: 'error', text: data.detail || 'Failed' }
+    }
+  } catch {
+    alertMessage.value = { type: 'error', text: 'Failed to connect' }
+  } finally {
+    testing.value = false
+  }
+}
+
+async function testNewBillTts() {
+  testing.value = 'new_bill'
+  alertMessage.value = null
+  try {
+    const res = await fetch(`${getApiBase()}/tts/test-new-bill`, { method: 'POST' })
+    const data = await res.json().catch(() => ({}))
+    if (res.ok) {
+      alertMessage.value = { type: 'success', text: data.message || 'New bill TTS sent' }
+    } else {
+      alertMessage.value = { type: 'error', text: data.detail || 'Failed' }
+    }
+  } catch {
+    alertMessage.value = { type: 'error', text: 'Failed to connect' }
+  } finally {
+    testing.value = false
+  }
+}
+
+async function testPaymentTts() {
+  testing.value = 'payment'
+  alertMessage.value = null
+  try {
+    const res = await fetch(`${getApiBase()}/tts/test-payment`, { method: 'POST' })
+    const data = await res.json().catch(() => ({}))
+    if (res.ok) {
+      alertMessage.value = { type: 'success', text: data.message || 'Payment TTS sent' }
     } else {
       alertMessage.value = { type: 'error', text: data.detail || 'Failed' }
     }
@@ -1088,6 +1140,17 @@ onMounted(async () => {
 
 .tts-btn-orange:hover:not(:disabled) {
   background: #f57c00;
+}
+
+.tts-btn-test-inline {
+  margin-top: 0.5rem;
+  background: #e3f2fd;
+  color: #1565c0;
+  border: 1px solid #90caf9;
+  font-size: 0.9rem;
+}
+.tts-btn-test-inline:hover:not(:disabled) {
+  background: #bbdefb;
 }
 
 .tts-message {
