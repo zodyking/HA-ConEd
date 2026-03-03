@@ -231,6 +231,7 @@
                 <BillPayeeSummary
                   :bill-id="bill.id"
                   :bill-summaries="billSummaries"
+                  :show-cumulative="breakdownShowRollover"
                 />
               </div>
             </div>
@@ -356,6 +357,7 @@ const billSummaries = computed<Record<number, any>>(() => {
 })
 const expandedBills = ref<Set<number>>(new Set())
 const expandedPayments = ref<Set<number>>(new Set())
+const breakdownShowRollover = ref(false)
 
 // Meter tracking state
 interface MeterReadingData {
@@ -494,6 +496,16 @@ async function loadLedgerData() {
   }
 }
 
+async function loadAppSettings() {
+  try {
+    const res = await fetch(`${getApiBase()}/app-settings`)
+    if (res.ok) {
+      const data = await res.json()
+      breakdownShowRollover.value = data.breakdown_show_rollover === true
+    }
+  } catch { /* ignore */ }
+}
+
 async function checkPdfExists() {
   try {
     const res = await fetch(`${getApiBase()}/latest-bill-pdf/status`)
@@ -539,6 +551,7 @@ let interval: ReturnType<typeof setInterval>
 onMounted(() => {
   loadLedgerData()
   loadMeterData()
+  loadAppSettings()
   checkPdfExists()
   interval = setInterval(() => {
     loadLedgerData()

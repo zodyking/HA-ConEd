@@ -35,6 +35,13 @@
           </div>
         </div>
 
+        <div class="ha-breakdown-setting" style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #e0e0e0;">
+          <label class="ha-breakdown-label">
+            <input v-model="breakdownShowRollover" type="checkbox" :disabled="breakdownSaving" @change="handleBreakdownChange" />
+            {{ breakdownShowRollover ? 'Rollover' : 'Bill only' }}
+          </label>
+          <div class="ha-breakdown-desc">Breakdown view in ledger: show current bill only, or cumulative rollover</div>
+        </div>
         <div v-if="totalResponsibility > 0 && Math.abs(totalResponsibility - 100) > 0.1" class="ha-warn">Total: {{ totalResponsibility.toFixed(1) }}% — must equal 100%</div>
         <button v-if="users.length" type="button" class="ha-button ha-button-primary" :disabled="isLoading || (totalResponsibility > 0 && Math.abs(totalResponsibility - 100) > 0.1)" @click="handleSaveResponsibilities">{{ isLoading ? 'Saving...' : 'Save Responsibilities' }}</button>
       </div>
@@ -211,6 +218,8 @@ const newCardLabel = ref('')
 const cardLoading = ref(false)
 const editingCardId = ref<number | null>(null)
 const editingLabel = ref('')
+const breakdownShowRollover = ref(false)
+const breakdownSaving = ref(false)
 
 const totalResponsibility = computed(() => Object.values(responsibilities.value).reduce((a, b) => a + (b || 0), 0))
 const isValidCardDigits = computed(() => /^\d{4}$/.test(newCardDigits.value))
@@ -219,6 +228,35 @@ const totalPayments = computed(() => {
   bills.value.forEach((b) => (n += b.payments?.length || 0))
   return n
 })
+
+async function loadAppSettings() {
+  try {
+    const res = await fetch(`${getApiBase()}/app-settings`)
+    if (res.ok) {
+      const d = await res.json()
+      breakdownShowRollover.value = d.breakdown_show_rollover === true
+    }
+  } catch { /* ignore */ }
+}
+
+async function handleBreakdownChange() {
+  breakdownSaving.value = true
+  try {
+    const res = await fetch(`${getApiBase()}/app-settings/payee-preferences`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ breakdown_show_rollover: breakdownShowRollover.value })
+    })
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}))
+      message.value = { type: 'error', text: e.detail || 'Failed to save breakdown setting' }
+    }
+  } catch {
+    message.value = { type: 'error', text: 'Failed to connect' }
+  } finally {
+    breakdownSaving.value = false
+  }
+}
 
 async function loadUsers() {
   try {
@@ -430,6 +468,7 @@ async function saveEditLabel(cardId: number) {
 onMounted(() => {
   loadUsers()
   loadPaymentsData()
+  loadAppSettings()
 })
 </script>
 
@@ -451,6 +490,9 @@ onMounted(() => {
 .ha-btn-red { background: #f44336; color: white; }
 .ha-responsibility { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
 .ha-responsibility input { width: 60px; }
+.ha-breakdown-setting { }
+.ha-breakdown-label { display: inline-flex; align-items: center; gap: 0.5rem; cursor: pointer; font-weight: 500; }
+.ha-breakdown-desc { font-size: 0.8rem; color: #666; margin-top: 0.25rem; margin-left: 1.5rem; }
 .ha-warn { color: #e65100; font-size: 0.85rem; margin: 0.5rem 0; }
 
 .ha-unverified-badge {

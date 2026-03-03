@@ -29,7 +29,7 @@ import db
 app = FastAPI(title="Con Edison API")
 
 # Code version for deployment verification
-CODE_VERSION = "1.3.15-postgres"
+CODE_VERSION = "1.3.16-postgres"
 
 @app.on_event("startup")
 async def startup():
@@ -854,6 +854,10 @@ async def save_app_settings(settings: dict):
         settings_data["auto_download_pdfs"] = bool(settings["auto_download_pdfs"])
     else:
         settings_data["auto_download_pdfs"] = existing.get("auto_download_pdfs", True)
+    if "breakdown_show_rollover" in settings:
+        settings_data["breakdown_show_rollover"] = bool(settings["breakdown_show_rollover"])
+    else:
+        settings_data["breakdown_show_rollover"] = existing.get("breakdown_show_rollover", False)
     await db.save_app_settings_db(settings_data)
 
 async def load_app_settings() -> dict:
@@ -866,6 +870,7 @@ async def load_app_settings() -> dict:
                 "time_offset_hours": 0.0,
                 "settings_password": "0000",
                 "auto_download_pdfs": True,
+                "breakdown_show_rollover": False,
             }
             await save_app_settings(default_settings)
             return default_settings
@@ -874,10 +879,11 @@ async def load_app_settings() -> dict:
             "time_offset_hours": float(data.get("time_offset_hours", 0.0)),
             "settings_password": decrypt_data(data.get("settings_password", encrypt_data("0000"))) if data.get("settings_password") else "0000",
             "auto_download_pdfs": data.get("auto_download_pdfs", True),
+            "breakdown_show_rollover": data.get("breakdown_show_rollover", False),
         }
     except Exception as e:
         logging.warning(f"Failed to load app settings: {str(e)}")
-        return {"time_offset_hours": 0.0, "settings_password": "0000", "auto_download_pdfs": True}
+        return {"time_offset_hours": 0.0, "settings_password": "0000", "auto_download_pdfs": True, "breakdown_show_rollover": False}
 
 async def verify_settings_password(password: str) -> bool:
     """Verify settings password"""
@@ -1296,13 +1302,17 @@ async def get_app_settings_endpoint():
             "has_password": bool(settings.get("settings_password")),
             "settings_password": settings.get("settings_password", "0000"),  # Needed for preservation
             "auto_download_pdfs": settings.get("auto_download_pdfs", True),
+            "breakdown_show_rollover": settings.get("breakdown_show_rollover", False),
         }
     except Exception as e:
         await db.add_log("error", f"Failed to get app settings: {str(e)}")
-        return {"time_offset_hours": 0.0, "has_password": True, "settings_password": "0000", "auto_download_pdfs": True}
+        return {"time_offset_hours": 0.0, "has_password": True, "settings_password": "0000", "auto_download_pdfs": True, "breakdown_show_rollover": False}
 
 class AutoDownloadPdfsModel(BaseModel):
     auto_download_pdfs: bool
+
+class PayeePreferencesModel(BaseModel):
+    breakdown_show_rollover: Optional[bool] = None
 
 @app.patch("/api/app-settings")
 async def patch_app_settings_endpoint(data: AutoDownloadPdfsModel):
@@ -1314,6 +1324,19 @@ async def patch_app_settings_endpoint(data: AutoDownloadPdfsModel):
         return {"message": "Settings updated", "auto_download_pdfs": data.auto_download_pdfs}
     except Exception as e:
         await db.add_log("error", f"Failed to update app settings: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.patch("/api/app-settings/payee-preferences")
+async def patch_payee_preferences_endpoint(data: PayeePreferencesModel):
+    """Update payee-related preferences (breakdown mode, etc.)"""
+    try:
+        settings = await load_app_settings()
+        if data.breakdown_show_rollover is not None:
+            settings["breakdown_show_rollover"] = data.breakdown_show_rollover
+        await save_app_settings(settings)
+        return {"message": "Preferences updated", "breakdown_show_rollover": settings.get("breakdown_show_rollover", False)}
+    except Exception as e:
+        await db.add_log("error", f"Failed to update payee preferences: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 class PasswordVerifyModel(BaseModel):
@@ -1801,7 +1824,15 @@ async def reparse_all_bill_pdfs():
                 results["failed"] += 1
                 results["errors"].append(f"Bill {bill_id}: {parsed_data['error']}")
             else:
-                await db.upsert_bill_details(bill_id, **parsed_data)
+                # Only pass keys that upsert_bill_details accepts (parser may include extras like parsed_at)
+                detail_keys = (
+                    "due_date", "kwh_used", "kwh_cost", "electricity_total",
+                    "total_from_billing_period", "balance_from_previous_bill", "total_amount_due",
+                    "billing_days", "supply_charges", "delivery_charges",
+                    "billing_period_start", "billing_period_end",
+                )
+                kwargs = {k: v for k, v in parsed_data.items() if k in detail_keys}
+                await db.upsert_bill_details(bill_id, **kwargs)
                 results["success"] += 1
                 await db.add_log("info", f"Re-parsed bill {bill_id}: kWh={parsed_data.get('kwh_used')}")
         except Exception as e:

@@ -17,9 +17,7 @@
         </template>
       </span>
       <span class="ha-payee-header-right">
-        <span class="ha-payee-mode-toggle" @click.stop>
-          <label><input type="checkbox" v-model="showCumulative" /> {{ showCumulative ? 'Rollover' : 'Bill only' }}</label>
-        </span>
+        <span class="ha-payee-mode-label">{{ showCumulative ? 'Rollover' : 'Bill only' }}</span>
         <span class="ha-payee-toggle">{{ expanded ? '▼' : '▶' }}</span>
       </span>
     </div>
@@ -87,15 +85,15 @@ interface BillSummaryData {
 const props = defineProps<{
   billId: number
   billSummaries: Record<number, BillSummaryData>
+  showCumulative?: boolean
 }>()
 
 const expanded = ref(true)
-const showCumulative = ref(false)
 
 const summary = computed(() => props.billSummaries[props.billId])
 
 function effectiveShare(payee: PayeeSummary) {
-  return showCumulative.value ? (payee.share_of_bill_cumulative ?? payee.share_of_bill ?? 0) : (payee.share_of_bill ?? 0)
+  return props.showCumulative ? (payee.share_of_bill_cumulative ?? payee.share_of_bill ?? 0) : (payee.share_of_bill ?? 0)
 }
 
 const hasResponsibilities = computed(() =>
@@ -161,13 +159,12 @@ function isOverPaid(payee: PayeeSummary) {
 .ha-payee-header-text .paid { color: #4caf50; }
 .ha-payee-header-text .due { color: #f44336; }
 .ha-payee-toggle { font-size: 0.65rem; color: #666; }
-.ha-payee-mode-toggle {
+.ha-payee-mode-label {
   margin-left: 0.5rem;
   font-size: 0.65rem;
   font-weight: 400;
   color: #888;
 }
-.ha-payee-mode-toggle label { cursor: pointer; display: inline-flex; align-items: center; gap: 0.25rem; }
 .ha-payee-rows { padding: 0.4rem; }
 .ha-payee-row {
   display: flex;

@@ -53,7 +53,14 @@ async def download_and_store_pdf(pdf_url: str, bill_id: int) -> dict:
 
         parsed_data = parse_coned_bill_pdf(str(pdf_path))
         if "error" not in parsed_data:
-            await db.upsert_bill_details(bill_id, **parsed_data)
+            detail_keys = (
+                "due_date", "kwh_used", "kwh_cost", "electricity_total",
+                "total_from_billing_period", "balance_from_previous_bill", "total_amount_due",
+                "billing_days", "supply_charges", "delivery_charges",
+                "billing_period_start", "billing_period_end",
+            )
+            kwargs = {k: v for k, v in parsed_data.items() if k in detail_keys}
+            await db.upsert_bill_details(bill_id, **kwargs)
             await db.add_log(
                 "info",
                 f"Parsed bill details: kWh={parsed_data.get('kwh_used')}, due={parsed_data.get('due_date')}",
