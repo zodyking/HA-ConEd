@@ -1,20 +1,24 @@
 #!/command/with-contenv bashio
 # shellcheck shell=bash
 # ==============================================================================
-# ConEd Scraper - Prisma Studio (Database UI)
+# ConEd Scraper - Prisma Studio (Database UI) - OPTIONAL SERVICE
 # ==============================================================================
 
 exec 2>&1
 
-export DATABASE_URL="postgresql://coned:coned@localhost:5432/coned"
+# Read configurable ports with defaults
+PRISMA_STUDIO_PORT=$(bashio::config 'prisma_studio_port' 2>/dev/null || echo "5555")
+POSTGRES_PORT=$(bashio::config 'postgres_port' 2>/dev/null || echo "5432")
+
+export DATABASE_URL="postgresql://coned:coned@localhost:${POSTGRES_PORT}/coned"
 
 cd /app/python-service
 
 # Wait for PostgreSQL and coned database to be ready
 bashio::log.info "Waiting for PostgreSQL before Prisma Studio..."
-until PGPASSWORD=coned psql -h localhost -p 5432 -U coned -d coned -t -c "SELECT 1" > /dev/null 2>&1; do
+until PGPASSWORD=coned psql -h localhost -p "${POSTGRES_PORT}" -U coned -d coned -t -c "SELECT 1" > /dev/null 2>&1; do
     sleep 2
 done
 sleep 2
-bashio::log.info "PostgreSQL is ready, starting Prisma Studio on port 5555..."
-exec prisma studio --port 5555 --browser none
+bashio::log.info "PostgreSQL is ready, starting Prisma Studio on port ${PRISMA_STUDIO_PORT}..."
+exec prisma studio --port "${PRISMA_STUDIO_PORT}" --browser none

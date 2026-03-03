@@ -29,7 +29,7 @@ import db
 app = FastAPI(title="Con Edison API")
 
 # Code version for deployment verification
-CODE_VERSION = "1.1.1-postgres"
+CODE_VERSION = "1.2.0-postgres"
 
 @app.on_event("startup")
 async def startup():

@@ -6,6 +6,9 @@
 
 exec 2>&1
 
+# Read configurable port with default
+POSTGRES_PORT=$(bashio::config 'postgres_port' 2>/dev/null || echo "5432")
+
 bashio::log.info "============================================"
 bashio::log.info "POSTGRESQL SERVICE STARTING"
 bashio::log.info "============================================"
@@ -13,7 +16,7 @@ bashio::log.info "============================================"
 DATA_DIR="/config/postgres/data"
 PGUSER="postgres"
 
-bashio::log.info "PostgreSQL data directory: $DATA_DIR"
+bashio::log.info "PostgreSQL data directory: $DATA_DIR, Port: ${POSTGRES_PORT}"
 
 # Ensure data directory exists with correct ownership
 mkdir -p "$DATA_DIR"
@@ -31,13 +34,13 @@ if [ ! -f "$DATA_DIR/PG_VERSION" ]; then
     echo "local all all trust" >> "$DATA_DIR/pg_hba.conf"
     
     # Start PostgreSQL temporarily to create database and user
-    sudo -u postgres /usr/lib/postgresql/*/bin/pg_ctl -D "$DATA_DIR" -l /tmp/pg_init.log start
+    sudo -u postgres /usr/lib/postgresql/*/bin/pg_ctl -D "$DATA_DIR" -l /tmp/pg_init.log -o "-p ${POSTGRES_PORT}" start
     sleep 2
     
     # Create coned database and user
-    sudo -u postgres psql -c "CREATE USER coned WITH PASSWORD 'coned';" || true
-    sudo -u postgres psql -c "CREATE DATABASE coned OWNER coned;" || true
-    sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE coned TO coned;" || true
+    sudo -u postgres psql -p "${POSTGRES_PORT}" -c "CREATE USER coned WITH PASSWORD 'coned';" || true
+    sudo -u postgres psql -p "${POSTGRES_PORT}" -c "CREATE DATABASE coned OWNER coned;" || true
+    sudo -u postgres psql -p "${POSTGRES_PORT}" -c "GRANT ALL PRIVILEGES ON DATABASE coned TO coned;" || true
     
     # Stop temporary instance
     sudo -u postgres /usr/lib/postgresql/*/bin/pg_ctl -D "$DATA_DIR" stop
@@ -46,5 +49,5 @@ if [ ! -f "$DATA_DIR/PG_VERSION" ]; then
     bashio::log.info "PostgreSQL database initialized successfully"
 fi
 
-bashio::log.info "Starting PostgreSQL daemon..."
-exec sudo -u postgres /usr/lib/postgresql/*/bin/postgres -D "$DATA_DIR" -c listen_addresses='127.0.0.1' -c port=5432
+bashio::log.info "Starting PostgreSQL daemon on port ${POSTGRES_PORT}..."
+exec sudo -u postgres /usr/lib/postgresql/*/bin/postgres -D "$DATA_DIR" -c listen_addresses='127.0.0.1' -c port="${POSTGRES_PORT}"

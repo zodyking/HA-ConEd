@@ -4,25 +4,27 @@
 # ConEd Scraper - Python API (FastAPI + Playwright)
 # ==============================================================================
 
+# Read configurable ports with defaults
+API_PORT=$(bashio::config 'api_port' 2>/dev/null || echo "8000")
+POSTGRES_PORT=$(bashio::config 'postgres_port' 2>/dev/null || echo "5432")
+
 bashio::log.info "============================================"
-bashio::log.info "CON EDISON API SERVICE v1.1.1"
+bashio::log.info "CON EDISON API SERVICE v1.2.0"
 bashio::log.info "============================================"
-bashio::log.info "If you see this, the NEW CODE is running!"
+bashio::log.info "API Port: ${API_PORT}, PostgreSQL Port: ${POSTGRES_PORT}"
 
 export PLAYWRIGHT_HEADLESS=true
 export PYTHONUNBUFFERED=1
 export DATA_DIR=/config
-export DATABASE_URL="postgresql://coned:coned@localhost:5432/coned"
+export DATABASE_URL="postgresql://coned:coned@localhost:${POSTGRES_PORT}/coned"
 
 cd /app/python-service
 
 # Wait for PostgreSQL to be ready AND coned user/database to exist
-# (pg_isready alone passes too early - during init before coned is created)
 bashio::log.info "Waiting for PostgreSQL and coned database..."
-until PGPASSWORD=coned psql -h localhost -p 5432 -U coned -d coned -t -c "SELECT 1" > /dev/null 2>&1; do
+until PGPASSWORD=coned psql -h localhost -p "${POSTGRES_PORT}" -U coned -d coned -t -c "SELECT 1" > /dev/null 2>&1; do
     sleep 1
 done
-# Brief delay to ensure we're past temp instance -> main daemon transition
 sleep 3
 bashio::log.info "PostgreSQL is ready!"
 
@@ -32,5 +34,5 @@ python3 -m prisma db push --accept-data-loss 2>&1 || {
     bashio::log.warning "Prisma migration had issues, continuing anyway..."
 }
 
-bashio::log.info "Starting FastAPI server..."
-exec python3 -m uvicorn main:app --host 0.0.0.0 --port 8000
+bashio::log.info "Starting FastAPI server on port ${API_PORT}..."
+exec python3 -m uvicorn main:app --host 0.0.0.0 --port "${API_PORT}"
