@@ -277,19 +277,48 @@ class MeterService:
                 end_date
             )
             
+            # Fallback: Con Edison often provides hourly data only (no quarter-hour unless realtime enrollment)
             if not reads:
-                logger.warning("No quarter-hour readings available")
-                return []
+                logger.info("No quarter-hour data, trying hourly fallback")
+                reads = await self._opower.async_get_cost_reads(
+                    account,
+                    AggregateType.HOUR,
+                    start_date,
+                    end_date
+                )
+                if reads:
+                    # Expand each hour into 4 x 15-min slots (divide consumption evenly)
+                    from datetime import timedelta
+                    result = []
+                    for r in reads:
+                        if r.start_time and r.end_time and r.consumption is not None:
+                            val = float(r.consumption) / 4.0
+                            delta = timedelta(minutes=15)
+                            for i in range(4):
+                                st = r.start_time + (delta * i)
+                                et = st + delta
+                                result.append({
+                                    'start_time': st.isoformat(),
+                                    'end_time': et.isoformat(),
+                                    'consumption': val,
+                                })
+                    reads = result
+                else:
+                    logger.warning("No hourly readings available either")
+                    return []
+            else:
+                result = None  # Will build below from reads
             
-            # Convert to dict format
-            result = [
-                {
-                    'start_time': r.start_time.isoformat() if r.start_time else None,
-                    'end_time': r.end_time.isoformat() if r.end_time else None,
-                    'consumption': float(r.consumption) if r.consumption is not None else 0,
-                }
-                for r in reads
-            ]
+            if result is None:
+                # Convert quarter-hour reads to dict format
+                result = [
+                    {
+                        'start_time': r.start_time.isoformat() if r.start_time else None,
+                        'end_time': r.end_time.isoformat() if r.end_time else None,
+                        'consumption': float(r.consumption) if r.consumption is not None else 0,
+                    }
+                    for r in reads
+                ]
             
             # Cache to database (limit to last 24 hours worth for storage efficiency)
             import db
@@ -356,12 +385,16 @@ class MeterService:
         
         return None
     
+    # Minimum = quarter-hour data resolution (Con Edison updates every 15 min)
+    MIN_POLLING_MINUTES = 15
+
     async def start_polling(self, interval_minutes: int = 15):
         """Start background polling for meter readings."""
         if self._running:
             logger.warning("Meter polling already running")
             return
         
+        interval_minutes = max(interval_minutes, self.MIN_POLLING_MINUTES)
         self._running = True
         interval_seconds = interval_minutes * 60
         
@@ -369,10 +402,12 @@ class MeterService:
             while self._running:
                 try:
                     if self.is_enabled():
+                        # Latest hourly reading (for Account Summary, MQTT)
                         reading = await self.fetch_reading()
                         if reading:
-                            # Publish to MQTT
                             await self._publish_reading(reading)
+                        # 24-hour data for History chart (quarter-hour or hourly fallback)
+                        await self.fetch_quarter_hour_reads(24)
                 except Exception as e:
                     logger.error(f"Meter polling error: {e}")
                 

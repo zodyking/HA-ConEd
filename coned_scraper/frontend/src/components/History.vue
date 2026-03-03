@@ -130,8 +130,8 @@
                 {{ realtimeError }}
               </div>
               <div v-else-if="!realtimeData.length" class="ha-realtime-empty">
-                <p>No real-time usage data available.</p>
-                <p class="ha-realtime-hint">Enable Meter Tracking in Settings to view quarter-hour usage data.</p>
+                <p>No usage data yet.</p>
+                <p class="ha-realtime-hint">Enable Meter Tracking in Settings, then click <strong>Refresh</strong> above to fetch data from Con Edison.</p>
               </div>
               <canvas v-show="realtimeData.length && !realtimeLoading" ref="realtimeChart"></canvas>
             </div>
@@ -446,6 +446,11 @@ async function fetchRealtimeData(forceRefresh: boolean = false) {
     realtimeData.value = readings
     
     if (!realtimeData.value.length) {
+      // Auto-fetch from API when cache is empty and meter is enabled
+      if (meterEnabled.value && !forceRefresh) {
+        await fetchRealtimeData(true)
+        return
+      }
       if (activeChartTab.value === 'realtime') {
         activeChartTab.value = 'billHistory'
       }

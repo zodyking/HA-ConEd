@@ -29,7 +29,7 @@ import db
 app = FastAPI(title="Con Edison API")
 
 # Code version for deployment verification
-CODE_VERSION = "1.3.17-postgres"
+CODE_VERSION = "1.3.18-postgres"
 
 @app.on_event("startup")
 async def startup():
@@ -2539,10 +2539,20 @@ async def get_meter_config():
     return config
 
 
+# Minimum polling interval = quarter-hour data resolution (Con Edison updates every 15 min)
+METER_MIN_POLLING_INTERVAL = 15
+
+
 @app.post("/api/meter-config")
 async def save_meter_config_endpoint(config: MeterConfigModel):
     """Save meter tracking configuration"""
     from meter_service import get_meter_service
+    
+    if config.polling_interval < METER_MIN_POLLING_INTERVAL:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Polling interval cannot be less than {METER_MIN_POLLING_INTERVAL} minutes (data update threshold for quarter-hour readings)"
+        )
     
     # Load existing config to preserve password if not provided
     existing = await db.get_meter_config_db() or {}

@@ -111,8 +111,8 @@
         <template v-if="meterConfig.enabled">
           <div class="ha-form-group">
             <label class="ha-form-label">Polling Interval (minutes)</label>
-            <input v-model.number="meterConfig.polling_interval" type="number" min="5" max="60" class="ha-form-input ha-input-small" />
-            <div class="info-text">How often to fetch meter readings (minimum 5 minutes)</div>
+            <input v-model.number="meterConfig.polling_interval" type="number" min="15" max="60" class="ha-form-input ha-input-small" />
+            <div class="info-text">Cannot be less than data update interval (quarter-hour = 15 min minimum)</div>
           </div>
 
           <div class="ha-form-actions">
@@ -360,7 +360,7 @@ async function loadMeterConfig() {
     if (res.ok) {
       const d = await res.json()
       meterConfig.enabled = d.enabled || false
-      meterConfig.polling_interval = d.polling_interval ?? 15
+      meterConfig.polling_interval = Math.max(15, d.polling_interval ?? 15)
     }
   } catch (e) {
     console.error('Failed to load meter config:', e)
