@@ -433,6 +433,27 @@ async def perform_login(username: str, password: str, totp_code: str, test_only:
                     await db.add_log("success", f"Data scraping completed successfully")
                     
                     await db.save_scraped_data(scraped_data, "success", None, SCREENSHOT_FILENAME)
+
+                    # Secondary PDF scrape (independent - failures do not affect main scrape)
+                    try:
+                        pdf_results = await scrape_bill_pdfs(page, context)
+                        if pdf_results:
+                            from pdf_utils import download_and_store_pdf
+                            for month_range, pdf_url in pdf_results:
+                                try:
+                                    bill_id = await db.get_bill_id_by_month_range(month_range)
+                                    if bill_id:
+                                        await download_and_store_pdf(pdf_url, bill_id)
+                                        await db.add_log("success", f"Auto-downloaded PDF for {month_range}")
+                                    else:
+                                        await db.add_log("warning", f"No bill found for {month_range}, skipped PDF")
+                                except Exception as dl_e:
+                                    await db.add_log("warning", f"PDF download failed for {month_range}: {dl_e}")
+                        elif pdf_results is not None:
+                            await db.add_log("info", "PDF scrape: No new PDF URLs to download")
+                    except Exception as pdf_e:
+                        await db.add_log("warning", f"PDF scrape failed (main scrape unaffected): {pdf_e}")
+                        logger.warning(f"PDF scrape failed: {pdf_e}")
                 except Exception as e:
                     error_msg = f"Data scraping failed: {str(e)}"
                     await db.add_log("error", error_msg)
@@ -786,6 +807,185 @@ async def scrape_pdf_bill_url(page, context):
             return pdf_url
     
     return pdf_url
+
+
+async def scrape_bill_pdfs(page, context) -> list:
+    """
+    Independent secondary scrape: capture PDF URLs for bills that don't have a PDF.
+    Runs after main scrape, uses same browser session. Does not modify scrape_bill_history.
+    Returns [(month_range, pdf_url), ...]
+    """
+    BILL_HISTORY_URL = "https://www.coned.com/en/accounts-billing/my-account/bill-history-assistance"
+    MAX_PDF_CAPTURES = 10  # Cap to avoid timeout
+
+    result = []
+
+    try:
+        # Check if auto-download is enabled
+        app_settings = await db.get_app_settings_db()
+        auto_download = app_settings.get("auto_download_pdfs", True) if app_settings else True
+        if not auto_download:
+            await db.add_log("info", "Auto-download PDFs is disabled, skipping PDF scrape")
+            return result
+
+        # Get bills that already have PDFs
+        existing_months = await db.get_month_ranges_with_pdf()
+        await db.add_log("info", f"PDF scrape: {len(existing_months)} bills already have PDFs")
+
+        # Navigate to bill history
+        await db.add_log("info", f"PDF scrape: Navigating to {BILL_HISTORY_URL}")
+        await page.goto(BILL_HISTORY_URL, wait_until="networkidle", timeout=30000)
+        await asyncio.sleep(3)
+
+        bill_items = await page.locator(".js-bill-item, .billing-payment-item--bill").all()
+        await db.add_log("info", f"PDF scrape: Found {len(bill_items)} bill rows")
+
+        # First pass: collect month_ranges that need PDF (avoid stale locators after nav)
+        to_capture = []
+        for item in bill_items:
+            try:
+                months_el = item.locator(".billing-payment-item__months").first
+                if await months_el.count() == 0:
+                    continue
+                month_range = (await months_el.inner_text()).strip()
+                if month_range and month_range not in existing_months:
+                    to_capture.append(month_range)
+                    existing_months.add(month_range)
+            except Exception:
+                continue
+
+        capture_count = 0
+        for month_range in to_capture:
+            if capture_count >= MAX_PDF_CAPTURES:
+                await db.add_log("info", f"PDF scrape: Reached cap of {MAX_PDF_CAPTURES}, stopping")
+                break
+
+            try:
+                # Ensure we're on bill history (may have navigated away)
+                if BILL_HISTORY_URL not in page.url:
+                    await page.goto(BILL_HISTORY_URL, wait_until="domcontentloaded", timeout=15000)
+                    await asyncio.sleep(2)
+
+                # Find row with this month_range (re-query for fresh locators)
+                bill_rows = await page.locator(".js-bill-item, .billing-payment-item--bill").all()
+                item = None
+                for row in bill_rows:
+                    try:
+                        mr = (await row.locator(".billing-payment-item__months").first.inner_text()).strip()
+                        if mr == month_range:
+                            item = row
+                            break
+                    except Exception:
+                        continue
+                if item is None:
+                    continue
+
+                view_bill_selectors = [
+                    "a.js-bill-link",
+                    "a:has-text('View Bill')",
+                    "a:has-text('VIEW BILL')",
+                    "[class*='view-bill']",
+                ]
+                pdf_url = None
+                view_bill_el = None
+
+                for sel in view_bill_selectors:
+                    el = item.locator(sel).first
+                    if await el.count() > 0:
+                        view_bill_el = el
+                        href = await el.get_attribute("href")
+                        if href and "javascript:" not in (href or "").lower():
+                            href = href.strip()
+                            if href.startswith("/"):
+                                href = f"https://www.coned.com{href}"
+                            if href.startswith("http"):
+                                try:
+                                    await db.add_log("info", f"PDF scrape: Same-tab for {month_range}")
+                                    await page.goto(href, wait_until="domcontentloaded", timeout=20000)
+                                    for _ in range(15):
+                                        await asyncio.sleep(1)
+                                        url = page.url.lower()
+                                        if (
+                                            "blob.core.windows.net" in url
+                                            or "cecony-bill" in url
+                                            or ".pdf" in url
+                                            or len(page.url) > 100
+                                        ):
+                                            pdf_url = page.url
+                                            await db.add_log("success", f"PDF scrape: Captured URL for {month_range}")
+                                            break
+                                    await page.goto(BILL_HISTORY_URL, wait_until="domcontentloaded", timeout=15000)
+                                    await asyncio.sleep(2)
+                                except Exception as e:
+                                    await db.add_log("warning", f"PDF scrape same-tab failed for {month_range}: {e}")
+                                    try:
+                                        await page.goto(BILL_HISTORY_URL, wait_until="domcontentloaded", timeout=15000)
+                                    except Exception:
+                                        pass
+                                break
+                        break
+
+                if not pdf_url and view_bill_el:
+                    try:
+                        captured = [None]
+
+                        def on_request(req):
+                            u = req.url.lower()
+                            if "blob.core.windows.net" in u or "cecony-bill" in u or ".pdf" in u:
+                                captured[0] = req.url
+
+                        def on_response(res):
+                            u = res.url.lower()
+                            if "blob.core.windows.net" in u or "cecony-bill" in u or ".pdf" in u:
+                                captured[0] = res.url
+
+                        page.on("request", on_request)
+                        page.on("response", on_response)
+                        try:
+                            async with context.expect_page(timeout=15000) as new_page_info:
+                                await view_bill_el.click()
+                            new_page = await new_page_info.value
+                            new_page.on("request", on_request)
+                            new_page.on("response", on_response)
+                            for _ in range(15):
+                                await asyncio.sleep(1)
+                                if captured[0]:
+                                    pdf_url = captured[0]
+                                    break
+                                url = new_page.url.lower() if new_page.url else ""
+                                if url and url not in ("about:blank", "", "about:srcdoc"):
+                                    if "blob.core.windows.net" in url or "cecony-bill" in url or ".pdf" in url:
+                                        pdf_url = new_page.url
+                                        break
+                            try:
+                                await new_page.close()
+                            except Exception:
+                                pass
+                        finally:
+                            try:
+                                page.remove_listener("request", on_request)
+                                page.remove_listener("response", on_response)
+                            except Exception:
+                                pass
+                    except Exception as e:
+                        await db.add_log("warning", f"PDF scrape new-tab failed for {month_range}: {e}")
+
+                if pdf_url:
+                    result.append((month_range, pdf_url))
+                    capture_count += 1
+
+            except Exception as e:
+                await db.add_log("warning", f"PDF scrape error for {month_range}: {e}")
+                continue
+
+        await db.add_log("info", f"PDF scrape: Captured {len(result)} PDF URLs")
+
+    except Exception as e:
+        await db.add_log("warning", f"PDF scrape failed: {e}")
+        logger.warning(f"PDF scrape failed: {e}")
+
+    return result
+
 
 async def scrape_bill_history(page):
     """

@@ -488,6 +488,7 @@ class MQTTConfigModel(BaseModel):
 class AppSettingsModel(BaseModel):
     time_offset_hours: float = 0.0
     settings_password: str = "0000"
+    auto_download_pdfs: Optional[bool] = None  # None = preserve existing
 
 def encrypt_data(data: str) -> str:
     """Encrypt sensitive data"""
@@ -842,12 +843,17 @@ async def should_trigger_new_bill_tts() -> tuple:
 
 
 async def save_app_settings(settings: dict):
-    """Save app settings (time offset, password) to database"""
+    """Save app settings (time offset, password, auto_download_pdfs) to database. Merges with existing."""
+    existing = await db.get_app_settings_db() or {}
     settings_data = {
-        "time_offset_hours": float(settings.get("time_offset_hours", 0.0)),
+        "time_offset_hours": float(settings.get("time_offset_hours", existing.get("time_offset_hours", 0.0))),
         "settings_password": encrypt_data(settings.get("settings_password", "0000")),
         "updated_at": utc_now_iso()
     }
+    if "auto_download_pdfs" in settings:
+        settings_data["auto_download_pdfs"] = bool(settings["auto_download_pdfs"])
+    else:
+        settings_data["auto_download_pdfs"] = existing.get("auto_download_pdfs", True)
     await db.save_app_settings_db(settings_data)
 
 async def load_app_settings() -> dict:
@@ -859,6 +865,7 @@ async def load_app_settings() -> dict:
             default_settings = {
                 "time_offset_hours": 0.0,
                 "settings_password": "0000",
+                "auto_download_pdfs": True,
             }
             await save_app_settings(default_settings)
             return default_settings
@@ -866,10 +873,11 @@ async def load_app_settings() -> dict:
         return {
             "time_offset_hours": float(data.get("time_offset_hours", 0.0)),
             "settings_password": decrypt_data(data.get("settings_password", encrypt_data("0000"))) if data.get("settings_password") else "0000",
+            "auto_download_pdfs": data.get("auto_download_pdfs", True),
         }
     except Exception as e:
         logging.warning(f"Failed to load app settings: {str(e)}")
-        return {"time_offset_hours": 0.0, "settings_password": "0000"}
+        return {"time_offset_hours": 0.0, "settings_password": "0000", "auto_download_pdfs": True}
 
 async def verify_settings_password(password: str) -> bool:
     """Verify settings password"""
@@ -1281,10 +1289,26 @@ async def get_app_settings_endpoint():
             "time_offset_hours": settings.get("time_offset_hours", 0.0),
             "has_password": bool(settings.get("settings_password")),
             "settings_password": settings.get("settings_password", "0000"),  # Needed for preservation
+            "auto_download_pdfs": settings.get("auto_download_pdfs", True),
         }
     except Exception as e:
         await db.add_log("error", f"Failed to get app settings: {str(e)}")
-        return {"time_offset_hours": 0.0, "has_password": True, "settings_password": "0000"}
+        return {"time_offset_hours": 0.0, "has_password": True, "settings_password": "0000", "auto_download_pdfs": True}
+
+class AutoDownloadPdfsModel(BaseModel):
+    auto_download_pdfs: bool
+
+@app.patch("/api/app-settings")
+async def patch_app_settings_endpoint(data: AutoDownloadPdfsModel):
+    """Update auto_download_pdfs setting only"""
+    try:
+        settings = await load_app_settings()
+        settings["auto_download_pdfs"] = data.auto_download_pdfs
+        await save_app_settings(settings)
+        return {"message": "Settings updated", "auto_download_pdfs": data.auto_download_pdfs}
+    except Exception as e:
+        await db.add_log("error", f"Failed to update app settings: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 class PasswordVerifyModel(BaseModel):
     password: str
@@ -1532,51 +1556,15 @@ class PdfDownloadRequest(BaseModel):
     url: str
 
 async def _download_and_store_pdf(pdf_url: str, bill_id: int) -> dict:
-    """Download PDF from URL and store for bill_id. Returns {success, message, size_bytes}."""
-    import aiohttp
-    import os
-    
-    if not ('blob.core.windows.net' in pdf_url or '.pdf' in pdf_url.lower() or 'cecony' in pdf_url.lower()):
-        await db.add_log("warning", f"URL doesn't look like a ConEd PDF: {pdf_url[:50]}...")
-    
-    bill = await db.get_bill_by_id(bill_id) if bill_id else None
-    if bill_id and not bill:
-        raise HTTPException(status_code=404, detail="Bill not found")
-    
-    async with aiohttp.ClientSession() as session:
-        async with session.get(pdf_url, timeout=aiohttp.ClientTimeout(total=60)) as response:
-            if response.status != 200:
-                await db.add_log("error", f"PDF download failed: HTTP {response.status}")
-                raise HTTPException(status_code=400, detail=f"Failed to download: HTTP {response.status}")
-            pdf_content = await response.read()
-            if len(pdf_content) < 1000:
-                raise HTTPException(status_code=400, detail="Downloaded file too small to be valid PDF")
-    
-    bills_dir = DATA_DIR / "bills"
-    bills_dir.mkdir(exist_ok=True)
-    pdf_path = bills_dir / f"bill_{bill_id}.pdf"
-    if os.path.exists(pdf_path):
-        os.remove(pdf_path)
-    with open(pdf_path, 'wb') as f:
-        f.write(pdf_content)
-    await db.upsert_bill_document(bill_id, f"bills/bill_{bill_id}.pdf", source_url=pdf_url)
-    size_kb = round(len(pdf_content) / 1024, 1)
-    await db.add_log("success", f"PDF saved for bill {bill_id}: {size_kb} KB")
-    
-    # Parse PDF and extract bill details
+    """Download PDF from URL and store for bill_id. Delegates to pdf_utils."""
+    from pdf_utils import download_and_store_pdf
     try:
-        from pdf_parser import parse_coned_bill_pdf
-        # Using db module for database operations
-        parsed_data = parse_coned_bill_pdf(str(pdf_path))
-        if "error" not in parsed_data:
-            await db.upsert_bill_details(bill_id, **parsed_data)
-            await db.add_log("info", f"Parsed bill details: kWh={parsed_data.get('kwh_used')}, due={parsed_data.get('due_date')}")
-        else:
-            await db.add_log("warning", f"PDF parsing error: {parsed_data.get('error')}")
-    except Exception as parse_e:
-        await db.add_log("warning", f"Failed to parse PDF: {parse_e}")
-    
-    return {"success": True, "message": f"PDF saved ({size_kb} KB)", "size_bytes": len(pdf_content)}
+        return await download_and_store_pdf(pdf_url, bill_id)
+    except ValueError as e:
+        msg = str(e)
+        if "not found" in msg.lower():
+            raise HTTPException(status_code=404, detail=msg)
+        raise HTTPException(status_code=400, detail=msg)
 
 @app.post("/api/bills/{bill_id}/pdf/download")
 async def download_bill_pdf_for_period(bill_id: int, request: PdfDownloadRequest):
@@ -2213,10 +2201,9 @@ async def update_payment_bill_endpoint(payment_id: int, data: UpdatePaymentBillM
 async def wipe_all_data():
     """Wipe all bills and payments from database"""
     try:
-        await db.wipe_bills_and_payments()
-        result = {"status": "success", "message": "Database wiped"}
+        result = await db.wipe_bills_and_payments()
         await db.add_log("warning", f"Database wiped: {result['bills_deleted']} bills, {result['payments_deleted']} payments deleted")
-        return {"success": True, **result}
+        return {"success": True, "status": "success", "message": "Database wiped", **result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

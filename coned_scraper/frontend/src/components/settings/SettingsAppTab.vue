@@ -15,6 +15,13 @@
         <h4 class="ha-section-title">📄 Bill PDFs</h4>
         <p class="ha-pdf-desc">Add a PDF for each billing period. Paste the ConEd link, then download. The app stores and hosts the PDF.</p>
 
+        <div class="ha-form-group" style="margin-bottom: 1rem;">
+          <label class="ha-checkbox-label" style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+            <input v-model="autoDownloadPdfs" type="checkbox" @change="handleAutoDownloadPdfsChange" />
+            <span>Auto-download PDFs during scrape</span>
+          </label>
+        </div>
+
         <div v-if="!bills.length" class="info-text">Run the scraper first to load billing periods</div>
         <div v-for="b in bills" :key="b.id" class="ha-pdf-cycle-block">
           <div class="ha-pdf-cycle-header">
@@ -92,6 +99,7 @@ const pdfMessage = ref<{ type: 'success' | 'error'; text: string } | null>(null)
 const bills = ref<Bill[]>([])
 const billStatuses = ref<Record<number, { size_kb: number }>>({})
 const reparseLoading = ref(false)
+const autoDownloadPdfs = ref(true)
 
 const billsWithPdf = computed(() =>
   bills.value.filter((b) => b.pdf_exists).map((b) => ({
@@ -99,6 +107,34 @@ const billsWithPdf = computed(() =>
     size_kb: billStatuses.value[b.id]?.size_kb ?? 0,
   }))
 )
+
+async function loadAppSettings() {
+  try {
+    const res = await fetch(`${getApiBase()}/app-settings`)
+    if (res.ok) {
+      const data = await res.json()
+      autoDownloadPdfs.value = data.auto_download_pdfs !== false
+    }
+  } catch {
+    autoDownloadPdfs.value = true
+  }
+}
+
+async function handleAutoDownloadPdfsChange() {
+  try {
+    const res = await fetch(`${getApiBase()}/app-settings`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ auto_download_pdfs: autoDownloadPdfs.value })
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      pdfMessage.value = { type: 'error', text: err.detail || 'Failed to save' }
+    }
+  } catch {
+    pdfMessage.value = { type: 'error', text: 'Failed to connect' }
+  }
+}
 
 async function loadBills() {
   try {
@@ -259,6 +295,7 @@ async function handleSave() {
 
 let timeInterval: ReturnType<typeof setInterval>
 onMounted(() => {
+  loadAppSettings()
   loadBills().then(() => loadBillStatuses())
   timeInterval = setInterval(() => {
     currentTime.value = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })

@@ -507,6 +507,27 @@ async def delete_bill_document(bill_id: int) -> bool:
     except Exception:
         return False
 
+async def get_month_ranges_with_pdf() -> set:
+    """Get month_range values for bills that already have a PDF document"""
+    await ensure_connected()
+    docs = await db.billdocument.find_many(include={"bill": True})
+    result = set()
+    for d in docs:
+        if d.bill and d.bill.monthRange:
+            result.add(d.bill.monthRange.strip())
+    return result
+
+async def get_bill_id_by_month_range(month_range: str) -> Optional[int]:
+    """Get bill id by month_range (e.g. 'JAN - FEB'). Returns most recent if multiple."""
+    await ensure_connected()
+    if not month_range or not month_range.strip():
+        return None
+    bill = await db.bill.find_first(
+        where={"monthRange": month_range.strip()},
+        order={"billCycleDate": "desc"}
+    )
+    return bill.id if bill else None
+
 # =============================================================================
 # Payments
 # =============================================================================
@@ -1522,7 +1543,7 @@ async def get_ledger_data() -> Dict[str, Any]:
         if bill.payments:
             bill.payments.sort(key=lambda p: p.paymentDate if p.paymentDate else datetime.min, reverse=True)
     
-    bills_data = []
+        bills_data = []
     for bill in bills:
         bill_dict = {
             "id": bill.id,
@@ -1538,7 +1559,7 @@ async def get_ledger_data() -> Dict[str, Any]:
                     "description": p.description,
                     "amount": f"${decimal_to_float(p.amount):.2f}" if p.amount else None,
                     "amount_numeric": decimal_to_float(p.amount),
-                    "payee_status": p.payeeStatus,
+                    "payee_status": p.payeeStatus or "unverified",
                     "payee_name": p.payeeUser.name if p.payeeUser else None,
                     "payee_user_id": p.payeeUserId,
                     "card_last_four": p.cardLastFour,
@@ -1577,6 +1598,8 @@ async def get_ledger_data() -> Dict[str, Any]:
                 "amount_numeric": decimal_to_float(p.amount),
                 "payee_status": p.payeeStatus or "unverified",
                 "payee_name": p.payeeUser.name if p.payeeUser else None,
+                "payee_user_id": p.payeeUserId,
+                "card_last_four": p.cardLastFour,
             }
             # Match to bill: largest cycle_date <= payment date
             candidates = [(d, b) for d, b in bills_by_date if d <= payment_dt]
@@ -1592,11 +1615,16 @@ async def get_ledger_data() -> Dict[str, Any]:
                 key=lambda p: parse_date(p.get("payment_date") or "") or datetime.min,
                 reverse=True
             )
-    
+
+    # Include payee summaries in ledger response for fast frontend loading
+    raw_summaries = await calculate_all_payee_balances()
+    payee_summaries = _format_payee_summaries_for_frontend(raw_summaries)
+
     return {
         "account_balance": account_balance,
         "bills": bills_data,
         "orphan_payments": [],  # No separate section - merged into bills
+        "payee_summaries": payee_summaries,
     }
 
 # =============================================================================
@@ -1675,6 +1703,48 @@ async def calculate_all_payee_balances() -> List[Dict[str, Any]]:
     
     return list(reversed(results))  # Return newest first
 
+
+def _format_payee_summaries_for_frontend(raw: List[Dict[str, Any]]) -> Dict[int, Dict[str, Any]]:
+    """Transform calculate_all_payee_balances output to BillPayeeSummary format, keyed by bill_id"""
+    out: Dict[int, Dict[str, Any]] = {}
+    for s in raw:
+        bid = s.get("bill_id")
+        if bid is None:
+            continue
+        bill_total = s.get("bill_total") or 0
+        total_paid = s.get("total_paid") or 0
+        bill_balance = s.get("bill_balance") or 0
+        if bill_balance < 0.01:
+            bill_status = "paid"
+        elif total_paid > 0.01:
+            bill_status = "partial"
+        else:
+            bill_status = "unpaid"
+        payee_summaries = [
+            {
+                "user_id": p["user_id"],
+                "name": p["name"],
+                "responsibility_percent": p["responsibility_percent"],
+                "amount_owed": p.get("amount_due", 0),
+                "amount_paid": p.get("amount_paid", 0),
+                "share_of_bill": p.get("amount_due", 0),
+                "rollover_from_previous": 0,
+                "current_balance": 0,
+                "status": "paid" if p.get("status") == "paid" else "partial" if p.get("status") == "overpaid" else "unpaid",
+            }
+            for p in s.get("payees") or []
+        ]
+        out[bid] = {
+            "bill_id": bid,
+            "bill_total": bill_total,
+            "total_paid": total_paid,
+            "bill_balance": bill_balance,
+            "bill_status": bill_status,
+            "payee_summaries": payee_summaries,
+        }
+    return out
+
+
 async def get_bill_payee_summary(bill_id: int) -> Optional[Dict[str, Any]]:
     """Get payee summary for a specific bill"""
     all_summaries = await calculate_all_payee_balances()
@@ -1693,16 +1763,19 @@ async def get_all_bill_summaries() -> List[Dict[str, Any]]:
 # Cleanup Functions
 # =============================================================================
 
-async def wipe_bills_and_payments():
-    """Delete all bills and payments"""
+async def wipe_bills_and_payments() -> Dict[str, int]:
+    """Delete all bills and payments. Returns counts deleted."""
     await ensure_connected()
     
-    await db.payment.delete_many()
+    pb = await db.payment.delete_many()
     await db.billdetails.delete_many()
     await db.billdocument.delete_many()
-    await db.bill.delete_many()
+    bb = await db.bill.delete_many()
     
+    bills_deleted = getattr(bb, "count", 0) or 0
+    payments_deleted = getattr(pb, "count", 0) or 0
     logger.info("Wiped all bills and payments")
+    return {"bills_deleted": bills_deleted, "payments_deleted": payments_deleted}
 
 async def get_all_bills_with_payments() -> Dict[str, Any]:
     """Get all bills with their payments and orphan payments for audit tab"""

@@ -197,7 +197,7 @@
                           <div>
                             <div class="ha-payment-desc">
                               {{ payment.description || 'Payment Received' }}
-                              <span v-if="payment.payee_status === 'confirmed' && payment.payee_name" class="ha-payee-badge">
+                              <span v-if="(payment.payee_status === 'confirmed' || payment.payee_status === 'auto_assigned') && payment.payee_name" class="ha-payee-badge">
                                 {{ payment.payee_name }}
                               </span>
                               <span
@@ -209,7 +209,7 @@
                                 Loading...
                               </span>
                               <span
-                                v-else-if="payment.payee_status === 'unverified'"
+                                v-else
                                 class="ha-payee-unverified"
                                 title="Unverified - assign payee in Settings → Payments"
                               >
@@ -251,14 +251,14 @@
                     <div>
                       <div class="ha-payment-desc">
                         {{ payment.description || 'Payment Received' }}
-                        <span v-if="payment.payee_status === 'confirmed' && payment.payee_name" class="ha-payee-badge">
+                        <span v-if="(payment.payee_status === 'confirmed' || payment.payee_status === 'auto_assigned') && payment.payee_name" class="ha-payee-badge">
                           {{ payment.payee_name }}
                         </span>
                         <span v-else-if="payment.payee_status === 'pending'" class="ha-payee-pending">
                           <span class="spinner-mini">⟳</span>
                           Loading payee...
                         </span>
-                        <span v-else-if="payment.payee_status === 'unverified'" class="ha-payee-unverified">
+                        <span v-else class="ha-payee-unverified">
                           Unassigned
                         </span>
                       </div>
@@ -333,6 +333,7 @@ interface LedgerData {
   latest_bill: Bill | null
   bills: Bill[]
   orphan_payments: Payment[]
+  payee_summaries?: Record<number, unknown>
 }
 
 const ledgerData = ref<LedgerData | null>(null)
@@ -343,7 +344,16 @@ const showScreenshotModal = ref(false)
 const showPdfModal = ref(false)
 const viewingBillId = ref<number | null>(null)
 const pdfExists = ref(false)
-const billSummaries = ref<Record<number, any>>({})
+const billSummaries = computed<Record<number, any>>(() => {
+  const summaries = ledgerData.value?.payee_summaries
+  if (!summaries || typeof summaries !== 'object') return {}
+  const out: Record<number, any> = {}
+  for (const [k, v] of Object.entries(summaries)) {
+    const id = parseInt(String(k), 10)
+    if (!isNaN(id) && v) out[id] = v
+  }
+  return out
+})
 const expandedBills = ref<Set<number>>(new Set())
 const expandedPayments = ref<Set<number>>(new Set())
 
@@ -525,31 +535,13 @@ function navigateToSettings() {
   emit('navigate', 'settings')
 }
 
-async function loadAllBillSummaries() {
-  try {
-    const res = await fetch(`${getApiBase()}/bills/all-summaries`)
-    if (res.ok) {
-      const data = await res.json()
-      const summaries: Record<number, any> = {}
-      for (const [key, value] of Object.entries(data.summaries || {})) {
-        summaries[parseInt(key)] = value
-      }
-      billSummaries.value = summaries
-    }
-  } catch {
-    // ignore
-  }
-}
-
 let interval: ReturnType<typeof setInterval>
 onMounted(() => {
   loadLedgerData()
   loadMeterData()
   checkPdfExists()
-  loadAllBillSummaries()
   interval = setInterval(() => {
     loadLedgerData()
-    loadAllBillSummaries()
   }, 30000)
 })
 onUnmounted(() => clearInterval(interval))

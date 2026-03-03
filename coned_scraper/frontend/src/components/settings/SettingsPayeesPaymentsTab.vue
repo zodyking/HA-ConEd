@@ -270,7 +270,7 @@ async function handleDeleteUser(id: number) {
   if (!confirm('Delete this payee?')) return
   try {
     const res = await fetch(`${getApiBase()}/payee-users/${id}`, { method: 'DELETE' })
-    if (res.ok) { await loadUsers(); await loadUnverified(); message.value = { type: 'success', text: 'Deleted' } }
+    if (res.ok) { await loadUsers(); message.value = { type: 'success', text: 'Deleted' } }
   } catch { message.value = { type: 'error', text: 'Failed' } }
 }
 
@@ -305,7 +305,7 @@ async function savePayeeAudit() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ payment_id: paymentId, user_id: Number(userId), method: 'manual' }),
       })
-      if (res.ok) { await loadPaymentsData(); await loadUnverified(); message.value = { type: 'success', text: 'Payee updated' }; auditPayment.value = null }
+      if (res.ok) { await loadPaymentsData(); message.value = { type: 'success', text: 'Payee updated' }; auditPayment.value = null }
       else message.value = { type: 'error', text: 'Failed to update payee' }
     }
   } catch {
@@ -335,7 +335,6 @@ async function handleRelink() {
       const d = await res.json()
       message.value = { type: 'success', text: d.message || `Linked ${d.updated} payments to bills` }
       await loadPaymentsData()
-      await loadUnverified()
     } else {
       const e = await res.json().catch(() => ({}))
       message.value = { type: 'error', text: e.detail || 'Failed to relink' }
