@@ -29,7 +29,7 @@ import db
 app = FastAPI(title="Con Edison API")
 
 # Code version for deployment verification
-CODE_VERSION = "1.2.0-postgres"
+CODE_VERSION = "1.2.1-postgres"
 
 @app.on_event("startup")
 async def startup():
@@ -2855,18 +2855,18 @@ async def get_tts_schedule():
     """Get TTS schedule configuration"""
     from tts_scheduler import get_scheduler
     scheduler = get_scheduler()
-    return scheduler.load_schedule_config()
+    return await scheduler.load_schedule_config()
 
 @app.post("/api/tts-schedule")
 async def save_tts_schedule_endpoint(config: TTSScheduleModel):
     """Save TTS schedule configuration"""
     from tts_scheduler import get_scheduler
     scheduler = get_scheduler()
-    current = scheduler.load_schedule_config()
+    current = await scheduler.load_schedule_config()
     updates = config.model_dump(exclude_none=True)
     for k, v in updates.items():
         current[k] = v
-    scheduler.save_schedule_config(current)
+    await scheduler.save_schedule_config(current)
     
     # Restart scheduler to apply new schedule
     await scheduler.stop()
@@ -2969,7 +2969,7 @@ async def preview_tts_message(
 
     # Get schedule config for sensors - use query params if provided, otherwise use saved config
     scheduler = get_scheduler()
-    schedule_config = scheduler.load_schedule_config()
+    schedule_config = await scheduler.load_schedule_config()
     current_usage_sensor = current_sensor if current_sensor else schedule_config.get("current_usage_sensor", "")
     future_usage_sensor = future_sensor if future_sensor else schedule_config.get("future_usage_sensor", "")
     

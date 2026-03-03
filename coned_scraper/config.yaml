@@ -1,6 +1,6 @@
 ---
 name: Con Edison
-version: "1.2.0"
+version: "1.2.1"
 slug: coned_scraper
 description: Con Edison account integration for Home Assistant — bills, payments, balance, MQTT
 url: https://github.com/zodyking/HA-ConEd
