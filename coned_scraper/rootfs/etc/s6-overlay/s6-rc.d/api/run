@@ -9,7 +9,7 @@ API_PORT="8000"
 POSTGRES_PORT="5432"
 
 bashio::log.info "============================================"
-bashio::log.info "CON EDISON API SERVICE v1.3.2"
+bashio::log.info "CON EDISON API SERVICE v1.3.3"
 bashio::log.info "============================================"
 bashio::log.info "API Port: ${API_PORT}, PostgreSQL Port: ${POSTGRES_PORT}"
 

@@ -29,7 +29,7 @@ import db
 app = FastAPI(title="Con Edison API")
 
 # Code version for deployment verification
-CODE_VERSION = "1.3.2-postgres"
+CODE_VERSION = "1.3.3-postgres"
 
 @app.on_event("startup")
 async def startup():
@@ -999,15 +999,18 @@ async def test_login():
             await db.add_log("success", "Login test successful")
             return {"success": True, "message": "Login successful! Credentials are valid."}
         else:
-            error_msg = result.get('error', 'Login failed')
+            error_msg = result.get('error', 'Login failed - could not verify credentials')
             await db.add_log("error", f"Login test failed: {error_msg}")
             raise HTTPException(status_code=400, detail=error_msg)
     except HTTPException:
         raise
     except Exception as e:
-        error_msg = f"Login test error: {str(e)}"
-        await db.add_log("error", error_msg)
-        raise HTTPException(status_code=500, detail=error_msg)
+        error_msg = str(e)
+        await db.add_log("error", f"Login test error: {error_msg}")
+        # Most exceptions from browser automation are credential-related
+        if any(keyword in error_msg.lower() for keyword in ['login failed', 'error detected', 'incorrect', 'invalid', 'timeout']):
+            raise HTTPException(status_code=400, detail=error_msg)
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {error_msg}")
 
 @app.post("/api/scrape")
 async def start_scraper():
@@ -2540,7 +2543,6 @@ async def save_meter_config_endpoint(config: MeterConfigModel):
 @app.post("/api/meter-config/test")
 async def test_meter_connection():
     """Test meter connection by fetching account info and a reading"""
-    # Using db module for database operations
     from meter_service import get_meter_service
 
     config = await db.get_meter_config_db()
@@ -2555,35 +2557,47 @@ async def test_meter_connection():
             raise HTTPException(status_code=400, detail="Failed to decrypt password")
 
     service = get_meter_service()
-    success = await service.initialize(config)
-
-    if not success:
-        raise HTTPException(status_code=500, detail="Failed to initialize meter connection")
-
-    # Get account info first (includes smart meter status)
-    account_info = await service.get_account_info()
     
-    # Get forecast
-    forecast = await service.fetch_forecast()
-    
-    # Get latest reading
-    reading = await service.fetch_reading()
+    try:
+        success = await service.initialize(config)
 
-    if reading:
-        return {
-            "success": True,
-            "message": f"Connected! Latest reading: {reading['value']} {reading['unit']} (from {reading.get('end_time', 'unknown')})",
-            "reading": reading,
-            "account_info": account_info,
-            "forecast": forecast,
-            "smart_meter_info": {
-                "has_realtime": account_info.get('has_realtime_access', False) if account_info else False,
-                "resolution": account_info.get('read_resolution') if account_info else None,
-                "note": "Realtime data requires special smart meter enrollment with Con Edison. This addon uses hourly historical data (typically 1-24 hour delay)."
+        if not success:
+            raise HTTPException(status_code=400, detail="Failed to initialize meter connection. Check your credentials.")
+
+        # Get account info first (includes smart meter status)
+        account_info = await service.get_account_info()
+        
+        if not account_info:
+            raise HTTPException(status_code=400, detail="Login failed. Check your username, password, and TOTP secret.")
+        
+        # Get forecast
+        forecast = await service.fetch_forecast()
+        
+        # Get latest reading
+        reading = await service.fetch_reading()
+
+        if reading:
+            return {
+                "success": True,
+                "message": f"Connected! Latest reading: {reading['value']} {reading['unit']} (from {reading.get('end_time', 'unknown')})",
+                "reading": reading,
+                "account_info": account_info,
+                "forecast": forecast,
+                "smart_meter_info": {
+                    "has_realtime": account_info.get('has_realtime_access', False) if account_info else False,
+                    "resolution": account_info.get('read_resolution') if account_info else None,
+                    "note": "Realtime data requires special smart meter enrollment with Con Edison. This addon uses hourly historical data (typically 1-24 hour delay)."
+                }
             }
-        }
-    else:
-        raise HTTPException(status_code=500, detail="Failed to fetch meter reading")
+        else:
+            raise HTTPException(status_code=400, detail="Connected to account but no meter readings available. Data may be delayed 1-24 hours.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_msg = str(e)
+        if "invalid" in error_msg.lower() or "password" in error_msg.lower():
+            raise HTTPException(status_code=400, detail=f"Authentication failed: {error_msg}")
+        raise HTTPException(status_code=500, detail=f"Meter test failed: {error_msg}")
 
 
 @app.get("/api/meter-reading")

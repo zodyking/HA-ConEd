@@ -1,0 +1,13 @@
+# Requirements for running local tests
+
+# Opower API library
+opower>=0.8.0
+
+# Browser automation
+playwright>=1.40.0
+
+# TOTP for MFA
+pyotp>=2.9.0
+
+# HTTP client
+aiohttp>=3.9.0
