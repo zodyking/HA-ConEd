@@ -71,14 +71,19 @@
             <div class="ha-section-header">
               <span class="ha-section-title">Current Billing Period</span>
               <span class="ha-section-dates" v-if="meterData?.forecast?.start_date">
-                {{ formatShortDate(meterData.forecast.start_date) }} — {{ formatShortDate(meterData.forecast.end_date) }}
+                {{ formatBillingPeriodDate(meterData.forecast.start_date) }} — {{ formatBillingPeriodDate(meterData.forecast.end_date) }}
+                {{ billingCycleDaysRemainingText }}
               </span>
             </div>
             
             <div class="ha-stats-grid">
-              <div class="ha-stat-item">
-                <div class="ha-stat-label">Usage to Date</div>
-                <div class="ha-stat-value">{{ meterData.forecast.usage_to_date }} <span class="ha-stat-unit">kWh</span></div>
+              <div 
+                class="ha-stat-item ha-stat-clickable" 
+                @click="cycleUsageDisplayMode"
+                title="Click to toggle Usage to Date / Avg Daily Usage"
+              >
+                <div class="ha-stat-label">{{ usageDisplayLabel }}</div>
+                <div class="ha-stat-value">{{ usageDisplayValue }} <span class="ha-stat-unit">kWh</span></div>
               </div>
               <div class="ha-stat-item">
                 <div class="ha-stat-label">Cost to Date</div>
@@ -379,6 +384,66 @@ interface MeterReadingData {
 }
 const meterData = ref<MeterReadingData | null>(null)
 
+// Toggle between Usage to Date and Avg Daily Usage
+const usageDisplayMode = ref<'usage_to_date' | 'avg_daily'>('usage_to_date')
+function cycleUsageDisplayMode() {
+  usageDisplayMode.value = usageDisplayMode.value === 'usage_to_date' ? 'avg_daily' : 'usage_to_date'
+}
+
+const usageDisplayLabel = computed(() => 
+  usageDisplayMode.value === 'usage_to_date' ? 'Usage to Date' : 'Avg Daily Usage'
+)
+
+const usageDisplayValue = computed(() => {
+  const forecast = meterData.value?.forecast
+  if (forecast?.usage_to_date == null) return '—'
+  const usage = forecast.usage_to_date
+  if (usageDisplayMode.value === 'usage_to_date') return String(Math.round(usage))
+  const daysPast = billingCycleDaysPast.value
+  if (daysPast <= 0) return '—'
+  const avg = usage / daysPast
+  return avg % 1 === 0 ? String(Math.round(avg)) : avg.toFixed(1)
+})
+
+const billingCycleDaysPast = computed(() => {
+  const start = meterData.value?.forecast?.start_date
+  if (!start) return 0
+  try {
+    const startDate = new Date(start + 'T00:00:00')
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    startDate.setHours(0, 0, 0, 0)
+    const diffMs = today.getTime() - startDate.getTime()
+    const diffDays = Math.floor(diffMs / (24 * 60 * 60 * 1000))
+    return Math.max(1, diffDays + 1) // inclusive of start and current day
+  } catch {
+    return 0
+  }
+})
+
+const billingCycleDaysRemaining = computed(() => {
+  const end = meterData.value?.forecast?.end_date
+  if (!end) return null
+  try {
+    const endDate = new Date(end + 'T00:00:00')
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    endDate.setHours(0, 0, 0, 0)
+    const diffMs = endDate.getTime() - today.getTime()
+    const diffDays = Math.ceil(diffMs / (24 * 60 * 60 * 1000))
+    return Math.max(0, diffDays)
+  } catch {
+    return null
+  }
+})
+
+const billingCycleDaysRemainingText = computed(() => {
+  const remaining = billingCycleDaysRemaining.value
+  if (remaining == null) return ''
+  const d = remaining
+  return `(${d} ${d === 1 ? 'day' : 'days'} remaining)`
+})
+
 const projectedBillCost = computed(() => {
   if (!meterData.value?.forecast?.forecasted_usage || !meterData.value?.kwh_cost) return '—'
   const cost = meterData.value.forecast.forecasted_usage * meterData.value.kwh_cost
@@ -408,6 +473,31 @@ function formatShortDate(dateStr: string | null): string {
       month: 'short', 
       day: 'numeric' 
     })
+  } catch {
+    return dateStr
+  }
+}
+
+function getOrdinalSuffix(day: number): string {
+  if (day >= 11 && day <= 13) return 'th'
+  switch (day % 10) {
+    case 1: return 'st'
+    case 2: return 'nd'
+    case 3: return 'rd'
+    default: return 'th'
+  }
+}
+
+function formatBillingPeriodDate(dateStr: string | null): string {
+  if (!dateStr) return '—'
+  try {
+    const date = new Date(dateStr + 'T00:00:00')
+    const weekday = date.toLocaleDateString('en-US', { weekday: 'long' })
+    const month = date.toLocaleDateString('en-US', { month: 'long' })
+    const day = date.getDate()
+    const year = date.getFullYear()
+    const ordinal = getOrdinalSuffix(day)
+    return `${weekday} ${month} ${day}${ordinal}, ${year}`
   } catch {
     return dateStr
   }
@@ -813,7 +903,13 @@ onUnmounted(() => clearInterval(interval))
 .ha-stat-item {
   background: white;
   padding: 0.6rem 0.5rem;
-  text-align: center;
+}
+.ha-stat-clickable {
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.ha-stat-clickable:hover {
+  background: #f0f8ff;
 }
 
 .ha-stat-label {

@@ -10,6 +10,7 @@ import aiohttp
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.network import get_url
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import DOMAIN, SCAN_INTERVAL
@@ -68,7 +69,7 @@ class ConEdisonDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     data = info.get("data", {})
                     ingress_entry = data.get("ingress_entry")
                     if ingress_entry:
-                        self._ingress_url = f"{{{{HA_URL}}}}{ingress_entry}"
+                        self._ingress_url = ingress_entry
                         _LOGGER.debug("Got ingress entry: %s", ingress_entry)
                         return ingress_entry
         except Exception as err:
@@ -102,11 +103,18 @@ class ConEdisonDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         data["previous_bill"] = extract_numeric(bills[1].get("bill_total"))
                         data["previous_bill_data"] = bills[1]
                     
-                    # Get last payment from the latest bill
-                    if bills and bills[0].get("payments"):
+                    # Get last payment: use addon's latest_payment (most recent for current bill)
+                    latest_payment = ledger.get("latest_payment")
+                    if latest_payment and isinstance(latest_payment, dict):
+                        data["last_payment"] = extract_numeric(
+                            latest_payment.get("amount")
+                        )
+                        data["last_payment_data"] = latest_payment
+                    elif bills and bills[0].get("payments"):
+                        # Fallback: first item = most recent (addon sorts payments desc)
                         payments = bills[0]["payments"]
                         if payments:
-                            last_payment = payments[-1]
+                            last_payment = payments[0]
                             data["last_payment"] = extract_numeric(
                                 last_payment.get("amount")
                             )
@@ -153,14 +161,11 @@ class ConEdisonDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     # PDF exists - construct external Ingress URL
                     ingress_entry = await self._get_ingress_url()
                     if ingress_entry:
-                        # Use Home Assistant's external URL with ingress path
-                        ha_url = self.hass.config.external_url or self.hass.config.internal_url
-                        if ha_url:
-                            data["bill_pdf_url"] = f"{ha_url.rstrip('/')}{ingress_entry}/api/bill-document"
-                        else:
-                            data["bill_pdf_url"] = f"{ingress_entry}/api/bill-document"
+                        # Use get_url for proper base URL (handles external/internal/cloud correctly)
+                        base_url = get_url(self.hass, prefer_external=True, require_ssl=False)
+                        data["bill_pdf_url"] = f"{base_url.rstrip('/')}{ingress_entry}/api/bill-document"
                     else:
-                        # Fallback to internal URL
+                        # Fallback to addon URL
                         data["bill_pdf_url"] = f"{self.addon_url}/api/bill-document"
 
             return data
