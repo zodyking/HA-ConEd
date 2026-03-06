@@ -45,15 +45,45 @@ model Payment {
   lastScrapedAt      DateTime  @updatedAt @map("last_scraped_at")
   scrapeOrder        Int?      @map("scrape_order")
 
-  bill        Bill?      @relation(fields: [billId], references: [id], onDelete: SetNull)
-  billId      Int?       @map("bill_id")
-  payeeUser   PayeeUser? @relation(fields: [payeeUserId], references: [id], onDelete: SetNull)
-  payeeUserId Int?       @map("payee_user_id")
+  bill             Bill?                   @relation(fields: [billId], references: [id], onDelete: SetNull)
+  billId           Int?                    @map("bill_id")
+  payeeUser        PayeeUser?              @relation(fields: [payeeUserId], references: [id], onDelete: SetNull)
+  payeeUserId      Int?                    @map("payee_user_id")
+  claimResponses   PaymentClaimResponse[]
+  petitions        PaymentPetition[]
 
   @@index([paymentDate])
   @@index([billId])
   @@index([firstScrapedAt])
   @@map("payments")
+}
+
+model PaymentClaimResponse {
+  id           Int      @id @default(autoincrement())
+  paymentId    Int      @map("payment_id")
+  payeeId      Int      @map("payee_id")
+  claimed      Boolean
+  respondedAt  DateTime @default(now()) @map("responded_at")
+
+  payment Payment   @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  payee   PayeeUser @relation("ClaimResponses", fields: [payeeId], references: [id], onDelete: Cascade)
+
+  @@unique([paymentId, payeeId])
+  @@index([paymentId])
+  @@map("payment_claim_responses")
+}
+
+model PaymentPetition {
+  id               Int      @id @default(autoincrement())
+  paymentId        Int      @map("payment_id")
+  petitioningPayeeId Int    @map("petitioning_payee_id")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  payment Payment   @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  payee   PayeeUser @relation("Petitions", fields: [petitioningPayeeId], references: [id], onDelete: Cascade)
+
+  @@index([paymentId])
+  @@map("payment_petitions")
 }
 
 model BillDetails {
@@ -103,22 +133,12 @@ model PayeeUser {
   isAdmin               Boolean  @default(false) @map("is_admin")
   createdAt             DateTime @default(now()) @map("created_at")
 
-  payments Payment[]
-  cards    UserCard[]
+  payments              Payment[]
+  claimResponses        PaymentClaimResponse[] @relation("ClaimResponses")
+  petitions             PaymentPetition[]      @relation("Petitions")
+
 
   @@map("payee_users")
-}
-
-model UserCard {
-  id           Int      @id @default(autoincrement())
-  cardLastFour String   @unique @map("card_last_four")
-  cardLabel    String?  @map("card_label")
-  createdAt    DateTime @default(now()) @map("created_at")
-
-  user   PayeeUser @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userId Int       @map("user_id")
-
-  @@map("user_cards")
 }
 
 model AccountBalanceHistory {

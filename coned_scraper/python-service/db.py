@@ -12,7 +12,7 @@ from decimal import Decimal
 from prisma import Prisma
 from prisma import Json
 from prisma.models import (
-    Bill, Payment, BillDetails, BillDocument, PayeeUser, UserCard,
+    Bill, Payment, BillDetails, BillDocument, PayeeUser,
     AccountBalanceHistory, ScrapedData, Log, ScrapeHistory, AppSetting
 )
 
@@ -66,6 +66,39 @@ async def run_migrations():
                 ON due_reminder_sent(bill_id, sent_date)
             """)
             
+            # Migration: Drop user_cards table (card feature removed)
+            await conn.execute("DROP TABLE IF EXISTS user_cards CASCADE")
+            
+            # Migration: Payment claim responses (notification-based assignment)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS payment_claim_responses (
+                    id SERIAL PRIMARY KEY,
+                    payment_id INTEGER NOT NULL REFERENCES payments(id) ON DELETE CASCADE,
+                    payee_id INTEGER NOT NULL REFERENCES payee_users(id) ON DELETE CASCADE,
+                    claimed BOOLEAN NOT NULL,
+                    responded_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(payment_id, payee_id)
+                )
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS payment_claim_responses_payment_id_idx 
+                ON payment_claim_responses(payment_id)
+            """)
+            
+            # Migration: Payment petitions (dispute/claim after assignment)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS payment_petitions (
+                    id SERIAL PRIMARY KEY,
+                    payment_id INTEGER NOT NULL REFERENCES payments(id) ON DELETE CASCADE,
+                    petitioning_payee_id INTEGER NOT NULL REFERENCES payee_users(id) ON DELETE CASCADE,
+                    created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS payment_petitions_payment_id_idx 
+                ON payment_petitions(payment_id)
+            """)
+            
             logger.info("Database migrations completed successfully")
         finally:
             await conn.close()
@@ -90,6 +123,15 @@ async def disconnect():
     if db.is_connected():
         await db.disconnect()
         logger.info("Disconnected from PostgreSQL database")
+
+async def _raw_conn():
+    """Get asyncpg connection for raw SQL (claim/petition tables)."""
+    import asyncpg
+    import os
+    url = os.environ.get("DATABASE_URL", "")
+    if not url:
+        raise RuntimeError("DATABASE_URL not set")
+    return await asyncpg.connect(url)
 
 async def ensure_connected():
     """Ensure database is connected"""
@@ -863,11 +905,11 @@ async def clear_payment_attribution(payment_id: int) -> bool:
         return False
 
 async def get_unverified_payments() -> List[Dict[str, Any]]:
-    """Get payments with unverified status"""
+    """Get payments with unverified or needs_admin_verification status"""
     await ensure_connected()
     
     payments = await db.payment.find_many(
-        where={"payeeStatus": "unverified"},
+        where={"payeeStatus": {"in": ["unverified", "needs_admin_verification"]}},
         include={"bill": True}
     )
     
@@ -879,9 +921,226 @@ async def get_unverified_payments() -> List[Dict[str, Any]]:
             "amount": f"${decimal_to_float(p.amount):.2f}" if p.amount else None,
             "amount_numeric": decimal_to_float(p.amount),
             "bill_id": p.billId,
+            "payee_status": p.payeeStatus,
         }
         for p in payments
     ]
+
+# =============================================================================
+# Payment Claim Responses (notification-based assignment)
+# =============================================================================
+
+async def record_payment_claim_response(payment_id: int, payee_id: int, claimed: bool) -> bool:
+    """Record a payee's Yes/No response to a payment claim. Runs resolution logic after."""
+    await ensure_connected()
+    try:
+        conn = await _raw_conn()
+        try:
+            await conn.execute(
+                """
+                INSERT INTO payment_claim_responses (payment_id, payee_id, claimed)
+                VALUES ($1, $2, $3)
+                ON CONFLICT (payment_id, payee_id) DO UPDATE SET claimed = $3, responded_at = NOW()
+                """,
+                payment_id, payee_id, claimed
+            )
+            await run_claim_resolution(payment_id, conn=conn)
+            return True
+        finally:
+            await conn.close()
+    except Exception as e:
+        logger.warning(f"Failed to record claim response: {e}")
+        return False
+
+async def run_claim_resolution(payment_id: int, conn=None):
+    """
+    Run assignment resolution after each Yes/No response.
+    1. Eliminate No payees from pool
+    2. 1 Yes -> assign to that payee
+    3. 2+ Yes -> needs_admin_verification
+    4. Only 1 non-responder left -> assign to that payee
+    5. All No -> schedule resend (handled by separate task)
+    """
+    import os
+    own_conn = False
+    if conn is None:
+        conn = await _raw_conn()
+        own_conn = True
+    try:
+        # Get payment
+        p = await db.payment.find_unique(where={"id": payment_id}, include={"payeeUser": True})
+        if not p or p.payeeStatus not in ("unverified", "needs_admin_verification"):
+            return
+        # Get payees with notifications (candidate pool)
+        payees = await db.payeeuser.find_many(where={"notificationsEnabled": True, "notifyService": {"not": None}})
+        payee_ids = [u.id for u in payees]
+        if not payee_ids:
+            return
+        # Get responses
+        rows = await conn.fetch(
+            "SELECT payee_id, claimed FROM payment_claim_responses WHERE payment_id = $1",
+            payment_id
+        )
+        responded = {r["payee_id"]: r["claimed"] for r in rows}
+        yes_ids = [pid for pid, claimed in responded.items() if claimed]
+        no_ids = [pid for pid, claimed in responded.items() if not claimed]
+        non_responders = [pid for pid in payee_ids if pid not in responded]
+        # Eliminate No from pool
+        candidates = [pid for pid in payee_ids if pid not in no_ids]
+        if len(yes_ids) == 1:
+            await attribute_payment(payment_id, yes_ids[0], "verified", "notification_claim")
+            return
+        if len(yes_ids) >= 2:
+            await db.payment.update(where={"id": payment_id}, data={"payeeStatus": "needs_admin_verification"})
+            return
+        if len(non_responders) == 1 and len(yes_ids) == 0:
+            await attribute_payment(payment_id, non_responders[0], "verified", "notification_claim_single_remaining")
+            return
+        # All said No: nothing to do here; resend task handles it
+    finally:
+        if own_conn:
+            await conn.close()
+
+async def get_claim_responses(payment_id: int) -> List[Dict[str, Any]]:
+    """Get all claim responses for a payment."""
+    conn = await _raw_conn()
+    try:
+        rows = await conn.fetch(
+            """SELECT pcr.payee_id, pcr.claimed, pcr.responded_at, pu.name
+               FROM payment_claim_responses pcr
+               JOIN payee_users pu ON pu.id = pcr.payee_id
+               WHERE pcr.payment_id = $1""",
+            payment_id
+        )
+        return [{"payee_id": r["payee_id"], "claimed": r["claimed"], "responded_at": r["responded_at"].isoformat(), "payee_name": r["name"]} for r in rows]
+    finally:
+        await conn.close()
+
+async def get_unverified_payments_with_no_claim_responses() -> List[Dict[str, Any]]:
+    """Unverified payments that have never had claim notifications sent (no responses yet)."""
+    conn = await _raw_conn()
+    try:
+        rows = await conn.fetch("""
+            SELECT p.id, p.payment_date, p.amount, p.description, p.bill_id
+            FROM payments p
+            LEFT JOIN payment_claim_responses pcr ON pcr.payment_id = p.id
+            WHERE p.payee_status = 'unverified' AND pcr.id IS NULL
+        """)
+        return [
+            {
+                "id": r["id"],
+                "payment_date": r["payment_date"].strftime("%m/%d/%Y") if r["payment_date"] else None,
+                "amount": f"${float(r['amount']):.2f}" if r["amount"] else None,
+                "amount_numeric": float(r["amount"]),
+                "description": r["description"],
+                "bill_id": r["bill_id"],
+            }
+            for r in rows
+        ]
+    finally:
+        await conn.close()
+
+async def get_payments_for_claim_resend(claim_resend_delay_hours: int = 24) -> List[Dict[str, Any]]:
+    """
+    Payments where all notified payees said No and the delay has passed.
+    Returns list for resend: we will delete responses and resend.
+    """
+    conn = await _raw_conn()
+    try:
+        payees = await db.payeeuser.find_many(where={"notificationsEnabled": True, "notifyService": {"not": None}})
+        payee_ids = set(u.id for u in payees)
+        if not payee_ids:
+            return []
+        rows = await conn.fetch("""
+            SELECT p.id, p.payment_date, p.amount, p.description,
+                   MAX(pcr.responded_at) as last_response
+            FROM payments p
+            JOIN payment_claim_responses pcr ON pcr.payment_id = p.id
+            WHERE p.payee_status = 'unverified'
+            GROUP BY p.id, p.payment_date, p.amount, p.description
+            HAVING COUNT(DISTINCT pcr.payee_id) = (
+                SELECT COUNT(*) FROM payee_users WHERE notifications_enabled = true AND notify_service IS NOT NULL
+            )
+            AND NOT EXISTS (SELECT 1 FROM payment_claim_responses WHERE payment_id = p.id AND claimed = true)
+        """)
+        result = []
+        from datetime import timedelta
+        cutoff = utc_now() - timedelta(hours=claim_resend_delay_hours)
+        for r in rows:
+            if r["last_response"]:
+                lr = r["last_response"]
+                lr_aware = lr.replace(tzinfo=timezone.utc) if lr.tzinfo is None else lr
+                if lr_aware <= cutoff:
+                    result.append({
+                        "id": r["id"],
+                        "payment_date": r["payment_date"].strftime("%m/%d/%Y") if r["payment_date"] else None,
+                        "amount": f"${float(r['amount']):.2f}" if r["amount"] else None,
+                        "amount_numeric": float(r["amount"]),
+                        "description": r["description"],
+                    })
+        return result
+    finally:
+        await conn.close()
+
+async def reset_claim_responses_for_resend(payment_id: int) -> bool:
+    """Delete all claim responses for a payment so we can resend notifications."""
+    conn = await _raw_conn()
+    try:
+        await conn.execute("DELETE FROM payment_claim_responses WHERE payment_id = $1", payment_id)
+        return True
+    except Exception:
+        return False
+    finally:
+        await conn.close()
+
+async def create_payment_petition(payment_id: int, payee_id: int) -> bool:
+    """Record a petition (payee claiming a payment already assigned elsewhere). Sets needs_admin_verification."""
+    await ensure_connected()
+    try:
+        conn = await _raw_conn()
+        try:
+            await conn.execute(
+                "INSERT INTO payment_petitions (payment_id, petitioning_payee_id) VALUES ($1, $2)",
+                payment_id, payee_id
+            )
+            await db.payment.update(where={"id": payment_id}, data={"payeeStatus": "needs_admin_verification"})
+            return True
+        finally:
+            await conn.close()
+    except Exception:
+        return False
+
+async def get_payment_petitions(payment_id: Optional[int] = None) -> List[Dict[str, Any]]:
+    """Get petitions, optionally filtered by payment_id."""
+    conn = await _raw_conn()
+    try:
+        if payment_id:
+            rows = await conn.fetch(
+                """SELECT pp.id, pp.payment_id, pp.petitioning_payee_id, pp.created_at, pu.name as payee_name
+                   FROM payment_petitions pp
+                   JOIN payee_users pu ON pu.id = pp.petitioning_payee_id
+                   WHERE pp.payment_id = $1""",
+                payment_id
+            )
+        else:
+            rows = await conn.fetch(
+                """SELECT pp.id, pp.payment_id, pp.petitioning_payee_id, pp.created_at, pu.name as payee_name
+                   FROM payment_petitions pp
+                   JOIN payee_users pu ON pu.id = pp.petitioning_payee_id
+                   ORDER BY pp.created_at DESC"""
+            )
+        return [
+            {
+                "id": r["id"],
+                "payment_id": r["payment_id"],
+                "petitioning_payee_id": r["petitioning_payee_id"],
+                "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+                "payee_name": r["payee_name"],
+            }
+            for r in rows
+        ]
+    finally:
+        await conn.close()
 
 # =============================================================================
 # Payee Users
@@ -908,13 +1167,10 @@ async def create_payee_user(name: str, is_default: bool = False, responsibility_
     )
 
 async def get_payee_users() -> List[Dict[str, Any]]:
-    """Get all payee users with their cards"""
+    """Get all payee users"""
     await ensure_connected()
     
-    users = await db.payeeuser.find_many(
-        include={"cards": True},
-        order={"name": "asc"}
-    )
+    users = await db.payeeuser.find_many(order={"name": "asc"})
     
     return [
         {
@@ -926,7 +1182,6 @@ async def get_payee_users() -> List[Dict[str, Any]]:
             "is_default": u.isDefault,
             "responsibility_percent": u.responsibilityPercent,
             "is_admin": u.isAdmin,
-            "cards": ",".join([c.cardLastFour for c in u.cards]) if u.cards else "",
             "created_at": u.createdAt.isoformat() if u.createdAt else None,
         }
         for u in users
@@ -1263,74 +1518,6 @@ async def record_due_reminder_sent(bill_id: int) -> None:
     except Exception as e:
         logger.warning(f"record_due_reminder_sent failed: {e}")
 
-
-# =============================================================================
-# User Cards
-# =============================================================================
-
-async def add_user_card(user_id: int, card_last_four: str, card_label: Optional[str] = None) -> UserCard:
-    """Add a card to a user"""
-    await ensure_connected()
-    
-    return await db.usercard.create(
-        data={
-            "userId": user_id,
-            "cardLastFour": card_last_four,
-            "cardLabel": card_label
-        }
-    )
-
-async def get_user_cards(user_id: int) -> List[Dict[str, Any]]:
-    """Get all cards for a user"""
-    await ensure_connected()
-    
-    cards = await db.usercard.find_many(where={"userId": user_id})
-    
-    return [
-        {
-            "id": c.id,
-            "card_last_four": c.cardLastFour,
-            "card_label": c.cardLabel,
-        }
-        for c in cards
-    ]
-
-async def get_user_by_card(card_last_four: str) -> Optional[Dict[str, Any]]:
-    """Get user by card last four digits"""
-    await ensure_connected()
-    
-    card = await db.usercard.find_unique(
-        where={"cardLastFour": card_last_four},
-        include={"user": True}
-    )
-    
-    if not card or not card.user:
-        return None
-    
-    return {
-        "id": card.user.id,
-        "name": card.user.name,
-    }
-
-async def update_user_card(card_id: int, card_label: str) -> bool:
-    """Update card label"""
-    await ensure_connected()
-    
-    try:
-        await db.usercard.update(where={"id": card_id}, data={"cardLabel": card_label})
-        return True
-    except Exception:
-        return False
-
-async def delete_user_card(card_id: int) -> bool:
-    """Delete a card"""
-    await ensure_connected()
-    
-    try:
-        await db.usercard.delete(where={"id": card_id})
-        return True
-    except Exception:
-        return False
 
 # =============================================================================
 # Account Balance

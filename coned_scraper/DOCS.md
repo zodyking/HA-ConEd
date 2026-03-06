@@ -52,6 +52,28 @@ Configure MQTT in the Settings tab. The addon publishes to MQTT topics for `acco
 
 **MQTT Discovery (enabled by default):** When enabled, the addon publishes Home Assistant MQTT discovery configs so sensors are **auto-registered**—no manual `configuration.yaml` needed. After configuring MQTT and running a scrape, sensors such as `sensor.coned_latest_bill`, `sensor.coned_account_balance`, `sensor.coned_last_payment`, etc. appear automatically under Settings → Devices & services → MQTT. You can disable discovery in MQTT Settings if you prefer manual YAML configuration.
 
+## Payment Claim Notifications (Notification-Based Assignment)
+
+When new unverified payments are detected, the addon sends "Did you make this $X payment on [date]?" notifications to each payee with notifications enabled. Payees tap **Yes** or **No** to claim or deny the payment.
+
+**Required: Home Assistant automation.** You must create an automation that:
+1. **Trigger:** `mobile_app_notification_action` with `action` starting with `CONED_CLAIM_`
+2. **Action:** HTTP request to the addon to record the response
+
+The action string format is `CONED_CLAIM_YES_<payment_id>_<payee_id>` or `CONED_CLAIM_NO_<payment_id>_<payee_id>`. Parse these to get `payment_id` and `payee_id`, then call:
+
+```
+POST http://localhost:8123/api/coned/ingress/<addon-slug>/api/payments/<payment_id>/payee-claim
+Body: { "payee_id": <payee_id>, "claimed": true }   # for Yes
+       { "payee_id": <payee_id>, "claimed": false }  # for No
+```
+
+Replace `<addon-slug>` with your addon slug (e.g. `core_coned`). Use the Ingress URL so the request goes through HA authentication.
+
+See `../Agent-Files/payment-claim-automation-example.md` (in this repo) for a full automation YAML example.
+
+**Resend after all No:** If all payees say No (e.g. accidental taps), the addon resends the claim request after a configurable delay (default 24 hours). Configure `claim_resend_delay_hours` in App Settings.
+
 ## Ingress
 
 This addon uses Home Assistant Ingress. The web interface is accessed through the sidebar—no additional ports or network configuration required.

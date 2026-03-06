@@ -132,6 +132,74 @@ async def notify_balance_change(
     })
 
 
+async def send_payment_claim_request(payment: Dict[str, Any], payees: List[Dict[str, Any]]) -> int:
+    """
+    Send per-payee claim notifications for an unverified payment.
+    Title: "Payment to claim"
+    Message: "Did you make the $X.XX payment on [date]?"
+    Actions: Yes (CONED_CLAIM_YES_<payment_id>_<payee_id>), No (CONED_CLAIM_NO_<payment_id>_<payee_id>)
+    Main tap does nothing; only Yes/No actions trigger the automation.
+    """
+    import aiohttp
+    
+    token = os.environ.get("SUPERVISOR_TOKEN")
+    if not token:
+        logger.debug("Not running as HA addon, skipping payment claim notifications")
+        return 0
+    
+    payment_id = payment.get("id")
+    amount = payment.get("amount", "N/A")
+    payment_date = payment.get("payment_date", "N/A")
+    title = "Payment to claim"
+    message = f"Did you make the {amount} payment on {payment_date}?"
+    
+    sent_count = 0
+    try:
+        async with aiohttp.ClientSession() as session:
+            for payee in payees:
+                notify_service = payee.get("notify_service")
+                if not notify_service:
+                    continue
+                payee_id = payee.get("id")
+                if not payee_id:
+                    continue
+                # Actions: only Yes/No trigger events; main tap does nothing via tap_action: "none" or similar
+                # HA mobile_app: data.actions with action IDs. Automation triggers on mobile_app_notification_action.
+                data_payload = {
+                    "actions": [
+                        {"action": f"CONED_CLAIM_YES_{payment_id}_{payee_id}", "title": "Yes"},
+                        {"action": f"CONED_CLAIM_NO_{payment_id}_{payee_id}", "title": "No"},
+                    ],
+                    "tag": f"coned_claim_{payment_id}_{payee_id}",
+                    "ttl": 0,
+                    "priority": "high",
+                }
+                try:
+                    async with session.post(
+                        f"http://supervisor/core/api/services/notify/{notify_service}",
+                        headers={
+                            "Authorization": f"Bearer {token}",
+                            "Content-Type": "application/json"
+                        },
+                        json={
+                            "title": title,
+                            "message": message,
+                            "data": data_payload,
+                        }
+                    ) as resp:
+                        if resp.status == 200:
+                            sent_count += 1
+                            logger.info(f"Sent claim request to {payee.get('name', 'payee')}")
+                        else:
+                            logger.warning(f"Failed to send claim notification to {notify_service}: {resp.status}")
+                except Exception as e:
+                    logger.error(f"Error sending claim notification to {notify_service}: {e}")
+    except Exception as e:
+        logger.error(f"Failed to send payment claim notifications: {e}")
+    
+    return sent_count
+
+
 async def notify_due_reminder(
     amount: str,
     due_date: str,

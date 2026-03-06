@@ -29,7 +29,7 @@ import db
 app = FastAPI(title="Con Edison API")
 
 # Code version for deployment verification
-CODE_VERSION = "1.3.38"
+CODE_VERSION = "1.3.39"
 
 @app.on_event("startup")
 async def startup():
@@ -91,7 +91,6 @@ from data_config import DATA_DIR
 
 CREDENTIALS_FILE = DATA_DIR / "credentials.json"
 SETTINGS_FILE = DATA_DIR / "app_settings.json"
-IMAP_CONFIG_FILE = DATA_DIR / "imap_config.json"
 LAST_PAYMENT_STATE_FILE = DATA_DIR / "last_payment_state.json"
 TTS_CONFIG_FILE = DATA_DIR / "tts_config.json"
 TTS_PAYMENT_STATE_FILE = DATA_DIR / "tts_payment_state.json"
@@ -265,17 +264,7 @@ async def run_scheduled_scrape():
             
         # Due date reminders now run at configured time via due_reminder_scheduler_loop
         
-        # Check IMAP for payment attribution if configured
         if success:
-            try:
-                from imap_client import load_imap_config, run_imap_auto_attribution
-                imap_config = load_imap_config()
-                if imap_config.get('auto_assign_mode') == 'every_scrape' and imap_config.get('server'):
-                    await db.add_log("info", "Running IMAP payment attribution after scrape...")
-                    await run_imap_auto_attribution()
-            except Exception as imap_e:
-                await db.add_log("warning", f"IMAP auto-attribution failed: {imap_e}")
-            
             # Auto-assign expired pending payments to default payee
             try:
                 # Auto-assign expired pending payments
@@ -285,6 +274,19 @@ async def run_scheduled_scrape():
                     await db.add_log("info", result.get('message', 'Auto-assigned expired pending payments'))
             except Exception as auto_e:
                 await db.add_log("warning", f"Auto-assign expired payments failed: {auto_e}")
+            
+            # Send payment claim requests for new unverified payments (notification-based assignment)
+            try:
+                from notifications import send_payment_claim_request
+                payments_to_claim = await db.get_unverified_payments_with_no_claim_responses()
+                payees = await db.get_payees_with_notifications()
+                if payments_to_claim and payees:
+                    for payment in payments_to_claim:
+                        sent = await send_payment_claim_request(payment, payees)
+                        if sent > 0:
+                            await db.add_log("info", f"Sent payment claim request to {sent} payee(s) for payment ${payment.get('amount_numeric', 0):.2f}")
+            except Exception as claim_e:
+                await db.add_log("warning", f"Payment claim notifications failed: {claim_e}")
         
         duration = time_module.time() - start_time
         await db.add_scrape_history(success, None if success else "Scrape failed", None, duration)
@@ -375,6 +377,35 @@ async def due_reminder_scheduler_loop():
             await asyncio.sleep(60)
 
 
+async def claim_resend_scheduler_loop():
+    """Resend payment claim notifications when all payees said No and delay has passed."""
+    while True:
+        try:
+            await asyncio.sleep(900)  # Check every 15 minutes
+            settings = await load_app_settings()
+            delay_hours = int(settings.get("claim_resend_delay_hours", 24))
+            candidates = await db.get_payments_for_claim_resend(claim_resend_delay_hours=delay_hours)
+            if not candidates:
+                continue
+            from notifications import send_payment_claim_request
+            payees = await db.get_payees_with_notifications()
+            if not payees:
+                continue
+            for payment in candidates:
+                try:
+                    await db.reset_claim_responses_for_resend(payment["id"])
+                    sent = await send_payment_claim_request(payment, payees)
+                    if sent > 0:
+                        await db.add_log("info", f"Resent payment claim request for payment ${payment.get('amount_numeric', 0):.2f} (all had said No)")
+                except Exception as e:
+                    await db.add_log("warning", f"Claim resend failed for payment {payment.get('id')}: {e}")
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logging.error(f"Claim resend scheduler error: {e}")
+            await asyncio.sleep(900)
+
+
 async def restart_scheduler():
     """Restart the scheduler with current settings"""
     global _scheduler_task
@@ -396,9 +427,11 @@ async def restart_scheduler():
         await db.add_log("info", "Scheduler disabled")
 
 # Start scheduler on app startup
+_claim_resend_task = None
+
 @app.on_event("startup")
 async def startup_event():
-    global _scheduler_task, _due_reminder_task
+    global _scheduler_task, _due_reminder_task, _claim_resend_task
 
     schedule = await load_schedule()
     if schedule["enabled"]:
@@ -407,6 +440,9 @@ async def startup_event():
 
     _due_reminder_task = asyncio.create_task(due_reminder_scheduler_loop())
     await db.add_log("info", "Due reminder scheduler started")
+
+    _claim_resend_task = asyncio.create_task(claim_resend_scheduler_loop())
+    await db.add_log("info", "Claim resend scheduler started")
 
     # Start TTS scheduler
     try:
@@ -427,7 +463,9 @@ async def startup_event():
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    global _scheduler_task, _due_reminder_task
+    global _scheduler_task, _due_reminder_task, _claim_resend_task
+    if _claim_resend_task and not _claim_resend_task.done():
+        _claim_resend_task.cancel()
     if _scheduler_task and not _scheduler_task.done():
         _scheduler_task.cancel()
         try:
@@ -708,6 +746,10 @@ async def save_app_settings(settings: dict):
         settings_data["breakdown_show_rollover"] = bool(settings["breakdown_show_rollover"])
     else:
         settings_data["breakdown_show_rollover"] = existing.get("breakdown_show_rollover", False)
+    if "claim_resend_delay_hours" in settings:
+        settings_data["claim_resend_delay_hours"] = int(settings["claim_resend_delay_hours"])
+    else:
+        settings_data["claim_resend_delay_hours"] = existing.get("claim_resend_delay_hours", 24)
     await db.save_app_settings_db(settings_data)
 
 async def load_app_settings() -> dict:
@@ -721,6 +763,7 @@ async def load_app_settings() -> dict:
                 "settings_password": "0000",
                 "auto_download_pdfs": True,
                 "breakdown_show_rollover": False,
+                "claim_resend_delay_hours": 24,
             }
             await save_app_settings(default_settings)
             return default_settings
@@ -730,10 +773,11 @@ async def load_app_settings() -> dict:
             "settings_password": decrypt_data(data.get("settings_password", encrypt_data("0000"))) if data.get("settings_password") else "0000",
             "auto_download_pdfs": data.get("auto_download_pdfs", True),
             "breakdown_show_rollover": data.get("breakdown_show_rollover", False),
+            "claim_resend_delay_hours": int(data.get("claim_resend_delay_hours", 24)),
         }
     except Exception as e:
         logging.warning(f"Failed to load app settings: {str(e)}")
-        return {"time_offset_hours": 0.0, "settings_password": "0000", "auto_download_pdfs": True, "breakdown_show_rollover": False}
+        return {"time_offset_hours": 0.0, "settings_password": "0000", "auto_download_pdfs": True, "breakdown_show_rollover": False, "claim_resend_delay_hours": 24}
 
 async def verify_settings_password(password: str) -> bool:
     """Verify settings password"""
@@ -1644,12 +1688,57 @@ async def get_payments(limit: int = 100, bill_id: Optional[int] = None):
 
 @app.get("/api/payments/unverified")
 async def get_payments_unverified(limit: int = 50):
-    """Get payments that need payee verification"""
+    """Get payments that need payee verification (unverified or needs_admin_verification)"""
     try:
         payments = await db.get_unverified_payments()
         return {"payments": payments}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+class PayeeClaimModel(BaseModel):
+    payee_id: int
+    claimed: bool
+
+
+class PetitionModel(BaseModel):
+    payee_id: int
+
+
+@app.post("/api/payments/{payment_id}/payee-claim")
+async def record_payee_claim(payment_id: int, body: PayeeClaimModel):
+    """
+    Record a payee's Yes/No response to a payment claim.
+    Called by Home Assistant automation when user taps Yes/No on notification.
+    Runs assignment resolution logic after recording.
+    """
+    try:
+        payment = await db.get_payment_by_id(payment_id)
+        if not payment:
+            raise HTTPException(status_code=404, detail="Payment not found")
+        if payment.get("payee_status") not in ("unverified", "needs_admin_verification"):
+            raise HTTPException(status_code=400, detail="Payment already assigned")
+        ok = await db.record_payment_claim_response(payment_id, body.payee_id, body.claimed)
+        if not ok:
+            raise HTTPException(status_code=500, detail="Failed to record claim response")
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/payments/{payment_id}/petition")
+async def create_payment_petition(payment_id: int, body: PetitionModel):
+    """Record a petition - payee claiming a payment already assigned to someone else."""
+    try:
+        ok = await db.create_payment_petition(payment_id, body.payee_id)
+        if not ok:
+            raise HTTPException(status_code=500, detail="Failed to create petition")
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 # ==========================================
 # PAYEE USER MANAGEMENT
@@ -1670,11 +1759,6 @@ class PayeeUserUpdateModel(BaseModel):
     is_default: Optional[bool] = None
     is_admin: Optional[bool] = None
 
-class UserCardModel(BaseModel):
-    user_id: int
-    card_last_four: str
-    label: Optional[str] = None
-
 class PaymentAttributionModel(BaseModel):
     payment_id: int
     user_id: int
@@ -1682,7 +1766,7 @@ class PaymentAttributionModel(BaseModel):
 
 @app.get("/api/payee-users")
 async def list_payee_users():
-    """Get all payee users with their cards"""
+    """Get all payee users"""
     try:
         users = await db.get_payee_users()
         return {"users": users}
@@ -1795,57 +1879,6 @@ async def get_bill_summary(bill_id: int):
     try:
         summary = await db.get_bill_payee_summary(bill_id)
         return summary
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/payee-users/{user_id}/cards")
-async def list_user_cards(user_id: int):
-    """Get all cards for a payee user"""
-    try:
-        cards = await db.get_user_cards(user_id)
-        return {"cards": cards}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/user-cards")
-async def add_card(card: UserCardModel):
-    """Add a card to a user"""
-    try:
-        new_card = await db.add_user_card(card.user_id, card.card_last_four, card.label)
-        card_id = new_card.id
-        await db.add_log("info", f"Added card *{card.card_last_four} to user ID: {card.user_id}")
-        return {"id": card_id}
-    except Exception as e:
-        if "UNIQUE constraint" in str(e):
-            raise HTTPException(status_code=400, detail="This card ending is already registered")
-        raise HTTPException(status_code=500, detail=str(e))
-
-class UserCardUpdateModel(BaseModel):
-    card_label: Optional[str] = None
-
-@app.put("/api/user-cards/{card_id}")
-async def update_card(card_id: int, update: UserCardUpdateModel):
-    """Update a card's label"""
-    try:
-        updated = await db.update_user_card(card_id, update.card_label)
-        if updated:
-            return {"success": True}
-        raise HTTPException(status_code=404, detail="Card not found")
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.delete("/api/user-cards/{card_id}")
-async def remove_card(card_id: int):
-    """Remove a card"""
-    try:
-        deleted = await db.delete_user_card(card_id)
-        if deleted:
-            return {"success": True}
-        raise HTTPException(status_code=404, detail="Card not found")
-    except HTTPException:
-        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -2003,180 +2036,6 @@ async def get_bills_with_payments_endpoint():
         return data
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-# ==========================================
-# IMAP EMAIL CONFIGURATION
-# ==========================================
-
-class IMAPConfigModel(BaseModel):
-    enabled: bool = False
-    server: str
-    port: int = 993
-    email: str
-    password: str
-    use_ssl: bool = True
-    gmail_label: str = "ConEd"
-    subject_filter: str = "Payment Confirmation"
-    auto_assign_mode: str = "manual"  # 'manual', 'every_scrape', 'custom'
-    custom_interval_minutes: int = 60
-
-class IMAPTestModel(BaseModel):
-    server: str
-    port: int = 993
-    email: str
-    password: str
-    use_ssl: bool = True
-    gmail_label: str = "ConEd"
-    subject_filter: str = "Payment Confirmation"
-
-@app.get("/api/imap-config")
-async def get_imap_config():
-    """Get IMAP configuration (password masked)"""
-    from imap_client import load_imap_config
-    config = load_imap_config()
-    # Mask password
-    if config.get('password'):
-        config['password'] = '••••••••'
-    return config
-
-@app.post("/api/imap-config")
-async def save_imap_config_endpoint(config: IMAPConfigModel):
-    """Save IMAP configuration"""
-    from imap_client import save_imap_config, load_imap_config
-    
-    # If password is masked, keep existing password
-    existing = load_imap_config()
-    if config.password == '••••••••' and existing.get('password'):
-        password = existing['password']
-    else:
-        password = config.password
-    
-    new_config = {
-        'enabled': config.enabled,
-        'server': config.server,
-        'port': config.port,
-        'email': config.email,
-        'password': password,
-        'use_ssl': config.use_ssl,
-        'gmail_label': config.gmail_label,
-        'subject_filter': config.subject_filter,
-        'auto_assign_mode': config.auto_assign_mode,
-        'custom_interval_minutes': config.custom_interval_minutes,
-        'updated_at': utc_now_iso()
-    }
-    
-    save_imap_config(new_config)
-    await db.add_log("info", f"IMAP configuration updated")
-    
-    return {"success": True, "message": "IMAP configuration saved"}
-
-@app.post("/api/imap-config/test")
-async def test_imap_config(config: IMAPTestModel):
-    """Test IMAP connection"""
-    from imap_client import test_imap_connection, load_imap_config
-    
-    # If password is masked, use existing password
-    password = config.password
-    if password == '••••••••':
-        existing = load_imap_config()
-        password = existing.get('password', '')
-    
-    # Get gmail_label from existing config if not in test model
-    existing = load_imap_config()
-    gmail_label = existing.get('gmail_label')
-    
-    result = test_imap_connection(
-        server=config.server,
-        port=config.port,
-        email_addr=config.email,
-        password=password,
-        use_ssl=config.use_ssl,
-        gmail_label=gmail_label
-    )
-    
-    if result['success']:
-        await db.add_log("success", "IMAP connection test successful")
-    else:
-        await db.add_log("error", f"IMAP connection test failed: {result['message']}")
-    
-    return result
-
-@app.post("/api/imap-config/preview")
-async def preview_imap_emails():
-    """Preview emails that would be found with current settings"""
-    from imap_client import preview_email_search, load_imap_config
-    
-    config = load_imap_config()
-    
-    if not config.get('server') or not config.get('email'):
-        return {
-            'success': False,
-            'message': 'IMAP not configured'
-        }
-    
-    await db.add_log("info", f"Previewing emails - Label: {config.get('gmail_label')}, Subject: {config.get('subject_filter')}")
-    
-    result = preview_email_search(
-        server=config['server'],
-        port=config.get('port', 993),
-        email_addr=config['email'],
-        password=config.get('password', ''),
-        use_ssl=config.get('use_ssl', True),
-        gmail_label=config.get('gmail_label'),
-        subject_filter=config.get('subject_filter'),
-        limit=10
-    )
-    
-    if result['success']:
-        await db.add_log("success", f"Found {result['emails_found']} payment emails")
-    else:
-        await db.add_log("error", f"Email preview failed: {result['message']}")
-    
-    return result
-
-@app.post("/api/imap-config/sync")
-async def sync_imap_emails():
-    """Run email sync to match payments"""
-    from imap_client import run_email_sync
-    
-    await db.add_log("info", "Starting IMAP email sync...")
-    result = run_email_sync()
-    
-    if result['success']:
-        await db.add_log("success", f"Email sync complete: {result['message']}")
-    else:
-        await db.add_log("error", f"Email sync failed: {result['message']}")
-    
-    return result
-
-@app.get("/api/imap-config/preview")
-async def preview_imap_emails():
-    """Preview emails without matching (for debugging)"""
-    from imap_client import load_imap_config, fetch_coned_payment_emails
-    
-    config = load_imap_config()
-    
-    if not config.get('server'):
-        raise HTTPException(status_code=400, detail="IMAP not configured")
-    
-    try:
-        emails = fetch_coned_payment_emails(
-            server=config['server'],
-            port=config.get('port', 993),
-            email_addr=config['email'],
-            password=config['password'],
-            use_ssl=config.get('use_ssl', True),
-            days_back=config.get('days_back', 30)
-        )
-        
-        return {
-            "success": True,
-            "count": len(emails),
-            "emails": emails[:20]  # Limit to 20 for preview
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
 
 # ========== Meter Tracking Configuration ==========
 

@@ -32,7 +32,6 @@
         <SettingsPayeesPaymentsTab v-else-if="currentPage === 'payees-payments'" />
         <SettingsTtsTab v-else-if="currentPage === 'tts'" />
         <SettingsNotificationsTab v-else-if="currentPage === 'notifications'" />
-        <SettingsImapTab v-else-if="currentPage === 'imap'" />
     </div>
   </div>
 </template>
@@ -58,7 +57,6 @@ type Page =
   | 'app-settings'
   | 'payees-payments'
   | 'tts'
-  | 'imap'
   | 'notifications'
 
 const currentPage = ref<Page>('menu')
@@ -68,10 +66,9 @@ const menuItems = [
   { id: 'credentials' as Page, icon: '🔐', label: 'Credentials & Meter', description: 'Con Edison login and meter tracking' },
   { id: 'automated' as Page, icon: '⏰', label: 'Automated Scrape', description: 'Schedule automatic data scraping' },
   { id: 'bill-settings' as Page, icon: '📄', label: 'Bill Settings', description: 'Bill PDFs, auto-download, re-parse' },
-  { id: 'payees-payments' as Page, icon: '👥', label: 'Payees & Payments', description: 'Users, bill split, cards, and payment audit' },
+  { id: 'payees-payments' as Page, icon: '👥', label: 'Payees & Payments', description: 'Users, bill split, and payment audit' },
   { id: 'notifications' as Page, icon: '🔔', label: 'Notifications', description: 'Mobile push notifications for bill events' },
   { id: 'tts' as Page, icon: '🔊', label: 'TTS Alerts', description: 'Media player, TTS messages, and wait-for-idle' },
-  { id: 'imap' as Page, icon: '📧', label: 'Email / IMAP', description: 'Email parsing for auto-payment detection' },
   { id: 'app-settings' as Page, icon: '⚙️', label: 'App Settings', description: 'App configuration' },
 ]
 </script>

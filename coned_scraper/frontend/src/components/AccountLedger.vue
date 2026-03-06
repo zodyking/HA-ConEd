@@ -70,32 +70,46 @@
           <div class="ha-billing-section" v-if="meterData?.enabled && meterData?.forecast?.usage_to_date">
             <div class="ha-section-header">
               <span class="ha-section-title">Current Billing Period</span>
-              <span class="ha-section-dates" v-if="meterData?.forecast?.start_date">
-                {{ formatBillingPeriodDate(meterData.forecast.start_date) }} — {{ formatBillingPeriodDate(meterData.forecast.end_date) }}
-                {{ billingCycleDaysRemainingText }}
-              </span>
+              <div class="ha-section-dates-wrap" v-if="meterData?.forecast?.start_date">
+                <span class="ha-section-dates">
+                  {{ formatBillingPeriodDate(meterData.forecast.start_date) }} — {{ formatBillingPeriodDate(meterData.forecast.end_date) }}
+                </span>
+                <span class="ha-section-days-remaining">{{ billingCycleDaysRemainingText }}</span>
+              </div>
             </div>
             
             <div class="ha-stats-grid">
               <div 
                 class="ha-stat-item ha-stat-clickable" 
                 @click="cycleUsageDisplayMode"
-                title="Click to toggle Usage to Date / Avg Daily Usage"
+                title="Click to toggle raw / avg daily"
               >
                 <div class="ha-stat-label">{{ usageDisplayLabel }}</div>
                 <div class="ha-stat-value">{{ usageDisplayValue }} <span class="ha-stat-unit">kWh</span></div>
               </div>
-              <div class="ha-stat-item">
-                <div class="ha-stat-label">Cost to Date</div>
-                <div class="ha-stat-value">${{ meterData.usage_to_date_cost?.toFixed(2) || '—' }}</div>
+              <div 
+                class="ha-stat-item ha-stat-clickable" 
+                @click="cycleUsageDisplayMode"
+                title="Click to toggle raw / avg daily"
+              >
+                <div class="ha-stat-label">{{ costDisplayLabel }}</div>
+                <div class="ha-stat-value">${{ costDisplayValue }}</div>
               </div>
-              <div class="ha-stat-item ha-stat-projected">
-                <div class="ha-stat-label">Projected Usage</div>
-                <div class="ha-stat-value">{{ meterData.forecast.forecasted_usage }} <span class="ha-stat-unit">kWh</span></div>
+              <div 
+                class="ha-stat-item ha-stat-projected ha-stat-clickable" 
+                @click="cycleUsageDisplayMode"
+                title="Click to toggle raw / avg daily"
+              >
+                <div class="ha-stat-label">{{ projectedUsageDisplayLabel }}</div>
+                <div class="ha-stat-value">{{ projectedUsageDisplayValue }} <span class="ha-stat-unit">kWh</span></div>
               </div>
-              <div class="ha-stat-item ha-stat-projected">
-                <div class="ha-stat-label">Projected Bill</div>
-                <div class="ha-stat-value">${{ projectedBillCost }}</div>
+              <div 
+                class="ha-stat-item ha-stat-projected ha-stat-clickable" 
+                @click="cycleUsageDisplayMode"
+                title="Click to toggle raw / avg daily"
+              >
+                <div class="ha-stat-label">{{ projectedBillDisplayLabel }}</div>
+                <div class="ha-stat-value">${{ projectedBillDisplayValue }}</div>
               </div>
             </div>
           </div>
@@ -214,6 +228,13 @@
                                 Loading...
                               </span>
                               <span
+                                v-else-if="payment.payee_status === 'needs_admin_verification'"
+                                class="ha-payee-unverified"
+                                title="Multiple payees claimed - assign in Settings → Payments"
+                              >
+                                Needs Admin Verification
+                              </span>
+                              <span
                                 v-else
                                 class="ha-payee-unverified"
                                 title="Unverified - assign payee in Settings → Payments"
@@ -263,6 +284,9 @@
                         <span v-else-if="payment.payee_status === 'pending'" class="ha-payee-pending">
                           <span class="spinner-mini">⟳</span>
                           Loading payee...
+                        </span>
+                        <span v-else-if="payment.payee_status === 'needs_admin_verification'" class="ha-payee-unverified">
+                          Needs Admin Verification
                         </span>
                         <span v-else class="ha-payee-unverified">
                           Unassigned
@@ -390,10 +414,9 @@ function cycleUsageDisplayMode() {
   usageDisplayMode.value = usageDisplayMode.value === 'usage_to_date' ? 'avg_daily' : 'usage_to_date'
 }
 
-const usageDisplayLabel = computed(() => 
+const usageDisplayLabel = computed(() =>
   usageDisplayMode.value === 'usage_to_date' ? 'Usage to Date' : 'Avg Daily Usage'
 )
-
 const usageDisplayValue = computed(() => {
   const forecast = meterData.value?.forecast
   if (forecast?.usage_to_date == null) return '—'
@@ -403,6 +426,48 @@ const usageDisplayValue = computed(() => {
   if (daysPast <= 0) return '—'
   const avg = usage / daysPast
   return avg % 1 === 0 ? String(Math.round(avg)) : avg.toFixed(1)
+})
+
+const costDisplayLabel = computed(() =>
+  usageDisplayMode.value === 'usage_to_date' ? 'Cost to Date' : 'Avg Daily Cost'
+)
+const costDisplayValue = computed(() => {
+  const cost = meterData.value?.usage_to_date_cost
+  if (cost == null) return '—'
+  if (usageDisplayMode.value === 'usage_to_date') return cost.toFixed(2)
+  const daysPast = billingCycleDaysPast.value
+  if (daysPast <= 0) return '—'
+  const avg = cost / daysPast
+  return avg.toFixed(2)
+})
+
+const projectedUsageDisplayLabel = computed(() =>
+  usageDisplayMode.value === 'usage_to_date' ? 'Projected Usage' : 'Est. Avg Daily Usage'
+)
+const projectedUsageDisplayValue = computed(() => {
+  const forecast = meterData.value?.forecast
+  if (forecast?.forecasted_usage == null) return '—'
+  const usage = forecast.forecasted_usage
+  if (usageDisplayMode.value === 'usage_to_date') return String(Math.round(usage))
+  const totalDays = billingCycleTotalDays.value
+  if (totalDays <= 0) return '—'
+  const avg = usage / totalDays
+  return avg % 1 === 0 ? String(Math.round(avg)) : avg.toFixed(1)
+})
+
+const projectedBillDisplayLabel = computed(() =>
+  usageDisplayMode.value === 'usage_to_date' ? 'Projected Bill' : 'Est. Avg Daily Cost'
+)
+const projectedBillDisplayValue = computed(() => {
+  const forecast = meterData.value?.forecast
+  const kwhCost = meterData.value?.kwh_cost
+  if (!forecast?.forecasted_usage || !kwhCost) return '—'
+  const totalCost = forecast.forecasted_usage * kwhCost
+  if (usageDisplayMode.value === 'usage_to_date') return totalCost.toFixed(2)
+  const totalDays = billingCycleTotalDays.value
+  if (totalDays <= 0) return '—'
+  const avg = totalCost / totalDays
+  return avg.toFixed(2)
 })
 
 const billingCycleDaysPast = computed(() => {
@@ -416,6 +481,21 @@ const billingCycleDaysPast = computed(() => {
     const diffMs = today.getTime() - startDate.getTime()
     const diffDays = Math.floor(diffMs / (24 * 60 * 60 * 1000))
     return Math.max(1, diffDays + 1) // inclusive of start and current day
+  } catch {
+    return 0
+  }
+})
+
+const billingCycleTotalDays = computed(() => {
+  const start = meterData.value?.forecast?.start_date
+  const end = meterData.value?.forecast?.end_date
+  if (!start || !end) return 0
+  try {
+    const startDate = new Date(start + 'T00:00:00')
+    const endDate = new Date(end + 'T00:00:00')
+    const diffMs = endDate.getTime() - startDate.getTime()
+    const diffDays = Math.floor(diffMs / (24 * 60 * 60 * 1000))
+    return Math.max(1, diffDays + 1) // inclusive
   } catch {
     return 0
   }
@@ -442,12 +522,6 @@ const billingCycleDaysRemainingText = computed(() => {
   if (remaining == null) return ''
   const d = remaining
   return `(${d} ${d === 1 ? 'day' : 'days'} remaining)`
-})
-
-const projectedBillCost = computed(() => {
-  if (!meterData.value?.forecast?.forecasted_usage || !meterData.value?.kwh_cost) return '—'
-  const cost = meterData.value.forecast.forecasted_usage * meterData.value.kwh_cost
-  return cost.toFixed(2)
 })
 
 function formatBillingDate(dateStr: string | null): string {
@@ -886,7 +960,19 @@ onUnmounted(() => clearInterval(interval))
   letter-spacing: 0.5px;
 }
 
+.ha-section-dates-wrap {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 0.35em;
+}
 .ha-section-dates {
+  font-size: 0.7rem;
+  font-weight: 500;
+  opacity: 0.95;
+}
+.ha-section-days-remaining {
   font-size: 0.7rem;
   font-weight: 500;
   opacity: 0.95;
@@ -959,6 +1045,12 @@ onUnmounted(() => clearInterval(interval))
     flex-direction: column;
     gap: 0.2rem;
     text-align: center;
+  }
+  
+  .ha-section-dates-wrap {
+    flex-direction: column;
+    align-items: center;
+    gap: 0.15rem;
   }
 }
 

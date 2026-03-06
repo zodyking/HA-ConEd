@@ -14,7 +14,6 @@ Con Edison account integration for Home Assistant. Syncs bills, payments, and ba
 - **Payee tracking** — Assign payments to roommates/households; audit and reconcile shared bills
 - **MQTT sensors** — Balance, latest bill, last payment, payee summaries; auto-discovery so no YAML config needed
 - **Automated scraping** — Configurable schedule or manual runs
-- **IMAP integration** — Match payments to payees from Con Edison confirmation emails
 - **Encrypted credential storage**
 
 ## Documentation
