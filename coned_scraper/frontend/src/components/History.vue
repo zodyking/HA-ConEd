@@ -520,9 +520,10 @@ function createRealtimeChart() {
   
   const chartData = realtimeData.value
   
-  // Get selected day from first reading (UTC date)
+  // Get selected day from first reading - use LOCAL midnight so chart starts at 12:00 AM
+  // (UTC midnight would show as 7:00 PM in Eastern time)
   const firstEnd = new Date(chartData[0].end_time)
-  const dayStart = new Date(Date.UTC(firstEnd.getUTCFullYear(), firstEnd.getUTCMonth(), firstEnd.getUTCDate(), 0, 0, 0))
+  const dayStart = new Date(firstEnd.getFullYear(), firstEnd.getMonth(), firstEnd.getDate(), 0, 0, 0)
   
   // Build 96 slots (12:00 AM - 11:45 PM) for full-day display
   const SLOTS = 96
@@ -545,7 +546,7 @@ function createRealtimeChart() {
     }
   }
   
-  // Use 0 for empty slots so chart spans full day
+  // Use 0 for empty slots so chart spans full day (12:00 AM - 11:45 PM)
   const consumptionFilled = consumption.map(v => v ?? 0)
   
   realtimeChartInstance = new Chart(ctx, {
