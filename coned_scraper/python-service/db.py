@@ -1848,7 +1848,7 @@ async def get_realtime_readings_for_day(day_offset: int = 0) -> tuple[List[Dict[
     day_end = day_start + timedelta(days=1)
     readings = await db.realtimereading.find_many(
         where={
-            "endTime": {"gte": day_start, "lt": day_end}
+            "endTime": {"gte": day_start, "lte": day_end}
         },
         order={"startTime": "asc"}
     )

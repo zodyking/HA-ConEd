@@ -112,10 +112,7 @@
                   @click="goToPrevDay"
                   title="Older day"
                 >‹</button>
-                <span class="ha-realtime-title">
-                  {{ realtimeDayLabel || 'Usage' }}
-                  <span v-if="realtimeTotalDays" class="ha-realtime-day-count">(day {{ realtimeDayOffset + 1 }} of {{ realtimeTotalDays }})</span>
-                </span>
+                <span class="ha-realtime-title">{{ realtimeDayLabel || 'Usage' }}</span>
                 <button 
                   class="ha-day-nav-btn"
                   :disabled="realtimeLoading || realtimeDayOffset <= 0"
@@ -149,7 +146,7 @@
               <canvas v-show="realtimeData.length && !realtimeLoading" ref="realtimeChart"></canvas>
             </div>
             <div v-if="realtimeData.length && !realtimeLoading" class="ha-realtime-disclaimer">
-              <p v-if="realtimeDataRange?.isStale" class="ha-delay-notice">
+              <p v-if="realtimeDayOffset === 0 && realtimeDataRange?.isStale" class="ha-delay-notice">
                 <strong>Data is {{ realtimeDataRange.hoursAgo }} hours behind.</strong> Con Edison usage data is typically delayed 1-24 hours.
               </p>
               Please note: As per Con Edison, your real-time usage may not match billing. Billed usage is validated (reconciled) and may have a multiplier applied (peak hour kWh rates), which will be shown on your bill statement.
@@ -521,33 +518,35 @@ function createRealtimeChart() {
   const ctx = realtimeChart.value.getContext('2d')
   if (!ctx) return
   
-  // Use all available data (opower data is delayed, don't filter by "now")
   const chartData = realtimeData.value
   
-  // Format labels as time (e.g., "2:30 PM") with date if spans multiple days
-  const firstDate = new Date(chartData[0].start_time).toDateString()
-  const lastDate = new Date(chartData[chartData.length - 1].end_time).toDateString()
-  const showDate = firstDate !== lastDate
+  // Get selected day from first reading (UTC date)
+  const firstEnd = new Date(chartData[0].end_time)
+  const dayStart = new Date(Date.UTC(firstEnd.getUTCFullYear(), firstEnd.getUTCMonth(), firstEnd.getUTCDate(), 0, 0, 0))
   
-  const labels = chartData.map(r => {
-    const date = new Date(r.end_time)
-    if (showDate) {
-      return date.toLocaleString('en-US', { 
-        month: 'short',
-        day: 'numeric',
-        hour: 'numeric', 
-        minute: '2-digit',
-        hour12: true 
-      })
+  // Build 96 slots (12:00 AM - 11:45 PM) for full-day display
+  const SLOTS = 96
+  const MS_PER_SLOT = 15 * 60 * 1000
+  const labels: string[] = []
+  const consumption: (number | null)[] = []
+  
+  for (let i = 0; i < SLOTS; i++) {
+    const slotStart = new Date(dayStart.getTime() + i * MS_PER_SLOT)
+    labels.push(slotStart.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }))
+    consumption.push(null)
+  }
+  
+  // Map readings to slots by end_time
+  for (const r of chartData) {
+    const endMs = new Date(r.end_time).getTime()
+    const slotIndex = Math.floor((endMs - dayStart.getTime()) / MS_PER_SLOT)
+    if (slotIndex >= 0 && slotIndex < SLOTS) {
+      consumption[slotIndex] = r.consumption
     }
-    return date.toLocaleTimeString('en-US', { 
-      hour: 'numeric', 
-      minute: '2-digit',
-      hour12: true 
-    })
-  })
+  }
   
-  const consumption = chartData.map(r => r.consumption)
+  // Use 0 for empty slots so chart spans full day
+  const consumptionFilled = consumption.map(v => v ?? 0)
   
   realtimeChartInstance = new Chart(ctx, {
     type: 'line',
@@ -555,7 +554,7 @@ function createRealtimeChart() {
       labels,
       datasets: [{
         label: 'Usage (kWh)',
-        data: consumption,
+        data: consumptionFilled,
         borderColor: 'rgba(0, 136, 204, 1)',
         backgroundColor: 'rgba(0, 136, 204, 0.15)',
         fill: true,
@@ -577,16 +576,12 @@ function createRealtimeChart() {
         tooltip: {
           callbacks: {
             title: (items) => {
-              if (items.length && chartData[items[0].dataIndex]) {
-                const r = chartData[items[0].dataIndex]
-                const start = new Date(r.start_time)
-                const end = new Date(r.end_time)
-                const dateStr = start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-                return `${dateStr} ${start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })} - ${end.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`
+              if (items.length && items[0].dataIndex >= 0 && items[0].dataIndex < labels.length) {
+                return labels[items[0].dataIndex]
               }
               return ''
             },
-            label: (ctx) => `${ctx.parsed.y.toFixed(3)} kWh`
+            label: (ctx) => `${Number(ctx.parsed.y).toFixed(3)} kWh`
           }
         }
       },

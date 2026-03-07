@@ -241,8 +241,11 @@ class MeterService:
     async def fetch_quarter_hour_reads(self, hours: int = 24) -> List[Dict[str, Any]]:
         """Fetch quarter-hour (15-minute) usage data for real-time chart.
         
+        Con Edison API limits each request to ~6 days. We fetch in 6-day chunks
+        and merge into DB so the chart can show unlimited history over time.
+        
         Args:
-            hours: Number of hours to fetch (default 24, max ~144 hours / 6 days)
+            hours: Total hours to fetch. Fetched in 144h (6-day) chunks. Default 720 (30 days).
         
         Returns:
             List of readings with start_time, end_time, consumption
@@ -266,67 +269,75 @@ class MeterService:
             
             account = accounts[0]
             
-            # Request a wider window: Con Edison data is typically delayed 1-24 hours.
-            # API max is 6 days. Request full 6 days to capture delayed data and store all.
+            # API max ~6 days per request. Fetch in chunks and merge.
+            CHUNK_HOURS = 144  # 6 days per API request
+            total_hours = max(hours, CHUNK_HOURS)
+            all_result: List[Dict[str, Any]] = []
             end_date = datetime.now(timezone.utc)
-            fetch_hours = min(max(hours, 24), 144)  # At least 24h, max 6 days (API limit)
-            start_date = end_date - timedelta(hours=fetch_hours)
             
-            reads = await self._opower.async_get_cost_reads(
-                account,
-                AggregateType.QUARTER_HOUR,
-                start_date,
-                end_date
-            )
-            
-            # Fallback: Con Edison often provides hourly data only (no quarter-hour unless realtime enrollment)
-            if not reads:
-                logger.info("No quarter-hour data, trying hourly fallback")
+            while total_hours > 0:
+                fetch_hours = min(total_hours, CHUNK_HOURS)
+                start_date = end_date - timedelta(hours=fetch_hours)
+
                 reads = await self._opower.async_get_cost_reads(
                     account,
-                    AggregateType.HOUR,
+                    AggregateType.QUARTER_HOUR,
                     start_date,
                     end_date
                 )
-                if reads:
-                    # Expand each hour into 4 x 15-min slots (divide consumption evenly)
-                    result = []
-                    for r in reads:
-                        if r.start_time and r.end_time and r.consumption is not None:
-                            val = float(r.consumption) / 4.0
-                            delta = timedelta(minutes=15)
-                            for i in range(4):
-                                st = r.start_time + (delta * i)
-                                et = st + delta
-                                result.append({
-                                    'start_time': st.isoformat(),
-                                    'end_time': et.isoformat(),
-                                    'consumption': val,
-                                })
-                    reads = result
+
+                # Fallback: Con Edison often provides hourly data only (no quarter-hour unless realtime enrollment)
+                if not reads:
+                    logger.info("No quarter-hour data, trying hourly fallback")
+                    reads = await self._opower.async_get_cost_reads(
+                        account,
+                        AggregateType.HOUR,
+                        start_date,
+                        end_date
+                    )
+                    if reads:
+                        # Expand each hour into 4 x 15-min slots (divide consumption evenly)
+                        result = []
+                        for r in reads:
+                            if r.start_time and r.end_time and r.consumption is not None:
+                                val = float(r.consumption) / 4.0
+                                delta = timedelta(minutes=15)
+                                for i in range(4):
+                                    st = r.start_time + (delta * i)
+                                    et = st + delta
+                                    result.append({
+                                        'start_time': st.isoformat(),
+                                        'end_time': et.isoformat(),
+                                        'consumption': val,
+                                    })
+                        reads = result
+                    else:
+                        logger.warning("No hourly readings available either")
+                        break
                 else:
-                    logger.warning("No hourly readings available either")
-                    return []
-            else:
-                result = None  # Will build below from reads
-            
-            if result is None:
-                # Convert quarter-hour reads to dict format
-                result = [
-                    {
-                        'start_time': r.start_time.isoformat() if r.start_time else None,
-                        'end_time': r.end_time.isoformat() if r.end_time else None,
-                        'consumption': float(r.consumption) if r.consumption is not None else 0,
-                    }
-                    for r in reads
-                ]
-            
-            # Store all data to DB (up to 6 days). Chart shows last 24h from most recent.
-            import db
-            await db.save_realtime_readings_db(result)
-            
-            logger.info(f"Fetched {len(result)} readings, stored all for 24h chart")
-            return result
+                    result = None  # Will build below from reads
+
+                if result is None:
+                    # Convert quarter-hour reads to dict format
+                    result = [
+                        {
+                            'start_time': r.start_time.isoformat() if r.start_time else None,
+                            'end_time': r.end_time.isoformat() if r.end_time else None,
+                            'consumption': float(r.consumption) if r.consumption is not None else 0,
+                        }
+                        for r in reads
+                    ]
+
+                all_result.extend(result)
+                end_date = start_date
+                total_hours -= fetch_hours
+
+            if all_result:
+                import db
+                await db.save_realtime_readings_db(all_result)
+                logger.info(f"Fetched {len(all_result)} readings across chunks, stored for chart")
+
+            return all_result
             
         except Exception as e:
             logger.error(f"Failed to fetch quarter-hour reads: {e}")

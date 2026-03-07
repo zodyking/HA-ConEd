@@ -2430,9 +2430,9 @@ async def get_realtime_usage(day_offset: int = 0, refresh: bool = False):
     if not service.is_enabled():
         raise HTTPException(status_code=400, detail="Meter tracking is not enabled")
     
-    # Optionally fetch fresh data and merge (append) into DB
+    # Optionally fetch fresh data and merge (append) into DB (chunked: API ~6 days/request)
     if refresh:
-        await service.fetch_quarter_hour_reads(144)
+        await service.fetch_quarter_hour_reads(720)  # 30 days in 6-day chunks
     
     # Get readings for the requested day
     readings, total_days = await db.get_realtime_readings_for_day(day_offset)
