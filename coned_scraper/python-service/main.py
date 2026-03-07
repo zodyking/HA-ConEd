@@ -277,14 +277,16 @@ async def run_scheduled_scrape():
             
             # Send payment claim requests for new unverified payments (notification-based assignment)
             try:
-                from notifications import send_payment_claim_request
-                payments_to_claim = await db.get_unverified_payments_with_no_claim_responses()
-                payees = await db.get_payees_with_notifications()
-                if payments_to_claim and payees:
-                    for payment in payments_to_claim:
-                        sent = await send_payment_claim_request(payment, payees)
-                        if sent > 0:
-                            await db.add_log("info", f"Sent payment claim request to {sent} payee(s) for payment ${payment.get('amount_numeric', 0):.2f}")
+                pv = await get_payment_verification_settings()
+                if pv.get("notification_claims_enabled", True) and pv.get("auto_send_claims_after_scrape", True):
+                    from notifications import send_payment_claim_request
+                    payments_to_claim = await db.get_unverified_payments_with_no_claim_responses()
+                    payees = await db.get_payees_with_notifications()
+                    if payments_to_claim and payees:
+                        for payment in payments_to_claim:
+                            sent = await send_payment_claim_request(payment, payees)
+                            if sent > 0:
+                                await db.add_log("info", f"Sent payment claim request to {sent} payee(s) for payment ${payment.get('amount_numeric', 0):.2f}")
             except Exception as claim_e:
                 await db.add_log("warning", f"Payment claim notifications failed: {claim_e}")
         
@@ -382,8 +384,10 @@ async def claim_resend_scheduler_loop():
     while True:
         try:
             await asyncio.sleep(900)  # Check every 15 minutes
-            settings = await load_app_settings()
-            delay_hours = int(settings.get("claim_resend_delay_hours", 24))
+            pv = await get_payment_verification_settings()
+            if not pv.get("notification_claims_enabled", True):
+                continue
+            delay_hours = int(pv.get("claim_resend_delay_hours", 24))
             candidates = await db.get_payments_for_claim_resend(claim_resend_delay_hours=delay_hours)
             if not candidates:
                 continue
@@ -730,6 +734,16 @@ async def should_trigger_new_bill_tts() -> tuple:
     return should_trigger, bill_data, reason
 
 
+# Payment verification settings (notification-based claim behavior)
+DEFAULT_PAYMENT_VERIFICATION = {
+    "notification_claims_enabled": True,
+    "auto_send_claims_after_scrape": True,
+    "claim_resend_delay_hours": 24,
+    "auto_assign_single_non_responder": True,
+    "petitions_enabled": True,
+}
+
+
 async def save_app_settings(settings: dict):
     """Save app settings (time offset, password, auto_download_pdfs) to database. Merges with existing."""
     existing = await db.get_app_settings_db() or {}
@@ -750,6 +764,8 @@ async def save_app_settings(settings: dict):
         settings_data["claim_resend_delay_hours"] = int(settings["claim_resend_delay_hours"])
     else:
         settings_data["claim_resend_delay_hours"] = existing.get("claim_resend_delay_hours", 24)
+    # Preserve payment_verification when saving other app settings
+    settings_data["payment_verification"] = existing.get("payment_verification") or DEFAULT_PAYMENT_VERIFICATION
     await db.save_app_settings_db(settings_data)
 
 async def load_app_settings() -> dict:
@@ -783,6 +799,27 @@ async def verify_settings_password(password: str) -> bool:
     """Verify settings password"""
     settings = await load_app_settings()
     return settings.get("settings_password") == password
+
+
+async def get_payment_verification_settings() -> dict:
+    """Get payment verification config, merged with defaults."""
+    data = await db.get_app_settings_db()
+    pv = (data or {}).get("payment_verification") or {}
+    result = {**DEFAULT_PAYMENT_VERIFICATION, **pv}
+    # Backward compat: claim_resend_delay_hours at root
+    if "claim_resend_delay_hours" not in pv and data and "claim_resend_delay_hours" in data:
+        result["claim_resend_delay_hours"] = int(data.get("claim_resend_delay_hours", 24))
+    return result
+
+async def save_payment_verification_settings(updates: dict) -> dict:
+    """Save payment verification config (partial merge)."""
+    data = await db.get_app_settings_db() or {}
+    pv = data.get("payment_verification") or {}
+    pv_merged = {**DEFAULT_PAYMENT_VERIFICATION, **pv, **updates}
+    pv_merged["claim_resend_delay_hours"] = max(1, min(72, int(pv_merged.get("claim_resend_delay_hours", 24))))
+    data["payment_verification"] = pv_merged
+    await db.save_app_settings_db(data)
+    return pv_merged
 
 # Frontend SPA - path to Vue build output (set by Dockerfile or dev)
 _SCRIPT_DIR = Path(__file__).resolve().parent
@@ -1123,6 +1160,40 @@ async def patch_payee_preferences_endpoint(data: PayeePreferencesModel):
     except Exception as e:
         await db.add_log("error", f"Failed to update payee preferences: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+class PaymentVerificationSettingsModel(BaseModel):
+    notification_claims_enabled: Optional[bool] = None
+    auto_send_claims_after_scrape: Optional[bool] = None
+    claim_resend_delay_hours: Optional[int] = None
+    auto_assign_single_non_responder: Optional[bool] = None
+    petitions_enabled: Optional[bool] = None
+
+
+@app.get("/api/payment-verification-settings")
+async def get_payment_verification_settings_endpoint():
+    """Get payment verification config (claim notifications, resend delay, auto-assign, petitions)."""
+    try:
+        return await get_payment_verification_settings()
+    except Exception as e:
+        await db.add_log("error", f"Failed to get payment verification settings: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.patch("/api/payment-verification-settings")
+async def patch_payment_verification_settings_endpoint(data: PaymentVerificationSettingsModel):
+    """Update payment verification config (partial merge)."""
+    try:
+        updates = {k: v for k, v in data.model_dump().items() if v is not None}
+        if not updates:
+            return await get_payment_verification_settings()
+        result = await save_payment_verification_settings(updates)
+        await db.add_log("info", "Payment verification settings updated")
+        return result
+    except Exception as e:
+        await db.add_log("error", f"Failed to save payment verification settings: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 class PasswordVerifyModel(BaseModel):
     password: str
@@ -1732,10 +1803,15 @@ async def record_payee_claim(payment_id: int, body: PayeeClaimModel):
 async def create_payment_petition(payment_id: int, body: PetitionModel):
     """Record a petition - payee claiming a payment already assigned to someone else."""
     try:
+        pv = await get_payment_verification_settings()
+        if not pv.get("petitions_enabled", True):
+            raise HTTPException(status_code=400, detail="Petitions are disabled")
         ok = await db.create_payment_petition(payment_id, body.payee_id)
         if not ok:
             raise HTTPException(status_code=500, detail="Failed to create petition")
         return {"success": True}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

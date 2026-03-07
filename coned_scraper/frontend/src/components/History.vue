@@ -131,7 +131,8 @@
               </div>
               <div v-else-if="!realtimeData.length" class="ha-realtime-empty">
                 <p>No usage data yet.</p>
-                <p class="ha-realtime-hint">Enable Meter Tracking in Settings, then click <strong>Refresh</strong> above to fetch data from Con Edison.</p>
+                <p class="ha-realtime-hint" v-if="!meterEnabled">Enable Meter Tracking in Settings, then click <strong>Refresh</strong> above to fetch data from Con Edison.</p>
+                <p class="ha-realtime-hint" v-else>Click <strong>Refresh</strong> above to fetch data. Con Edison usage data is typically delayed 1–24 hours.</p>
               </div>
               <canvas v-show="realtimeData.length && !realtimeLoading" ref="realtimeChart"></canvas>
             </div>

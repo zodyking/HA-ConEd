@@ -994,7 +994,11 @@ async def run_claim_resolution(payment_id: int, conn=None):
             await db.payment.update(where={"id": payment_id}, data={"payeeStatus": "needs_admin_verification"})
             return
         if len(non_responders) == 1 and len(yes_ids) == 0:
-            await attribute_payment(payment_id, non_responders[0], "verified", "notification_claim_single_remaining")
+            app_settings = await get_app_setting("app_settings")
+            pv = (app_settings or {}).get("payment_verification") or {}
+            auto_assign = pv.get("auto_assign_single_non_responder", True)
+            if auto_assign:
+                await attribute_payment(payment_id, non_responders[0], "verified", "notification_claim_single_remaining")
             return
         # All said No: nothing to do here; resend task handles it
     finally:

@@ -30,6 +30,7 @@
         <SettingsBillTab v-else-if="currentPage === 'bill-settings'" />
         <SettingsAppTab v-else-if="currentPage === 'app-settings'" />
         <SettingsPayeesPaymentsTab v-else-if="currentPage === 'payees-payments'" />
+        <SettingsPaymentVerificationTab v-else-if="currentPage === 'payment-verification'" />
         <SettingsTtsTab v-else-if="currentPage === 'tts'" />
         <SettingsNotificationsTab v-else-if="currentPage === 'notifications'" />
     </div>
@@ -45,7 +46,7 @@ import SettingsBillTab from './settings/SettingsBillTab.vue'
 import SettingsAppTab from './settings/SettingsAppTab.vue'
 import SettingsPayeesPaymentsTab from './settings/SettingsPayeesPaymentsTab.vue'
 import SettingsTtsTab from './settings/SettingsTtsTab.vue'
-import SettingsImapTab from './settings/SettingsImapTab.vue'
+import SettingsPaymentVerificationTab from './settings/SettingsPaymentVerificationTab.vue'
 import SettingsNotificationsTab from './settings/SettingsNotificationsTab.vue'
 
 type Page =
@@ -56,6 +57,7 @@ type Page =
   | 'bill-settings'
   | 'app-settings'
   | 'payees-payments'
+  | 'payment-verification'
   | 'tts'
   | 'notifications'
 
@@ -67,6 +69,7 @@ const menuItems = [
   { id: 'automated' as Page, icon: '⏰', label: 'Automated Scrape', description: 'Schedule automatic data scraping' },
   { id: 'bill-settings' as Page, icon: '📄', label: 'Bill Settings', description: 'Bill PDFs, auto-download, re-parse' },
   { id: 'payees-payments' as Page, icon: '👥', label: 'Payees & Payments', description: 'Users, bill split, and payment audit' },
+  { id: 'payment-verification' as Page, icon: '✓', label: 'Payment Verification', description: 'Claim notifications, resend delay, auto-assign, petitions' },
   { id: 'notifications' as Page, icon: '🔔', label: 'Notifications', description: 'Mobile push notifications for bill events' },
   { id: 'tts' as Page, icon: '🔊', label: 'TTS Alerts', description: 'Media player, TTS messages, and wait-for-idle' },
   { id: 'app-settings' as Page, icon: '⚙️', label: 'App Settings', description: 'App configuration' },

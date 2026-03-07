@@ -266,9 +266,12 @@ class MeterService:
             
             account = accounts[0]
             
-            # Fetch quarter-hour data (limited to 6 days by opower)
+            # Request a wider window: Con Edison data is typically delayed 1-24 hours.
+            # If we only request last 24h, the most recent data may fall outside our window.
+            # Request up to 7 days so we capture delayed data, then trim to last 24h for display.
             end_date = datetime.now(timezone.utc)
-            start_date = end_date - timedelta(hours=hours)
+            fetch_hours = min(max(hours, 24), 168)  # At least 24h, max 7 days
+            start_date = end_date - timedelta(hours=fetch_hours)
             
             reads = await self._opower.async_get_cost_reads(
                 account,
@@ -320,12 +323,13 @@ class MeterService:
                     for r in reads
                 ]
             
-            # Cache to database (limit to last 24 hours worth for storage efficiency)
+            # Trim to last 24 hours (96 x 15-min intervals) for storage and response
+            trimmed = result[-96:] if len(result) > 96 else result
             import db
-            await db.save_realtime_readings_db(result[-96:] if len(result) > 96 else result)  # 96 = 24 hours of 15-min intervals
+            await db.save_realtime_readings_db(trimmed)
             
-            logger.info(f"Fetched {len(result)} quarter-hour readings")
-            return result
+            logger.info(f"Fetched {len(result)} readings, returning last {len(trimmed)} (24h)")
+            return trimmed
             
         except Exception as e:
             logger.error(f"Failed to fetch quarter-hour reads: {e}")
