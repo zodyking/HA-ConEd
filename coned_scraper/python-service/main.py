@@ -2413,55 +2413,50 @@ async def refresh_meter_reading():
 
 
 @app.get("/api/meter-reading/realtime")
-async def get_realtime_usage(hours: int = 24, refresh: bool = False):
-    """Get quarter-hour (15-minute) usage data for real-time chart.
+async def get_realtime_usage(day_offset: int = 0, refresh: bool = False):
+    """Get hourly/quarter-hour usage for a specific day. API is delayed, so we show prior days.
     
     Args:
-        hours: Number of hours to fetch (default 24, max 144 / 6 days)
-        refresh: If True, fetch fresh data from API. If False, use cached data for immediate load.
+        day_offset: 0 = most recent complete day, 1 = day before, etc.
+        refresh: If True, fetch fresh data from API and merge into DB.
     
     Returns:
-        List of readings with start_time, end_time, consumption
+        readings for that day (full 24h), total_available_days, day_label
     """
     from meter_service import get_meter_service
-    # Using db module for database operations
     
     service = get_meter_service()
     
     if not service.is_enabled():
         raise HTTPException(status_code=400, detail="Meter tracking is not enabled")
     
-    # For immediate page load, return cached data first
-    if not refresh:
-        cached = await db.get_realtime_readings_db()
-        if cached:
-            return {
-                "success": True,
-                "readings": cached,
-                "hours": 24,
-                "count": len(cached),
-                "cached": True
-            }
+    # Optionally fetch fresh data and merge (append) into DB
+    if refresh:
+        await service.fetch_quarter_hour_reads(144)
     
-    # Clamp hours to max 144 (6 days, API limit). Always fetch 6 days to capture delayed data.
-    hours = min(max(1, hours), 144)
-    fetch_hours = 144  # Request full 6 days; chart filters to last 24h
-    readings = await service.fetch_quarter_hour_reads(fetch_hours)
+    # Get readings for the requested day
+    readings, total_days = await db.get_realtime_readings_for_day(day_offset)
     
-    if not readings:
-        return {
-            "success": True,
-            "readings": [],
-            "hours": hours,
-            "message": "No quarter-hour data available"
-        }
+    # Build day label for display
+    day_label = None
+    if readings:
+        from datetime import datetime, timezone
+        first_end = readings[0].get("end_time") if isinstance(readings[0], dict) else None
+        if first_end:
+            try:
+                dt = datetime.fromisoformat(first_end.replace("Z", "+00:00"))
+                day_label = dt.strftime("%b %d, %Y")
+            except (ValueError, TypeError):
+                pass
     
     return {
         "success": True,
         "readings": readings,
-        "hours": hours,
+        "day_offset": day_offset,
+        "total_available_days": total_days,
+        "day_label": day_label,
         "count": len(readings),
-        "cached": False
+        "cached": not refresh
     }
 
 

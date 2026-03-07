@@ -99,6 +99,12 @@ async def run_migrations():
                 ON payment_petitions(payment_id)
             """)
             
+            # Migration: Unique constraint on realtime_readings for upsert/append
+            await conn.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS realtime_readings_start_end_key 
+                ON realtime_readings(start_time, end_time)
+            """)
+            
             logger.info("Database migrations completed successfully")
         finally:
             await conn.close()
@@ -1800,13 +1806,11 @@ async def save_meter_forecast_db(forecast: Dict[str, Any]):
     await set_app_setting("meter_forecast_cache", forecast)
 
 async def get_realtime_readings_db() -> Optional[List[Dict[str, Any]]]:
-    """Get cached realtime readings from dedicated table (up to 6 days stored)"""
+    """Get all cached realtime readings (no limit - append storage)"""
     await ensure_connected()
-    rows = await db.realtimereading.find_many(order={"endTime": "desc"})
+    rows = await db.realtimereading.find_many(order={"endTime": "asc"})
     if not rows:
         return None
-    # Return ascending by start_time for chart
-    rows = list(reversed(rows))
     return [
         {
             "start_time": r.startTime.isoformat(),
@@ -1817,31 +1821,74 @@ async def get_realtime_readings_db() -> Optional[List[Dict[str, Any]]]:
     ]
 
 
+async def get_realtime_readings_for_day(day_offset: int = 0) -> tuple[List[Dict[str, Any]], int]:
+    """
+    Get readings for a specific day. Day 0 = most recent complete day we have, 1 = day before, etc.
+    Returns (readings for that day, total_available_days).
+    """
+    await ensure_connected()
+    # Get distinct dates (UTC) from our data, ordered most recent first
+    conn = await _raw_conn()
+    try:
+        rows = await conn.fetch("""
+            SELECT DISTINCT DATE(end_time AT TIME ZONE 'UTC') as d
+            FROM realtime_readings
+            ORDER BY d DESC
+        """)
+        if not rows:
+            return [], 0
+        dates = [r["d"] for r in rows]
+        total_days = len(dates)
+        if day_offset >= total_days:
+            return [], total_days
+        target_date = dates[day_offset]
+        # Get readings for that date (full 24h in UTC)
+        day_start = datetime(target_date.year, target_date.month, target_date.day, tzinfo=timezone.utc)
+        day_end = day_start + timedelta(days=1)
+        readings = await db.realtimereading.find_many(
+            where={
+                "endTime": {"gte": day_start, "lt": day_end}
+            },
+            order={"startTime": "asc"}
+        )
+        return [
+            {
+                "start_time": r.startTime.isoformat(),
+                "end_time": r.endTime.isoformat(),
+                "consumption": float(r.consumption),
+            }
+            for r in readings
+        ], total_days
+    finally:
+        await conn.close()
+
+
 async def save_realtime_readings_db(readings: List[Dict[str, Any]]):
-    """Save realtime readings to dedicated table (replaces previous cache, stores up to 6 days)"""
+    """Append/merge realtime readings (upsert by start_time, end_time - no max days)"""
     await ensure_connected()
     from datetime import datetime
-    # Delete all existing readings (we replace with fresh fetch)
-    await db.realtimereading.delete_many()
     if not readings:
         return
-    to_save = readings
-    data_list = []
-    for r in to_save:
-        start_str = r.get("start_time") or ""
-        end_str = r.get("end_time") or ""
-        try:
-            start_dt = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
-            end_dt = datetime.fromisoformat(end_str.replace("Z", "+00:00"))
-        except (ValueError, TypeError):
-            continue
-        data_list.append({
-            "startTime": start_dt,
-            "endTime": end_dt,
-            "consumption": float(r.get("consumption", 0) or 0),
-        })
-    if data_list:
-        await db.realtimereading.create_many(data=data_list)
+    conn = await _raw_conn()
+    try:
+        for r in readings:
+            start_str = r.get("start_time") or ""
+            end_str = r.get("end_time") or ""
+            try:
+                start_dt = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
+                end_dt = datetime.fromisoformat(end_str.replace("Z", "+00:00"))
+            except (ValueError, TypeError):
+                continue
+            consumption = float(r.get("consumption", 0) or 0)
+            await conn.execute("""
+                INSERT INTO realtime_readings (start_time, end_time, consumption)
+                VALUES ($1, $2, $3)
+                ON CONFLICT (start_time, end_time) DO UPDATE SET
+                    consumption = EXCLUDED.consumption,
+                    fetched_at = NOW()
+            """, start_dt, end_dt, consumption)
+    finally:
+        await conn.close()
 
 # =============================================================================
 # Credentials (migrated from file to database)

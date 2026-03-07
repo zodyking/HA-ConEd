@@ -63,7 +63,7 @@
           >
             <span class="ha-tab-icon">⚡</span>
             <span class="ha-tab-label">
-              Recent Usage
+              Daily Usage
               <span v-if="realtimeDataRange?.isStale" class="ha-tab-stale">({{ realtimeDataRange.hoursAgo }}h ago)</span>
             </span>
           </button>
@@ -102,15 +102,27 @@
         </div>
         
         <div class="ha-chart-tab-content">
-          <!-- Real Time Usage Chart (Last 24 Hours) -->
+          <!-- Hourly Usage Chart (prior days - API delayed, full 24h per day) -->
           <div v-show="activeChartTab === 'realtime'" class="ha-realtime-wrapper">
             <div class="ha-realtime-header">
-              <span class="ha-realtime-title">
-                Last 24 Hours of Available Data
-                <span v-if="realtimeDataRange" class="ha-realtime-range">
-                  ({{ formatRealtimeRange(realtimeDataRange.first) }} — {{ formatRealtimeRange(realtimeDataRange.last) }})
+              <div class="ha-realtime-day-nav">
+                <button 
+                  class="ha-day-nav-btn"
+                  :disabled="realtimeLoading || realtimeDayOffset >= realtimeTotalDays - 1"
+                  @click="goToPrevDay"
+                  title="Older day"
+                >‹</button>
+                <span class="ha-realtime-title">
+                  {{ realtimeDayLabel || 'Usage' }}
+                  <span v-if="realtimeTotalDays" class="ha-realtime-day-count">(day {{ realtimeDayOffset + 1 }} of {{ realtimeTotalDays }})</span>
                 </span>
-              </span>
+                <button 
+                  class="ha-day-nav-btn"
+                  :disabled="realtimeLoading || realtimeDayOffset <= 0"
+                  @click="goToNextDay"
+                  title="Newer day"
+                >›</button>
+              </div>
               <button 
                 class="ha-refresh-btn" 
                 @click="refreshRealtimeData" 
@@ -270,11 +282,14 @@ const error = ref<string | null>(null)
 const historyData = ref<HistoryRow[]>([])
 const activeChartTab = ref<'realtime' | 'billHistory' | 'kwh' | 'cost' | 'rates'>('billHistory')
 
-// Realtime data state
+// Realtime data state (prior-day view: API is delayed, show full 24h of each day)
 const realtimeData = ref<RealtimeReading[]>([])
 const realtimeLoading = ref(false)
 const realtimeError = ref<string | null>(null)
 const meterEnabled = ref(false)
+const realtimeDayOffset = ref(0)  // 0 = most recent day, 1 = day before, etc.
+const realtimeTotalDays = ref(0)
+const realtimeDayLabel = ref<string | null>(null)
 
 const realtimeChart = ref<HTMLCanvasElement | null>(null)
 const kwhChart = ref<HTMLCanvasElement | null>(null)
@@ -420,12 +435,14 @@ async function fetchRealtimeData(forceRefresh: boolean = false) {
       return
     }
     
-    // Use refresh=true to force fresh data from opower API. Request 6 days (API max) to capture delayed data.
+    // day_offset: 0 = most recent day, 1 = day before. API returns full 24h of that day.
     const refreshParam = forceRefresh ? '&refresh=true' : ''
-    const res = await fetch(`${getApiBase()}/meter-reading/realtime?hours=144${refreshParam}`)
+    const res = await fetch(`${getApiBase()}/meter-reading/realtime?day_offset=${realtimeDayOffset.value}${refreshParam}`)
     if (!res.ok) {
       if (res.status === 400) {
         realtimeData.value = []
+        realtimeTotalDays.value = 0
+        realtimeDayLabel.value = null
         if (activeChartTab.value === 'realtime') {
           activeChartTab.value = 'billHistory'
         }
@@ -434,20 +451,12 @@ async function fetchRealtimeData(forceRefresh: boolean = false) {
       throw new Error(`HTTP ${res.status}`)
     }
     const data = await res.json()
-    let readings = data.readings || []
-    
-    // Filter to show only the last 24 hours from the most recent available reading
-    // (opower data is delayed, so we can't filter from "now")
-    if (readings.length > 0) {
-      const lastReadingTime = new Date(readings[readings.length - 1].end_time)
-      const cutoffTime = new Date(lastReadingTime.getTime() - 24 * 60 * 60 * 1000)
-      readings = readings.filter((r: RealtimeReading) => new Date(r.start_time) >= cutoffTime)
-    }
-    
+    const readings = data.readings || []
     realtimeData.value = readings
-    
+    realtimeTotalDays.value = data.total_available_days ?? 0
+    realtimeDayLabel.value = data.day_label ?? null
+
     if (!realtimeData.value.length) {
-      // Auto-fetch from API when cache is empty and meter is enabled
       if (meterEnabled.value && !forceRefresh) {
         await fetchRealtimeData(true)
         return
@@ -470,6 +479,18 @@ async function fetchRealtimeData(forceRefresh: boolean = false) {
 
 async function refreshRealtimeData() {
   await fetchRealtimeData(true)
+}
+
+function goToPrevDay() {
+  if (realtimeDayOffset.value >= realtimeTotalDays.value - 1 || realtimeLoading.value) return
+  realtimeDayOffset.value++
+  fetchRealtimeData(false)
+}
+
+function goToNextDay() {
+  if (realtimeDayOffset.value <= 0 || realtimeLoading.value) return
+  realtimeDayOffset.value--
+  fetchRealtimeData(false)
 }
 
 function destroyRealtimeChart() {
@@ -816,8 +837,11 @@ watch(historyData, async () => {
 
 watch(activeChartTab, async (newTab) => {
   await nextTick()
-  if (newTab === 'realtime' && realtimeData.value.length && !realtimeChartInstance) {
-    createRealtimeChart()
+  if (newTab === 'realtime') {
+    await fetchRealtimeData(false)
+    if (realtimeData.value.length && !realtimeChartInstance) {
+      createRealtimeChart()
+    }
   }
 })
 
@@ -1051,6 +1075,8 @@ onUnmounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
   padding: 8px 16px;
   background: #f8f9fa;
   border-bottom: 1px solid #e9ecef;
@@ -1062,10 +1088,58 @@ onUnmounted(() => {
   color: #495057;
 }
 
+.ha-realtime-day-count {
+  font-weight: normal;
+  color: #6c757d;
+  font-size: 11px;
+  margin-left: 6px;
+}
+
 .ha-realtime-range {
   font-weight: normal;
   color: #6c757d;
   font-size: 12px;
+}
+
+.ha-realtime-day-nav {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.ha-day-nav-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--ha-primary-color, #0088cc);
+  background: transparent;
+  border: 1px solid var(--ha-border-color, #e0e0e0);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+}
+
+.ha-day-nav-btn:hover:not(:disabled) {
+  background: rgba(0, 136, 204, 0.1);
+  border-color: var(--ha-primary-color, #0088cc);
+}
+
+.ha-day-nav-btn:disabled {
+  color: #adb5bd;
+  border-color: #e9ecef;
+  cursor: not-allowed;
+}
+
+.ha-realtime-day-count {
+  font-weight: normal;
+  color: #6c757d;
+  font-size: 12px;
+  margin-left: 6px;
 }
 
 .ha-refresh-btn {
