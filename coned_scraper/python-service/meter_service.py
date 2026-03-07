@@ -267,10 +267,9 @@ class MeterService:
             account = accounts[0]
             
             # Request a wider window: Con Edison data is typically delayed 1-24 hours.
-            # If we only request last 24h, the most recent data may fall outside our window.
-            # Request up to 7 days so we capture delayed data, then trim to last 24h for display.
+            # API max is 6 days. Request full 6 days to capture delayed data and store all.
             end_date = datetime.now(timezone.utc)
-            fetch_hours = min(max(hours, 24), 168)  # At least 24h, max 7 days
+            fetch_hours = min(max(hours, 24), 144)  # At least 24h, max 6 days (API limit)
             start_date = end_date - timedelta(hours=fetch_hours)
             
             reads = await self._opower.async_get_cost_reads(
@@ -323,13 +322,12 @@ class MeterService:
                     for r in reads
                 ]
             
-            # Trim to last 24 hours (96 x 15-min intervals) for storage and response
-            trimmed = result[-96:] if len(result) > 96 else result
+            # Store all data to DB (up to 6 days). Chart shows last 24h from most recent.
             import db
-            await db.save_realtime_readings_db(trimmed)
+            await db.save_realtime_readings_db(result)
             
-            logger.info(f"Fetched {len(result)} readings, returning last {len(trimmed)} (24h)")
-            return trimmed
+            logger.info(f"Fetched {len(result)} readings, stored all for 24h chart")
+            return result
             
         except Exception as e:
             logger.error(f"Failed to fetch quarter-hour reads: {e}")
@@ -408,8 +406,8 @@ class MeterService:
                     if self.is_enabled():
                         # Latest hourly reading (data saved to DB for integration to poll)
                         await self.fetch_reading()
-                        # 24-hour data for History chart (quarter-hour or hourly fallback)
-                        await self.fetch_quarter_hour_reads(24)
+                        # 6-day data for History chart (API max); chart shows last 24h
+                        await self.fetch_quarter_hour_reads(144)
                         # Also fetch forecast data
                         await self.fetch_forecast()
                 except Exception as e:

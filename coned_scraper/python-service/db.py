@@ -1800,9 +1800,9 @@ async def save_meter_forecast_db(forecast: Dict[str, Any]):
     await set_app_setting("meter_forecast_cache", forecast)
 
 async def get_realtime_readings_db() -> Optional[List[Dict[str, Any]]]:
-    """Get cached realtime readings from dedicated table (last 96 = 24h of 15-min intervals)"""
+    """Get cached realtime readings from dedicated table (up to 6 days stored)"""
     await ensure_connected()
-    rows = await db.realtimereading.find_many(order={"endTime": "desc"}, take=96)
+    rows = await db.realtimereading.find_many(order={"endTime": "desc"})
     if not rows:
         return None
     # Return ascending by start_time for chart
@@ -1818,15 +1818,14 @@ async def get_realtime_readings_db() -> Optional[List[Dict[str, Any]]]:
 
 
 async def save_realtime_readings_db(readings: List[Dict[str, Any]]):
-    """Save realtime readings to dedicated table (replaces previous cache)"""
+    """Save realtime readings to dedicated table (replaces previous cache, stores up to 6 days)"""
     await ensure_connected()
     from datetime import datetime
     # Delete all existing readings (we replace with fresh fetch)
     await db.realtimereading.delete_many()
     if not readings:
         return
-    # Limit to last 96 (24h of 15-min intervals)
-    to_save = readings[-96:] if len(readings) > 96 else readings
+    to_save = readings
     data_list = []
     for r in to_save:
         start_str = r.get("start_time") or ""

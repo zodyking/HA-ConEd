@@ -77,6 +77,62 @@ async def get_db_status():
             "database": "postgresql"
         }
 
+
+def _parse_host_from_url(url: str) -> str | None:
+    """Extract hostname from a URL (no port - caller appends :5555 for Prisma)."""
+    if not url or not isinstance(url, str) or not url.strip():
+        return None
+    url = url.strip().rstrip("/")
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(url if "://" in url else f"http://{url}")
+        if parsed.hostname:
+            return parsed.hostname
+    except Exception:
+        pass
+    return None
+
+
+@app.get("/api/prisma-url")
+async def get_prisma_url(request: Request):
+    """
+    Return Prisma Studio URL using HA external_url if present, else internal_url, else request host.
+    Prisma runs on port 5555 (HTTP).
+    """
+    host = None
+    token = os.environ.get("SUPERVISOR_TOKEN")
+    if token:
+        try:
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    "http://supervisor/core/api/config",
+                    headers={"Authorization": f"Bearer {token}"},
+                    timeout=aiohttp.ClientTimeout(total=5),
+                ) as resp:
+                    if resp.status == 200:
+                        config = await resp.json()
+                        external = config.get("external_url") or config.get("externalUrl")
+                        internal = config.get("internal_url") or config.get("internalUrl")
+                        # Prefer external if present and non-empty
+                        url_str = (external or "").strip() or (internal or "").strip()
+                        if url_str:
+                            host = _parse_host_from_url(url_str)
+        except Exception:
+            pass
+    if not host:
+        # Fallback: use request host (X-Forwarded-Host from ingress, or Host)
+        host = (
+            request.headers.get("x-forwarded-host")
+            or request.headers.get("X-Forwarded-Host")
+            or request.headers.get("Host")
+        )
+        if host and ":" in host:
+            host = host.split(":")[0]
+    if not host:
+        host = "localhost"
+    return {"url": f"http://{host}:5555"}
+
 # CORS configuration
 app.add_middleware(
     CORSMiddleware,
@@ -2387,10 +2443,10 @@ async def get_realtime_usage(hours: int = 24, refresh: bool = False):
                 "cached": True
             }
     
-    # Clamp hours to max 144 (6 days of quarter-hour data)
+    # Clamp hours to max 144 (6 days, API limit). Always fetch 6 days to capture delayed data.
     hours = min(max(1, hours), 144)
-    
-    readings = await service.fetch_quarter_hour_reads(hours)
+    fetch_hours = 144  # Request full 6 days; chart filters to last 24h
+    readings = await service.fetch_quarter_hour_reads(fetch_hours)
     
     if not readings:
         return {

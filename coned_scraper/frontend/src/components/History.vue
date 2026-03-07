@@ -420,9 +420,9 @@ async function fetchRealtimeData(forceRefresh: boolean = false) {
       return
     }
     
-    // Use refresh=true to force fresh data from opower API
+    // Use refresh=true to force fresh data from opower API. Request 6 days (API max) to capture delayed data.
     const refreshParam = forceRefresh ? '&refresh=true' : ''
-    const res = await fetch(`${getApiBase()}/meter-reading/realtime?hours=24${refreshParam}`)
+    const res = await fetch(`${getApiBase()}/meter-reading/realtime?hours=144${refreshParam}`)
     if (!res.ok) {
       if (res.status === 400) {
         realtimeData.value = []
