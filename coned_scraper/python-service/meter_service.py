@@ -290,7 +290,6 @@ class MeterService:
                 )
                 if reads:
                     # Expand each hour into 4 x 15-min slots (divide consumption evenly)
-                    from datetime import timedelta
                     result = []
                     for r in reads:
                         if r.start_time and r.end_time and r.consumption is not None:

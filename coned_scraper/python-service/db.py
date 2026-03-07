@@ -1825,70 +1825,79 @@ async def get_realtime_readings_for_day(day_offset: int = 0) -> tuple[List[Dict[
     """
     Get readings for a specific day. Day 0 = most recent complete day we have, 1 = day before, etc.
     Returns (readings for that day, total_available_days).
+    Uses Prisma only (no asyncpg) for addon compatibility.
     """
     await ensure_connected()
-    # Get distinct dates (UTC) from our data, ordered most recent first
-    conn = await _raw_conn()
-    try:
-        rows = await conn.fetch("""
-            SELECT DISTINCT DATE(end_time AT TIME ZONE 'UTC') as d
-            FROM realtime_readings
-            ORDER BY d DESC
-        """)
-        if not rows:
-            return [], 0
-        dates = [r["d"] for r in rows]
-        total_days = len(dates)
-        if day_offset >= total_days:
-            return [], total_days
-        target_date = dates[day_offset]
-        # Get readings for that date (full 24h in UTC)
-        day_start = datetime(target_date.year, target_date.month, target_date.day, tzinfo=timezone.utc)
-        day_end = day_start + timedelta(days=1)
-        readings = await db.realtimereading.find_many(
-            where={
-                "endTime": {"gte": day_start, "lt": day_end}
-            },
-            order={"startTime": "asc"}
-        )
-        return [
-            {
-                "start_time": r.startTime.isoformat(),
-                "end_time": r.endTime.isoformat(),
-                "consumption": float(r.consumption),
-            }
-            for r in readings
-        ], total_days
-    finally:
-        await conn.close()
+    # Fetch all readings and compute distinct dates in Python (Prisma-only, no raw SQL)
+    rows = await db.realtimereading.find_many(order={"endTime": "desc"})
+    if not rows:
+        return [], 0
+    # Get distinct dates (UTC) from endTime, most recent first
+    seen: set = set()
+    dates: List[datetime] = []
+    for r in rows:
+        d = r.endTime.date() if hasattr(r.endTime, "date") else r.endTime.replace(tzinfo=timezone.utc).date()
+        if d not in seen:
+            seen.add(d)
+            dates.append(datetime(d.year, d.month, d.day, tzinfo=timezone.utc))
+    dates.sort(reverse=True)
+    total_days = len(dates)
+    if day_offset >= total_days:
+        return [], total_days
+    day_start = dates[day_offset]
+    day_end = day_start + timedelta(days=1)
+    readings = await db.realtimereading.find_many(
+        where={
+            "endTime": {"gte": day_start, "lt": day_end}
+        },
+        order={"startTime": "asc"}
+    )
+    return [
+        {
+            "start_time": r.startTime.isoformat(),
+            "end_time": r.endTime.isoformat(),
+            "consumption": float(r.consumption),
+        }
+        for r in readings
+    ], total_days
 
 
 async def save_realtime_readings_db(readings: List[Dict[str, Any]]):
-    """Append/merge realtime readings (upsert by start_time, end_time - no max days)"""
+    """Append/merge realtime readings (upsert by start_time, end_time - no max days).
+    Uses Prisma only (no asyncpg) for addon compatibility.
+    """
     await ensure_connected()
-    from datetime import datetime
     if not readings:
         return
-    conn = await _raw_conn()
-    try:
-        for r in readings:
-            start_str = r.get("start_time") or ""
-            end_str = r.get("end_time") or ""
-            try:
-                start_dt = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
-                end_dt = datetime.fromisoformat(end_str.replace("Z", "+00:00"))
-            except (ValueError, TypeError):
-                continue
-            consumption = float(r.get("consumption", 0) or 0)
-            await conn.execute("""
-                INSERT INTO realtime_readings (start_time, end_time, consumption)
-                VALUES ($1, $2, $3)
-                ON CONFLICT (start_time, end_time) DO UPDATE SET
-                    consumption = EXCLUDED.consumption,
-                    fetched_at = NOW()
-            """, start_dt, end_dt, consumption)
-    finally:
-        await conn.close()
+    for r in readings:
+        start_str = r.get("start_time") or ""
+        end_str = r.get("end_time") or ""
+        try:
+            start_dt = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
+            end_dt = datetime.fromisoformat(end_str.replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            continue
+        consumption = float(r.get("consumption", 0) or 0)
+        try:
+            await db.realtimereading.upsert(
+                where={"startTime_endTime": {"startTime": start_dt, "endTime": end_dt}},
+                create={"startTime": start_dt, "endTime": end_dt, "consumption": consumption},
+                update={"consumption": consumption},
+            )
+        except Exception:
+            # Fallback: find_first + create/update (compound unique name may vary by Prisma version)
+            existing = await db.realtimereading.find_first(
+                where={"startTime": start_dt, "endTime": end_dt}
+            )
+            if existing:
+                await db.realtimereading.update(
+                    where={"id": existing.id},
+                    data={"consumption": consumption},
+                )
+            else:
+                await db.realtimereading.create(
+                    data={"startTime": start_dt, "endTime": end_dt, "consumption": consumption},
+                )
 
 # =============================================================================
 # Credentials (migrated from file to database)
