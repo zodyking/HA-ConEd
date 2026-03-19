@@ -29,7 +29,7 @@ import db
 app = FastAPI(title="Con Edison API")
 
 # Code version for deployment verification
-CODE_VERSION = "1.3.51"
+CODE_VERSION = "1.3.52"
 
 @app.on_event("startup")
 async def startup():
@@ -1793,6 +1793,8 @@ async def get_ledger():
     """Get complete ledger data from normalized database tables"""
     try:
         data = await db.get_ledger_data()
+        pv = await get_payment_verification_settings()
+        data["petitions_enabled"] = pv.get("petitions_enabled", True)
         return data
     except Exception as e:
         await db.add_log("error", f"Failed to get ledger: {str(e)}")

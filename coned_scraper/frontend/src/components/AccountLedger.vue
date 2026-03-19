@@ -37,6 +37,30 @@
       </div>
     </div>
 
+    <!-- Petition Payment Modal -->
+    <div v-if="petitionPayment" class="ha-modal-overlay ha-unclaim-overlay" @click.self="petitionPayment = null">
+      <div class="ha-modal ha-unclaim-modal">
+        <div class="ha-modal-header">
+          <span>Claim This Payment?</span>
+          <button type="button" class="ha-modal-close" @click="petitionPayment = null">×</button>
+        </div>
+        <div class="ha-modal-body">
+          <p v-if="petitionPayment">
+            This payment is assigned to {{ petitionPayment.payee_name || 'someone else' }}. Did you make this payment?
+          </p>
+          <div v-if="petitionPayment" class="ha-unclaim-payment-info">
+            <strong>{{ petitionPayment.amount }}</strong> • {{ petitionPayment.payment_date }}
+          </div>
+        </div>
+        <div class="ha-modal-footer">
+          <button type="button" class="ha-btn ha-btn-gray" @click="petitionPayment = null">Cancel</button>
+          <button type="button" class="ha-btn ha-btn-primary" :disabled="petitionLoading" @click="confirmPetition">
+            {{ petitionLoading ? 'Submitting...' : 'Yes, I Made This Payment' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- PDF Bill Modal -->
     <PdfViewer
       v-if="showPdfModal && viewingBillId"
@@ -230,8 +254,8 @@
                     <div
                       v-for="payment in bill.payments"
                       :key="payment.id"
-                      :class="['ha-payment-entry', { 'ha-payment-clickable': canUnclaimPayment(payment) }]"
-                      @click="canUnclaimPayment(payment) ? openUnclaimModal(payment) : null"
+                      :class="['ha-payment-entry', { 'ha-payment-clickable': isPaymentClickable(payment) }]"
+                      @click="handlePaymentClick(payment)"
                     >
                       <div class="ha-payment-row">
                         <div class="ha-payment-meta">
@@ -293,8 +317,8 @@
               <div
                 v-for="payment in ledgerData.orphan_payments"
                 :key="payment.id"
-                :class="['ha-payment-entry', { 'ha-payment-clickable': canUnclaimPayment(payment) }]"
-                @click="canUnclaimPayment(payment) ? openUnclaimModal(payment) : null"
+                :class="['ha-payment-entry', { 'ha-payment-clickable': isPaymentClickable(payment) }]"
+                @click="handlePaymentClick(payment)"
               >
                 <div class="ha-payment-row">
                   <div class="ha-payment-meta">
@@ -414,6 +438,9 @@ const expandedPayments = ref<Set<number>>(new Set())
 const breakdownShowRollover = ref(false)
 const unclaimPayment = ref<Payment | null>(null)
 const unclaimLoading = ref(false)
+const petitionPayment = ref<Payment | null>(null)
+const petitionLoading = ref(false)
+const petitionsEnabled = ref(true)
 
 interface PayeeUser {
   id: number
@@ -450,6 +477,25 @@ function canUnclaimPayment(payment: Payment): boolean {
   return currentViewerPayeeId.value !== null && currentViewerPayeeId.value === payment.payee_user_id
 }
 
+function canPetitionPayment(payment: Payment): boolean {
+  if (!currentViewerPayeeId.value) return false
+  if (!payment.payee_user_id) return false
+  if (currentViewerPayeeId.value === payment.payee_user_id) return false
+  return petitionsEnabled.value
+}
+
+function isPaymentClickable(payment: Payment): boolean {
+  return canUnclaimPayment(payment) || canPetitionPayment(payment)
+}
+
+function handlePaymentClick(payment: Payment) {
+  if (canUnclaimPayment(payment)) {
+    openUnclaimModal(payment)
+  } else if (canPetitionPayment(payment)) {
+    petitionPayment.value = payment
+  }
+}
+
 async function loadPayees() {
   try {
     const res = await fetch(`${getApiBase()}/payee-users`)
@@ -480,6 +526,28 @@ async function confirmUnclaim() {
     apiError.value = 'Failed to connect'
   } finally {
     unclaimLoading.value = false
+  }
+}
+
+async function confirmPetition() {
+  if (!petitionPayment.value || currentViewerPayeeId.value === null) return
+  petitionLoading.value = true
+  try {
+    const res = await fetch(`${getApiBase()}/payments/${petitionPayment.value.id}/petition`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ payee_id: currentViewerPayeeId.value }),
+    })
+    if (res.ok) {
+      petitionPayment.value = null
+      await loadLedgerData()
+    } else {
+      apiError.value = (await res.json().catch(() => ({}))).detail || 'Failed to submit petition'
+    }
+  } catch (e) {
+    apiError.value = 'Failed to connect'
+  } finally {
+    petitionLoading.value = false
   }
 }
 
@@ -719,6 +787,7 @@ async function loadLedgerData() {
     if (response.ok) {
       const data = await response.json()
       ledgerData.value = data
+      petitionsEnabled.value = data.petitions_enabled !== false
       apiError.value = null
     } else {
       const legacyResponse = await fetch(`${api}/scraped-data?limit=1`)
