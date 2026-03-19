@@ -29,7 +29,7 @@ import db
 app = FastAPI(title="Con Edison API")
 
 # Code version for deployment verification
-CODE_VERSION = "1.3.50"
+CODE_VERSION = "1.3.51"
 
 @app.on_event("startup")
 async def startup():
@@ -3211,6 +3211,13 @@ async def get_ha_users():
         await db.add_log("error", f"Failed to fetch HA users: {str(e)}")
     
     return result
+
+
+@app.get("/api/current-ha-user")
+async def get_current_ha_user(request: Request):
+    """Return the signed-in HA user ID when accessed via Ingress (X-Remote-User-ID header)."""
+    ha_user_id = request.headers.get("X-Remote-User-ID") or None
+    return {"ha_user_id": ha_user_id}
 
 
 @app.get("/api/ha-notify-services")
