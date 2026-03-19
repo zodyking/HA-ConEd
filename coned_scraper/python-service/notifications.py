@@ -193,7 +193,7 @@ async def send_payment_claim_request(payment: Dict[str, Any], payees: List[Dict[
     amount = payment.get("amount", "N/A")
     payment_date = payment.get("payment_date", "N/A")
     title = ensure_con_edison_title("Payment to claim")
-    message = f"Did you make the {amount} payment on {payment_date}?"
+    message = f"Did you make the {amount} payment on {payment_date}? (Tap & Hold to respond)"
     
     sent_count = 0
     try:

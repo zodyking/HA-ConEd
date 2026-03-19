@@ -29,7 +29,7 @@ import db
 app = FastAPI(title="Con Edison API")
 
 # Code version for deployment verification
-CODE_VERSION = "1.3.52"
+CODE_VERSION = "1.3.53"
 
 @app.on_event("startup")
 async def startup():
@@ -1936,6 +1936,7 @@ class PayeeUserModel(BaseModel):
 class PayeeUserUpdateModel(BaseModel):
     name: Optional[str] = None
     ha_user_id: Optional[str] = None
+    unlink_ha_user: Optional[bool] = None  # When True, clear ha_user_id
     notify_service: Optional[str] = None
     notifications_enabled: Optional[bool] = None
     is_default: Optional[bool] = None
@@ -2017,12 +2018,20 @@ async def update_user(user_id: int, user: PayeeUserUpdateModel):
             await db.update_payee_user(user_id, user.name, user.is_default, user.is_admin)
         
         # Update notification fields
-        if user.ha_user_id is not None or user.notify_service is not None or user.notifications_enabled is not None:
+        unlink = getattr(user, "unlink_ha_user", None) is True
+        should_update = (
+            unlink
+            or user.ha_user_id is not None
+            or user.notify_service is not None
+            or user.notifications_enabled is not None
+        )
+        if should_update:
             await db.update_payee_notify_settings(
                 user_id,
-                ha_user_id=user.ha_user_id,
+                ha_user_id=None if unlink else user.ha_user_id,
                 notify_service=user.notify_service,
-                notifications_enabled=user.notifications_enabled
+                notifications_enabled=user.notifications_enabled,
+                clear_ha_user=unlink
             )
         
         return {"success": True}

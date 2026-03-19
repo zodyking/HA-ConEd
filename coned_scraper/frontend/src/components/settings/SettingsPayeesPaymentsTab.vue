@@ -47,6 +47,19 @@
                 <input v-model.number="responsibilities[user.id]" type="number" min="0" max="100" @input="(e: Event) => responsibilities[user.id] = parseInt((e.target as HTMLInputElement).value) || 0" @click.stop />
                 <span>%</span>
               </div>
+              <!-- Link HA User (required for unclaim/petition in Account Ledger) -->
+              <div v-if="isAddon" class="ha-link-row" @click.stop>
+                <span class="ha-link-label">Link HA User:</span>
+                <button
+                  type="button"
+                  class="ha-link-btn"
+                  :title="user.ha_user_id ? 'Change linked HA user' : 'Link to HA user for unclaim/petition in Account Ledger'"
+                  @click="openLinkHaUserModal(user)"
+                >
+                  {{ getLinkedHaUserName(user) || 'Not linked' }}
+                  <span class="ha-link-action">{{ user.ha_user_id ? 'Change' : 'Link' }}</span>
+                </button>
+              </div>
               <!-- Notification settings -->
               <div v-if="isAddon" class="ha-notify-row" @click.stop>
                 <label class="ha-notify-toggle">
@@ -196,6 +209,42 @@
         <div class="ha-modal-footer">
           <button type="button" class="ha-btn ha-btn-gray" @click="auditPayment = null">Cancel</button>
           <button type="button" class="ha-btn ha-btn-primary" @click="savePayeeAudit">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Link HA User Modal -->
+    <div v-if="showLinkHaUserModal" class="ha-modal-overlay" @click.self="showLinkHaUserModal = false; linkHaUserPayeeId = null">
+      <div class="ha-modal ha-ha-user-modal">
+        <div class="ha-modal-header">
+          <h3>Link to HA User</h3>
+          <button type="button" class="ha-modal-close" @click="showLinkHaUserModal = false; linkHaUserPayeeId = null">×</button>
+        </div>
+        <div class="ha-modal-content">
+          <p class="ha-modal-desc">Select an HA user to link to this payee. Linked payees can unclaim or petition payments in the Account Ledger.</p>
+          <div
+            v-if="linkHaUserPayeeId != null && (users.find(u => u.id === linkHaUserPayeeId)?.ha_user_id)"
+            class="ha-unlink-row"
+          >
+            <button type="button" class="ha-btn ha-btn-gray" @click="unlinkHaUserFromModal">Unlink HA User</button>
+          </div>
+          <div v-if="haUsersLoading" class="ha-loading">Loading HA users...</div>
+          <div v-else-if="haUsers.length === 0" class="ha-empty">No Home Assistant users found.</div>
+          <div v-else class="ha-ha-users-list">
+            <div
+              v-for="haUser in haUsers"
+              :key="haUser.id"
+              :class="['ha-ha-user-item', { disabled: linkHaUserPayeeId != null && isHaUserLinkedToOtherPayee(haUser.id, linkHaUserPayeeId) }]"
+              @click="linkHaUserPayeeId != null && !isHaUserLinkedToOtherPayee(haUser.id, linkHaUserPayeeId) && handleLinkHaUser(haUser)"
+            >
+              <div class="ha-ha-user-info">
+                <span class="ha-ha-user-name">{{ haUser.name }}</span>
+                <span v-if="haUser.is_admin" class="ha-badge ha-badge-admin">Admin</span>
+                <span v-if="linkHaUserPayeeId != null && isHaUserLinkedToOtherPayee(haUser.id, linkHaUserPayeeId)" class="ha-badge ha-badge-added">Linked to another payee</span>
+              </div>
+              <span v-if="haUser.username" class="ha-ha-user-username">@{{ haUser.username }}</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -580,6 +629,100 @@ function isUserAlreadyAdded(haUserId: string): boolean {
   return users.value.some(u => u.ha_user_id === haUserId)
 }
 
+const showLinkHaUserModal = ref(false)
+const linkHaUserPayeeId = ref<number | null>(null)
+
+function getLinkedHaUserName(user: User): string | null {
+  if (!user.ha_user_id) return null
+  const haUser = haUsers.value.find(u => u.id === user.ha_user_id)
+  return haUser?.name ?? null
+}
+
+function isHaUserLinkedToOtherPayee(haUserId: string, excludePayeeId: number): boolean {
+  return users.value.some(u => u.id !== excludePayeeId && (u.ha_user_id ?? null) === haUserId)
+}
+
+async function openLinkHaUserModal(user: User) {
+  linkHaUserPayeeId.value = user.id
+  showLinkHaUserModal.value = true
+  await loadHaUsersAndServices()
+}
+
+async function handleLinkHaUser(haUser: HaUser) {
+  const payeeId = linkHaUserPayeeId.value
+  if (!payeeId) return
+  isLoading.value = true
+  message.value = null
+  try {
+    const res = await fetch(`${getApiBase()}/payee-users/${payeeId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ha_user_id: haUser.id })
+    })
+    if (res.ok) {
+      showLinkHaUserModal.value = false
+      linkHaUserPayeeId.value = null
+      await loadUsers()
+      message.value = { type: 'success', text: `Linked to ${haUser.name}` }
+    } else {
+      const e = await res.json().catch(() => ({}))
+      message.value = { type: 'error', text: e.detail || 'Failed to link' }
+    }
+  } catch {
+    message.value = { type: 'error', text: 'Failed to connect' }
+  } finally {
+    isLoading.value = false
+  }
+}
+
+async function unlinkHaUserFromModal() {
+  const pid = linkHaUserPayeeId.value
+  if (pid == null) return
+  const user = users.value.find(u => u.id === pid)
+  if (!user) return
+  await unlinkHaUser(user)
+  if (message.value?.type === 'success') {
+    showLinkHaUserModal.value = false
+    linkHaUserPayeeId.value = null
+  }
+}
+
+async function unlinkHaUserFromModal() {
+  const pid = linkHaUserPayeeId.value
+  if (pid == null) return
+  const user = users.value.find(u => u.id === pid)
+  if (!user) return
+  await unlinkHaUser(user)
+  if (message.value?.type === 'success') {
+    showLinkHaUserModal.value = false
+    linkHaUserPayeeId.value = null
+  }
+}
+
+async function unlinkHaUser(user: User) {
+  if (!confirm(`Unlink ${user.name} from HA user?`)) return
+  isLoading.value = true
+  message.value = null
+  try {
+    const res = await fetch(`${getApiBase()}/payee-users/${user.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ unlink_ha_user: true })
+    })
+    if (res.ok) {
+      await loadUsers()
+      message.value = { type: 'success', text: 'Unlinked' }
+    } else {
+      const e = await res.json().catch(() => ({}))
+      message.value = { type: 'error', text: e.detail || 'Failed to unlink' }
+    }
+  } catch {
+    message.value = { type: 'error', text: 'Failed to connect' }
+  } finally {
+    isLoading.value = false
+  }
+}
+
 onMounted(() => {
   loadUsers()
   loadPaymentsData()
@@ -609,6 +752,12 @@ onMounted(() => {
 .ha-btn-red { background: #f44336; color: white; }
 .ha-responsibility { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
 .ha-responsibility input { width: 60px; }
+.ha-link-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
+.ha-link-label { font-size: 0.85rem; color: #666; }
+.ha-link-btn { font-size: 0.8rem; background: #e3f2fd; color: #1976d2; border: 1px solid #90caf9; padding: 0.3rem 0.6rem; border-radius: 4px; cursor: pointer; display: inline-flex; align-items: center; gap: 0.35rem; }
+.ha-link-btn:hover { background: #bbdefb; }
+.ha-link-action { font-size: 0.7rem; opacity: 0.9; }
+.ha-unlink-row { margin-bottom: 1rem; }
 .ha-breakdown-setting { }
 .ha-breakdown-label { display: inline-flex; align-items: center; gap: 0.5rem; cursor: pointer; font-weight: 500; }
 .ha-breakdown-desc { font-size: 0.8rem; color: #666; margin-top: 0.25rem; margin-left: 1.5rem; }

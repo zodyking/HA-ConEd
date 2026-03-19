@@ -1299,13 +1299,16 @@ async def update_payee_notify_settings(
     user_id: int,
     ha_user_id: Optional[str] = None,
     notify_service: Optional[str] = None,
-    notifications_enabled: Optional[bool] = None
+    notifications_enabled: Optional[bool] = None,
+    clear_ha_user: bool = False
 ) -> bool:
     """Update payee notification settings"""
     await ensure_connected()
     
     data = {}
-    if ha_user_id is not None:
+    if clear_ha_user:
+        data["haUserId"] = None
+    elif ha_user_id is not None:
         data["haUserId"] = ha_user_id
     if notify_service is not None:
         data["notifyService"] = notify_service

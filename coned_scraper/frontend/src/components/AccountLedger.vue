@@ -255,6 +255,7 @@
                       v-for="payment in bill.payments"
                       :key="payment.id"
                       :class="['ha-payment-entry', { 'ha-payment-clickable': isPaymentClickable(payment) }]"
+                      :title="getPaymentRowTitle(payment)"
                       @click="handlePaymentClick(payment)"
                     >
                       <div class="ha-payment-row">
@@ -318,6 +319,7 @@
                 v-for="payment in ledgerData.orphan_payments"
                 :key="payment.id"
                 :class="['ha-payment-entry', { 'ha-payment-clickable': isPaymentClickable(payment) }]"
+                :title="getPaymentRowTitle(payment)"
                 @click="handlePaymentClick(payment)"
               >
                 <div class="ha-payment-row">
@@ -465,8 +467,8 @@ async function loadCurrentHaUser() {
 }
 
 const currentViewerPayeeId = computed<number | null>(() => {
-  if (!isInHaPanel()) return null
-  const haUserId = currentHaUserId.value ?? getHaUserId()
+  // Prefer backend (X-Remote-User-ID) - set only when accessed via Ingress
+  const haUserId = currentHaUserId.value ?? (isInHaPanel() ? getHaUserId() : null)
   if (!haUserId) return null
   const payee = payees.value.find((p) => (p.ha_user_id ?? null) === haUserId)
   return payee?.id ?? null
@@ -486,6 +488,14 @@ function canPetitionPayment(payment: Payment): boolean {
 
 function isPaymentClickable(payment: Payment): boolean {
   return canUnclaimPayment(payment) || canPetitionPayment(payment)
+}
+
+function getPaymentRowTitle(payment: Payment): string {
+  if (canUnclaimPayment(payment)) return 'Click to unclaim'
+  if (canPetitionPayment(payment)) return 'Click to petition'
+  if (payment.payee_user_id && payment.payee_name)
+    return 'Link your payee to your HA user in Settings → Payees to unclaim or petition'
+  return ''
 }
 
 function handlePaymentClick(payment: Payment) {
