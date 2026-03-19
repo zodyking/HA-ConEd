@@ -1,31 +1,79 @@
 # Payment Claim Automation Example
 
-Example Home Assistant automation for recording ConEd payment claim Yes/No responses from mobile notifications.
+Example Home Assistant automation for recording ConEd payment claim Yes/No responses from mobile notifications. **You must create this automation** for tapping Yes/No to work; without it, the notification dismisses but no claim is recorded.
 
 ## Overview
 
-When payees tap **Yes** or **No** on a "Did you make this payment?" notification, Home Assistant fires `mobile_app_notification_action` with an action string like:
-- `CONED_CLAIM_YES_123_45` (payment 123, payee 45, claimed Yes)
-- `CONED_CLAIM_NO_123_45` (payment 123, payee 45, claimed No)
+When payees tap **Yes** or **No** on a "Did you make this payment?" notification, Home Assistant fires:
+- **Android:** `mobile_app_notification_action` with `action` like `CONED_CLAIM_YES_123_45`
+- **iOS:** `ios.notification_action` with `action` in the event data
 
-This automation parses the action and calls the addon API to record the response.
+The action format is `CONED_CLAIM_YES_<payment_id>_<payee_id>` or `CONED_CLAIM_NO_<payment_id>_<payee_id>`.
 
-## YAML Automation
+## Recommended: Simple claim-action endpoint (single URL, no parsing)
+
+The addon provides `POST /api/payments/claim-action` that accepts the raw action string. Use this so your rest_command needs only a **static URL** (no payment_id in path).
+
+### 1. Add rest_command
+
+In `configuration.yaml` (or `rest_command.yaml`). Replace `core_coned` with your addon slug (Settings → Add-ons → Con Edison → check the slug).
+
+```yaml
+rest_command:
+  coned_payee_claim:
+    method: POST
+    url: "http://homeassistant.local:8123/api/coned/ingress/core_coned/api/payments/claim-action"
+    content_type: "application/json"
+    payload_template: '{"action": "{{ action }}"}'
+```
+
+### 2. Add automation
+
+Use **two triggers** if you have both Android and iOS devices (the event type differs).
 
 ```yaml
 alias: ConEd Payment Claim - Record Yes/No
-description: Record payee claim response when user taps Yes or No on payment notification
+description: Record payee claim when user taps Yes or No on payment notification
 trigger:
   - platform: event
     event_type: mobile_app_notification_action
+  - platform: event
+    event_type: ios.notification_action
 condition:
   - condition: template
-    value_template: "{{ trigger.event.data.action starts with 'CONED_CLAIM_' }}"
+    value_template: >
+      {{ trigger.event.data.action is defined
+         and trigger.event.data.action starts with 'CONED_CLAIM_' }}
+action:
+  - service: rest_command.coned_payee_claim
+    data:
+      action: "{{ trigger.event.data.action }}"
+```
+
+### 3. Verify
+
+After saving and reloading automations, tap Yes on a payment claim notification. The ledger should show the payment as claimed for that payee.
+
+---
+
+## Alternative: Parse and call payee-claim (URL includes payment_id)
+
+If you prefer the original endpoint `POST /api/payments/{payment_id}/payee-claim`:
+
+```yaml
+alias: ConEd Payment Claim - Record Yes/No
+trigger:
+  - platform: event
+    event_type: mobile_app_notification_action
+  - platform: event
+    event_type: ios.notification_action
+condition:
+  - condition: template
+    value_template: "{{ trigger.event.data.action is defined and trigger.event.data.action starts with 'CONED_CLAIM_' }}"
 action:
   - variables:
       action: "{{ trigger.event.data.action }}"
       parts: "{{ action.split('_') }}"
-      # parts: ['CONED', 'CLAIM', 'YES' or 'NO', payment_id, payee_id]
       claimed: "{{ parts[2] == 'YES' }}"
       payment_id: "{{ parts[3] | int }}"
       payee_id: "{{ parts[4] | int }}"
@@ -36,73 +84,17 @@ action:
       claimed: "{{ claimed }}"
 ```
 
-## REST Command
-
-Add to `configuration.yaml` (or create a `rest_command.yaml` and include it):
+**REST command** (requires `url_template` in HA 2024.4+ or script + http.request):
 
 ```yaml
 rest_command:
   coned_payee_claim:
     method: POST
-    url: !secret coned_ingress_url  # e.g. http://localhost:8123/api/coned/ingress/core_coned
+    url_template: "http://homeassistant.local:8123/api/coned/ingress/core_coned/api/payments/{{ payment_id }}/payee-claim"
     content_type: "application/json"
-    payload: >
-      {
-        "payee_id": "{{ payee_id }}",
-        "claimed": {{ claimed | lower }}
-      }
-    # For Ingress, path is relative to base; append the API path:
-    # In HA, use a template or full URL in secrets
+    payload_template: '{"payee_id": {{ payee_id }}, "claimed": {{ claimed | lower }}}'
 ```
-
-**Alternative using a full URL in secrets** (`secrets.yaml`):
-
-```yaml
-coned_ingress_base: "http://homeassistant.local:8123/api/coned/ingress/core_coned"
-```
-
-Then in `configuration.yaml`:
-
-```yaml
-rest_command:
-  coned_payee_claim:
-    method: POST
-    url: "{{ config.coned_ingress_base }}/api/payments/{{ payment_id }}/payee-claim"
-    content_type: "application/json"
-    payload: '{"payee_id": {{ payee_id }}, "claimed": {{ claimed }}}'
-```
-
-**Note:** `rest_command` does not support Jinja in `url` directly in older HA versions. Use a template-based approach or a script that builds the URL and calls `http.request`.
-
-### Simpler approach: Script + HTTP
-
-```yaml
-script:
-  coned_payee_claim:
-    sequence:
-      - variables:
-          action: "{{ action }}"
-          parts: "{{ action.split('_') }}"
-          claimed: "{{ parts[2] == 'YES' }}"
-          payment_id: "{{ parts[3] }}"
-          payee_id: "{{ parts[4] }}"
-      - service: http.request
-        method: POST
-        url: "http://localhost:8123/api/coned/ingress/core_coned/api/payments/{{ payment_id }}/payee-claim"
-        headers:
-          Authorization: "Bearer {{ state_attr('person.xxx', 'user_id') }}"
-        content_type: "application/json"
-        data:
-          payee_id: "{{ payee_id | int }}"
-          claimed: "{{ claimed }}"
-```
-
-Replace `core_coned` with your addon slug. For Ingress, the request is sent to HA which proxies to the addon; auth may use the HA token from the notification context.
-
-### Recommended: use `coned.api_call` if the addon exposes it
-
-If the addon provides a dedicated script/helper, use that instead. Otherwise the HTTP approach above works.
 
 ---
 
-**Purpose:** 1-line doc for payment claim automation setup.
+**Purpose:** Enable Yes/No claim responses so the addon can assign payments.

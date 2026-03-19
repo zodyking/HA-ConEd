@@ -16,7 +16,7 @@
     </div>
 
     <!-- Unclaim Payment Modal -->
-    <div v-if="unclaimPayment" class="ha-modal-overlay" @click.self="unclaimPayment = null">
+    <div v-if="unclaimPayment" class="ha-modal-overlay ha-unclaim-overlay" @click.self="unclaimPayment = null">
       <div class="ha-modal ha-unclaim-modal">
         <div class="ha-modal-header">
           <span>Unclaim Payment</span>
@@ -230,8 +230,8 @@
                     <div
                       v-for="payment in bill.payments"
                       :key="payment.id"
-                      :class="['ha-payment-entry', { 'ha-payment-clickable': payment.payee_user_id }]"
-                      @click="payment.payee_user_id ? openUnclaimModal(payment) : null"
+                      :class="['ha-payment-entry', { 'ha-payment-clickable': canUnclaimPayment(payment) }]"
+                      @click="canUnclaimPayment(payment) ? openUnclaimModal(payment) : null"
                     >
                       <div class="ha-payment-row">
                         <div class="ha-payment-meta">
@@ -293,8 +293,8 @@
               <div
                 v-for="payment in ledgerData.orphan_payments"
                 :key="payment.id"
-                :class="['ha-payment-entry', { 'ha-payment-clickable': payment.payee_user_id }]"
-                @click="payment.payee_user_id ? openUnclaimModal(payment) : null"
+                :class="['ha-payment-entry', { 'ha-payment-clickable': canUnclaimPayment(payment) }]"
+                @click="canUnclaimPayment(payment) ? openUnclaimModal(payment) : null"
               >
                 <div class="ha-payment-row">
                   <div class="ha-payment-meta">
@@ -343,6 +343,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { formatDate } from '../lib/timezone'
 import { getApiBase } from '../lib/api-base'
 import { ajaxLoader } from '../lib/assets'
+import { isInHaPanel, getHaUserId } from '../lib/ha-user-admin'
 import PdfViewer from './PdfViewer.vue'
 import BillPayeeSummary from './BillPayeeSummary.vue'
 
@@ -413,6 +414,38 @@ const expandedPayments = ref<Set<number>>(new Set())
 const breakdownShowRollover = ref(false)
 const unclaimPayment = ref<Payment | null>(null)
 const unclaimLoading = ref(false)
+
+interface PayeeUser {
+  id: number
+  name: string
+  ha_user_id?: string | null
+}
+const payees = ref<PayeeUser[]>([])
+
+const currentViewerPayeeId = computed<number | null>(() => {
+  if (!isInHaPanel()) return null
+  const haUserId = getHaUserId()
+  if (!haUserId) return null
+  const payee = payees.value.find((p) => (p.ha_user_id ?? null) === haUserId)
+  return payee?.id ?? null
+})
+
+function canUnclaimPayment(payment: Payment): boolean {
+  if (!payment.payee_user_id) return false
+  return currentViewerPayeeId.value !== null && currentViewerPayeeId.value === payment.payee_user_id
+}
+
+async function loadPayees() {
+  try {
+    const res = await fetch(`${getApiBase()}/payee-users`)
+    if (res.ok) {
+      const d = await res.json()
+      payees.value = d.users || []
+    }
+  } catch {
+    payees.value = []
+  }
+}
 
 function openUnclaimModal(payment: Payment) {
   unclaimPayment.value = payment
@@ -761,6 +794,7 @@ function navigateToSettings() {
 let interval: ReturnType<typeof setInterval>
 onMounted(() => {
   loadLedgerData()
+  loadPayees()
   loadMeterData()
   loadAppSettings()
   checkPdfExists()
@@ -796,6 +830,27 @@ onUnmounted(() => clearInterval(interval))
 .ha-message.success { background: #e8f5e9; color: #2e7d32; }
 .ha-message.error { background: #ffebee; color: #c62828; }
 .ha-modal-overlay .ha-modal { margin: auto; }
+
+/* Unclaim modal: small box, readable light theme */
+.ha-unclaim-overlay {
+  background: rgba(0, 0, 0, 0.5);
+}
+.ha-unclaim-modal {
+  background: white;
+  color: #333;
+  max-width: 420px;
+  width: 100%;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  display: flex;
+  flex-direction: column;
+}
+.ha-unclaim-modal .ha-modal-body p,
+.ha-unclaim-modal .ha-unclaim-payment-info {
+  color: #333;
+  font-size: 1rem;
+}
+
 .ha-modal-close {
   position: relative;
   top: 0;

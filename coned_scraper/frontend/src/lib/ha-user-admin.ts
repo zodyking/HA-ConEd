@@ -1,4 +1,19 @@
 /**
+ * Gets the current HA user's ID when running inside a Home Assistant panel iframe.
+ * Returns null when not in HA or when hass.user.id is unavailable.
+ */
+export function getHaUserId(): string | null {
+  try {
+    if (typeof window === 'undefined') return null
+    const doc = window.parent?.document ?? document
+    const el = doc?.querySelector?.('home-assistant') as { hass?: { user?: { id?: string } } } | null
+    return el?.hass?.user?.id ?? null
+  } catch {
+    return null
+  }
+}
+
+/**
  * Whether we're running inside a Home Assistant panel iframe (parent has home-assistant).
  */
 export function isInHaPanel(): boolean {

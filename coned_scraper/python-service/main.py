@@ -29,7 +29,7 @@ import db
 app = FastAPI(title="Con Edison API")
 
 # Code version for deployment verification
-CODE_VERSION = "1.3.46"
+CODE_VERSION = "1.3.47"
 
 @app.on_event("startup")
 async def startup():
@@ -1254,6 +1254,101 @@ async def patch_payment_verification_settings_endpoint(data: PaymentVerification
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/automation/install-payment-claim")
+async def install_payment_claim_automation():
+    """
+    Create the payment claim automation package file in HA config.
+    Writes to /config/packages/coned_payment_claim.yaml with rest_command + automation.
+    User must have 'packages: !include_dir_named packages' in configuration.yaml (or restart HA after adding it).
+    """
+    import aiohttp
+    from pathlib import Path
+
+    token = os.environ.get("SUPERVISOR_TOKEN")
+    if not token:
+        raise HTTPException(status_code=400, detail="Not running as Home Assistant addon")
+
+    # Get addon slug from Supervisor
+    addon_slug = "local_coned_scraper"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                "http://supervisor/addons/self/info",
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=aiohttp.ClientTimeout(total=5),
+            ) as resp:
+                if resp.status == 200:
+                    info = await resp.json()
+                    addon_slug = info.get("slug") or info.get("data", {}).get("slug") or "local_coned_scraper"
+    except Exception as e:
+        await db.add_log("warning", f"Could not get addon slug: {e}, using default")
+        addon_slug = "local_coned_scraper"
+
+    # Ingress URL - HA calls localhost when automation runs
+    base_url = "http://localhost:8123"
+    claim_action_url = f"{base_url}/api/coned/ingress/{addon_slug}/api/payments/claim-action"
+
+    # DATA_DIR is /config when running as addon
+    packages_dir = DATA_DIR / "packages"
+    packages_dir.mkdir(parents=True, exist_ok=True)
+    package_path = packages_dir / "coned_payment_claim.yaml"
+
+    package_content = f'''# ConEd Payment Claim - Auto-installed by ConEd addon
+# When you tap Yes/No on "Did you make this payment?" notifications,
+# this automation records your response so payments get assigned.
+
+rest_command:
+  coned_payee_claim:
+    method: POST
+    url: "{claim_action_url}"
+    content_type: "application/json"
+    payload_template: '{{{{ "action": "{{{{ action }}}}" }}}}'
+
+automation:
+  - id: coned_payment_claim
+    alias: ConEd Payment Claim - Record Yes/No
+    description: Record payee claim when user taps Yes or No on payment notification
+    trigger:
+      - platform: event
+        event_type:
+          - mobile_app_notification_action
+          - ios.notification_action
+    condition:
+      - condition: template
+        value_template: >-
+          {{{{ trigger.event.data.action is defined
+             and trigger.event.data.action.startswith('CONED_CLAIM_') }}}}
+    action:
+      - service: rest_command.coned_payee_claim
+        data:
+          action: "{{{{ trigger.event.data.action }}}}"
+    mode: single
+'''
+
+    try:
+        package_path.write_text(package_content, encoding="utf-8")
+        await db.add_log("info", f"Installed payment claim automation to {package_path}")
+
+        # Check if configuration.yaml includes packages
+        config_path = DATA_DIR / "configuration.yaml"
+        packages_included = False
+        if config_path.exists():
+            config_text = config_path.read_text(encoding="utf-8")
+            packages_included = "packages" in config_text.lower() and ("include_dir_named" in config_text or "include_dir" in config_text)
+
+        return {
+            "success": True,
+            "path": str(package_path),
+            "packages_include_needed": not packages_included,
+            "message": "Package file created. Restart Home Assistant to load the automation."
+            if packages_included
+            else "Package file created. Add 'packages: !include_dir_named packages' under 'homeassistant:' in configuration.yaml, then restart Home Assistant.",
+        }
+    except Exception as e:
+        await db.add_log("error", f"Failed to install payment claim automation: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 class PasswordVerifyModel(BaseModel):
     password: str
 
@@ -1833,6 +1928,33 @@ class PayeeClaimModel(BaseModel):
 
 class PetitionModel(BaseModel):
     payee_id: int
+
+
+class ClaimActionModel(BaseModel):
+    action: str
+
+
+@app.post("/api/payments/claim-action")
+async def record_payee_claim_by_action(body: ClaimActionModel):
+    """
+    Record a payee's Yes/No response by passing the raw action string.
+    Simpler for automations: no need to parse, just forward trigger.event.data.action.
+
+    Action format: CONED_CLAIM_YES_<payment_id>_<payee_id> or CONED_CLAIM_NO_<payment_id>_<payee_id>
+    """
+    action = (body.action or "").strip()
+    if not action.startswith("CONED_CLAIM_"):
+        raise HTTPException(status_code=400, detail="Invalid action format")
+    parts = action.split("_")
+    if len(parts) != 5:
+        raise HTTPException(status_code=400, detail="Invalid action format")
+    try:
+        payment_id = int(parts[3])
+        payee_id = int(parts[4])
+        claimed = parts[2].upper() == "YES"
+    except (ValueError, IndexError):
+        raise HTTPException(status_code=400, detail="Invalid action format")
+    return await record_payee_claim(payment_id, PayeeClaimModel(payee_id=payee_id, claimed=claimed))
 
 
 @app.post("/api/payments/{payment_id}/payee-claim")
@@ -3359,7 +3481,7 @@ async def _get_real_test_data_for_notification(event_type: str) -> dict:
 async def test_notification(event_type: str, payee_id: Optional[int] = None):
     """Send a test notification for a specific event type using REAL account data."""
     import aiohttp
-    from notifications import format_template
+    from notifications import format_template, ensure_con_edison_title
     
     token = os.environ.get("SUPERVISOR_TOKEN")
     if not token:
@@ -3402,7 +3524,7 @@ async def test_notification(event_type: str, payee_id: Optional[int] = None):
                         "Content-Type": "application/json"
                     },
                     json={
-                        "title": config["title"],
+                        "title": ensure_con_edison_title(config.get("title") or ""),
                         "message": message
                     }
                 ) as resp:

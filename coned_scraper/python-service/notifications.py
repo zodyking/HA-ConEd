@@ -10,6 +10,15 @@ from typing import Dict, Any, Optional, List
 logger = logging.getLogger(__name__)
 
 
+def ensure_con_edison_title(title: str) -> str:
+    """Ensure notification title includes Con Edison (safeguard for stale DB configs)."""
+    if not title:
+        return "Con Edison"
+    if "con edison" in title.lower() or "conedison" in title.lower():
+        return title
+    return f"Con Edison: {title}"
+
+
 async def send_payee_notifications(event_type: str, data: Dict[str, Any]) -> int:
     """
     Send mobile notifications to all payees with notifications enabled.
@@ -47,7 +56,7 @@ async def send_payee_notifications(event_type: str, data: Dict[str, Any]) -> int
     
     # Format the message
     message = format_template(config["template"], data)
-    title = config["title"]
+    title = ensure_con_edison_title(config.get("title") or "")
     
     # Send to each payee
     sent_count = 0
@@ -183,7 +192,7 @@ async def send_payment_claim_request(payment: Dict[str, Any], payees: List[Dict[
     payment_id = payment.get("id")
     amount = payment.get("amount", "N/A")
     payment_date = payment.get("payment_date", "N/A")
-    title = "Payment to claim"
+    title = ensure_con_edison_title("Payment to claim")
     message = f"Did you make the {amount} payment on {payment_date}?"
     
     sent_count = 0

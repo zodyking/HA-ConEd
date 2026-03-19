@@ -436,6 +436,10 @@ async def perform_login(username: str, password: str, totp_code: str, test_only:
                     if recheck_info:
                         await db.add_log("info", "Balance validation failed, doing balance recheck...")
                         logger.info("Balance validation failed, doing balance recheck...")
+                        # Page is on bill history - navigate back to account page for balance selectors
+                        account_url = "https://www.coned.com/en/accounts-billing/my-account"
+                        await page.goto(account_url, wait_until="networkidle", timeout=30000)
+                        await asyncio.sleep(2)
                         rescraped = await scrape_account_data(page, context)
                         rescraped_balance = rescraped.get("account_balance") if rescraped else None
                         await db.process_balance_recheck(
