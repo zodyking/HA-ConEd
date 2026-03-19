@@ -687,18 +687,6 @@ async function unlinkHaUserFromModal() {
   }
 }
 
-async function unlinkHaUserFromModal() {
-  const pid = linkHaUserPayeeId.value
-  if (pid == null) return
-  const user = users.value.find(u => u.id === pid)
-  if (!user) return
-  await unlinkHaUser(user)
-  if (message.value?.type === 'success') {
-    showLinkHaUserModal.value = false
-    linkHaUserPayeeId.value = null
-  }
-}
-
 async function unlinkHaUser(user: User) {
   if (!confirm(`Unlink ${user.name} from HA user?`)) return
   isLoading.value = true
