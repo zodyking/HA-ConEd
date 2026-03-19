@@ -48,7 +48,7 @@ def _create_payment_claim_handler(hass: HomeAssistant, addon_url: str) -> Callab
             except Exception as err:
                 _LOGGER.warning("Payment claim request error: %s", err)
 
-        hass.async_create_task(_post())
+        hass.loop.call_soon_threadsafe(hass.async_create_task, _post())
 
     return handler
 
