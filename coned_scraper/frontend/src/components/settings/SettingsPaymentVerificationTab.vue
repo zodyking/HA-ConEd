@@ -32,37 +32,7 @@
           </label>
           <div class="ha-helper">When only one payee has not responded and all others said No, automatically assign the payment to them.</div>
         </div>
-      </div>
-    </div>
-
-    <div class="ha-card ha-section-card">
-      <div class="ha-card-header">
-        <span class="ha-card-icon">🔧</span>
-        <span>Payment Claim Automation</span>
-      </div>
-      <div class="ha-card-content">
-        <p class="ha-helper">Tapping Yes/No on "Did you make this payment?" notifications requires a Home Assistant automation. Without it, taps are ignored.</p>
-        <button
-          type="button"
-          class="ha-button ha-button-secondary"
-          :disabled="installing"
-          @click="installAutomation"
-        >
-          {{ installing ? 'Installing...' : 'Install automation (one-click)' }}
-        </button>
-        <div v-if="installResult" :class="['ha-install-result', installResult.success ? 'success' : 'error']">
-          <template v-if="installResult.success">
-            <p><strong>Package file created:</strong> {{ installResult.path }}</p>
-            <p v-if="installResult.packages_include_needed" class="ha-install-note">
-              Add this to your <code>configuration.yaml</code> under <code>homeassistant:</code> if not already present:
-            </p>
-            <pre v-if="installResult.packages_include_needed" class="ha-install-pre">packages: !include_dir_named packages</pre>
-            <p class="ha-install-note">Restart Home Assistant to load the automation.</p>
-          </template>
-          <template v-else>
-            <p>{{ installResult.message }}</p>
-          </template>
-        </div>
+        <p class="ha-helper">ConEd Connect integration automatically handles Yes/No taps. No automation needed.</p>
       </div>
     </div>
 
@@ -101,31 +71,6 @@ const autoAssignSingleNonResponder = ref(true)
 const petitionsEnabled = ref(true)
 const saving = ref(false)
 const message = ref<{ type: 'success' | 'error'; text: string } | null>(null)
-const installing = ref(false)
-const installResult = ref<{ success: boolean; path?: string; packages_include_needed?: boolean; message?: string } | null>(null)
-
-async function installAutomation() {
-  installing.value = true
-  installResult.value = null
-  try {
-    const res = await fetch(`${getApiBase()}/automation/install-payment-claim`, { method: 'POST' })
-    const data = await res.json().catch(() => ({}))
-    if (res.ok) {
-      installResult.value = {
-        success: true,
-        path: data.path,
-        packages_include_needed: data.packages_include_needed,
-        message: data.message,
-      }
-    } else {
-      installResult.value = { success: false, message: data.detail || 'Install failed' }
-    }
-  } catch {
-    installResult.value = { success: false, message: 'Failed to connect' }
-  } finally {
-    installing.value = false
-  }
-}
 
 async function load() {
   try {
@@ -190,9 +135,4 @@ onMounted(() => load())
 .ha-message { margin-top: 0.5rem; padding: 0.75rem; border-radius: 4px; }
 .ha-message.success { background: #e8f5e9; color: #2e7d32; }
 .ha-message.error { background: #ffebee; color: #c62828; }
-.ha-install-result { margin-top: 1rem; padding: 1rem; border-radius: 6px; border: 1px solid #e0e0e0; }
-.ha-install-result.success { background: #e8f5e9; border-color: #c8e6c9; }
-.ha-install-result.error { background: #ffebee; border-color: #ffcdd2; }
-.ha-install-note { font-size: 0.9rem; color: #333; margin: 0.5rem 0; }
-.ha-install-pre { background: #f5f5f5; padding: 0.5rem 0.75rem; border-radius: 4px; font-size: 0.85rem; margin: 0.5rem 0; overflow-x: auto; }
 </style>

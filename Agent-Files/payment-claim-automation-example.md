@@ -1,6 +1,10 @@
 # Payment Claim Automation Example
 
-Example Home Assistant automation for recording ConEd payment claim Yes/No responses from mobile notifications. **You must create this automation** for tapping Yes/No to work; without it, the notification dismisses but no claim is recorded.
+Example Home Assistant automation for recording ConEd payment claim Yes/No responses from mobile notifications.
+
+**ConEd Connect integration (recommended):** If you have added the ConEd Connect integration (Settings → Devices & services → Add integration → ConEd Connect) and configured the addon URL, Yes/No taps are handled **automatically**. No manual automation or YAML changes needed.
+
+**Manual automation (fallback):** If you use only the addon panel without the integration, you must create the automation below for tapping Yes/No to work; otherwise the notification dismisses but no claim is recorded.
 
 ## Overview
 

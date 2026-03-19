@@ -18,17 +18,31 @@
           </div>
         </div>
         <div v-if="users.length" class="ha-users-list">
-          <div v-for="user in users" :key="user.id" :class="['ha-user-card', { default: user.is_default }]">
+          <div v-for="user in users" :key="user.id" class="ha-user-card">
             <div class="ha-user-row">
-              <span class="ha-user-name">{{ user.name }}</span>
-              <span v-if="user.is_default" class="ha-badge">DEFAULT</span>
+              <div v-if="editingNameId === user.id" class="ha-user-name-edit" @click.stop>
+                <input
+                  ref="renameInputRef"
+                  v-model="editingNameValue"
+                  type="text"
+                  class="ha-form-input ha-rename-input"
+                  @blur="saveRename(user.id)"
+                  @keydown.enter="saveRename(user.id)"
+                  @keydown.escape="cancelRename"
+                />
+              </div>
+              <span
+                v-else
+                class="ha-user-name ha-user-name-clickable"
+                title="Click to rename"
+                @click="startRename(user)"
+              >{{ user.name }}</span>
               <div class="ha-user-actions" @click.stop>
-                <button v-if="!user.is_default" type="button" class="ha-btn-sm ha-btn-green" @click="handleSetDefault(user.id)">Set Default</button>
                 <button type="button" class="ha-btn-sm ha-btn-red" @click="handleDeleteUser(user.id)">Delete</button>
               </div>
             </div>
             <div class="ha-user-detail">
-              <div v-if="!user.is_default" class="ha-responsibility">
+              <div class="ha-responsibility">
                 <span>Bill Share:</span>
                 <input v-model.number="responsibilities[user.id]" type="number" min="0" max="100" @input="(e: Event) => responsibilities[user.id] = parseInt((e.target as HTMLInputElement).value) || 0" @click.stop />
                 <span>%</span>
@@ -220,7 +234,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { getApiBase } from '../../lib/api-base'
 
 interface User { 
@@ -332,18 +346,56 @@ async function handleAddUser() {
   isLoading.value = true
   message.value = null
   try {
-    const res = await fetch(`${getApiBase()}/payee-users`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: newUserName.value.trim(), is_default: users.value.length === 0 }) })
+    const res = await fetch(`${getApiBase()}/payee-users`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: newUserName.value.trim(), is_default: false }) })
     if (res.ok) { newUserName.value = ''; await loadUsers(); message.value = { type: 'success', text: 'User added' } }
     else { const e = await res.json().catch(() => ({})); message.value = { type: 'error', text: e.detail || 'Failed' } }
   } catch { message.value = { type: 'error', text: 'Failed to connect' } }
   finally { isLoading.value = false }
 }
 
-async function handleSetDefault(id: number) {
+const editingNameId = ref<number | null>(null)
+const editingNameValue = ref('')
+const renameInputRef = ref<HTMLInputElement | null>(null)
+
+function startRename(user: User) {
+  editingNameId.value = user.id
+  editingNameValue.value = user.name
+  nextTick(() => {
+    const r = renameInputRef.value
+    const el = Array.isArray(r) ? r[0] : r
+    if (el instanceof HTMLInputElement) el.focus()
+  })
+}
+
+function cancelRename() {
+  editingNameId.value = null
+  editingNameValue.value = ''
+}
+
+async function saveRename(userId: number) {
+  const name = editingNameValue.value.trim()
+  if (!name) {
+    cancelRename()
+    return
+  }
   try {
-    const res = await fetch(`${getApiBase()}/payee-users/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ is_default: true }) })
-    if (res.ok) { await loadUsers(); message.value = { type: 'success', text: 'Default updated' } }
-  } catch { message.value = { type: 'error', text: 'Failed' } }
+    const res = await fetch(`${getApiBase()}/payee-users/${userId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name })
+    })
+    if (res.ok) {
+      await loadUsers()
+      message.value = { type: 'success', text: 'Name updated' }
+    } else {
+      const e = await res.json().catch(() => ({}))
+      message.value = { type: 'error', text: e.detail || 'Failed to rename' }
+    }
+  } catch {
+    message.value = { type: 'error', text: 'Failed to connect' }
+  } finally {
+    cancelRename()
+  }
 }
 
 async function handleDeleteUser(id: number) {
@@ -463,11 +515,11 @@ async function handleAddHaUser(haUser: HaUser) {
     const res = await fetch(`${getApiBase()}/payee-users`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+        body: JSON.stringify({
         name: haUser.name,
         ha_user_id: haUser.id,
         notifications_enabled: true,
-        is_default: users.value.length === 0
+        is_default: false
       })
     })
     if (res.ok) {
@@ -543,10 +595,13 @@ onMounted(() => {
 .ha-add-row { display: flex; gap: 0.5rem; }
 .ha-add-row input { flex: 1; }
 .ha-users-list { display: flex; flex-direction: column; gap: 0.75rem; margin: 1rem 0; }
-.ha-user-card { padding: 0.75rem; border-radius: 8px; border: 1px solid #e0e0e0; cursor: pointer; }
-.ha-user-card.default { border-color: #03a9f4; background: #e3f2fd; }
+.ha-user-card { padding: 0.75rem; border-radius: 8px; border: 1px solid #e0e0e0; }
 .ha-user-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
 .ha-user-name { font-weight: 600; }
+.ha-user-name-clickable { cursor: pointer; padding: 0.15rem 0; border-radius: 4px; }
+.ha-user-name-clickable:hover { background: #e8f4fd; color: #1976d2; }
+.ha-user-name-edit { display: inline-block; min-width: 120px; }
+.ha-rename-input { font-weight: 600; padding: 0.2rem 0.4rem; width: 100%; }
 .ha-badge { font-size: 0.65rem; background: #03a9f4; color: white; padding: 0.15rem 0.4rem; border-radius: 3px; }
 .ha-user-actions { display: flex; gap: 0.5rem; }
 .ha-btn-sm { padding: 0.3rem 0.6rem; font-size: 0.7rem; border: none; border-radius: 4px; cursor: pointer; }
