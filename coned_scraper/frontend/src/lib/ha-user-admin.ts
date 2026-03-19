@@ -1,12 +1,28 @@
+type HassElement = Element & { hass?: { user?: { id?: string; is_admin?: boolean } } }
+
+function findHomeAssistant(root: Document | ShadowRoot): HassElement | null {
+  const el = root.querySelector?.('home-assistant') as HassElement | null
+  if (el) return el
+  const nodes = root.querySelectorAll?.('*') ?? []
+  for (const node of nodes) {
+    if (node.shadowRoot) {
+      const found = findHomeAssistant(node.shadowRoot)
+      if (found) return found
+    }
+  }
+  return null
+}
+
 /**
  * Gets the current HA user's ID when running inside a Home Assistant panel iframe.
  * Returns null when not in HA or when hass.user.id is unavailable.
+ * Traverses shadow DOM for modern HA frontend.
  */
 export function getHaUserId(): string | null {
   try {
     if (typeof window === 'undefined') return null
     const doc = window.parent?.document ?? document
-    const el = doc?.querySelector?.('home-assistant') as { hass?: { user?: { id?: string } } } | null
+    const el = findHomeAssistant(doc)
     return el?.hass?.user?.id ?? null
   } catch {
     return null
@@ -15,12 +31,13 @@ export function getHaUserId(): string | null {
 
 /**
  * Whether we're running inside a Home Assistant panel iframe (parent has home-assistant).
+ * Traverses shadow DOM for modern HA frontend.
  */
 export function isInHaPanel(): boolean {
   try {
     if (typeof window === 'undefined') return false
     const doc = window.parent?.document ?? document
-    return !!doc?.querySelector?.('home-assistant')
+    return !!findHomeAssistant(doc)
   } catch {
     return false
   }
@@ -30,12 +47,13 @@ export function isInHaPanel(): boolean {
  * Detects if the current HA user is an admin when running inside a Home Assistant panel iframe.
  * Uses the parent window's hass object (hass.user.is_admin).
  * Returns false when not in HA or when the user is not an admin.
+ * Traverses shadow DOM for modern HA frontend.
  */
 export function getHaUserIsAdmin(): boolean {
   try {
     if (typeof window === 'undefined') return false
     const doc = window.parent?.document ?? document
-    const el = doc?.querySelector?.('home-assistant') as { hass?: { user?: { is_admin?: boolean } } } | null
+    const el = findHomeAssistant(doc)
     return el?.hass?.user?.is_admin === true
   } catch {
     return false

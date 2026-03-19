@@ -450,25 +450,10 @@ interface PayeeUser {
   ha_user_id?: string | null
 }
 const payees = ref<PayeeUser[]>([])
-const currentHaUserId = ref<string | null>(null)
-
-async function loadCurrentHaUser() {
-  try {
-    const res = await fetch(`${getApiBase()}/current-ha-user`)
-    if (res.ok) {
-      const d = await res.json()
-      currentHaUserId.value = d.ha_user_id ?? null
-    } else {
-      currentHaUserId.value = null
-    }
-  } catch {
-    currentHaUserId.value = null
-  }
-}
 
 const currentViewerPayeeId = computed<number | null>(() => {
-  // Prefer backend (X-Remote-User-ID) - set only when accessed via Ingress
-  const haUserId = currentHaUserId.value ?? (isInHaPanel() ? getHaUserId() : null)
+  if (!isInHaPanel()) return null
+  const haUserId = getHaUserId()
   if (!haUserId) return null
   const payee = payees.value.find((p) => (p.ha_user_id ?? null) === haUserId)
   return payee?.id ?? null
@@ -889,7 +874,6 @@ let interval: ReturnType<typeof setInterval>
 onMounted(() => {
   loadLedgerData()
   loadPayees()
-  loadCurrentHaUser()
   loadMeterData()
   loadAppSettings()
   checkPdfExists()
