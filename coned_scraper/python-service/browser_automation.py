@@ -432,7 +432,18 @@ async def perform_login(username: str, password: str, totp_code: str, test_only:
                     
                     await db.add_log("success", f"Data scraping completed successfully")
                     
-                    await db.save_scraped_data(scraped_data, "success", None, SCREENSHOT_FILENAME)
+                    scrape_id, recheck_info = await db.save_scraped_data(scraped_data, "success", None, SCREENSHOT_FILENAME)
+                    if recheck_info:
+                        await db.add_log("info", "Balance validation failed, doing balance recheck...")
+                        logger.info("Balance validation failed, doing balance recheck...")
+                        rescraped = await scrape_account_data(page, context)
+                        rescraped_balance = rescraped.get("account_balance") if rescraped else None
+                        await db.process_balance_recheck(
+                            rescraped_balance,
+                            recheck_info["scraped"],
+                            recheck_info["expected"],
+                            recheck_info["bill_id"],
+                        )
 
                     # Secondary PDF scrape (independent - failures do not affect main scrape)
                     try:

@@ -936,8 +936,11 @@ async def get_unverified_payments() -> List[Dict[str, Any]]:
 # Payment Claim Responses (notification-based assignment)
 # =============================================================================
 
-async def record_payment_claim_response(payment_id: int, payee_id: int, claimed: bool) -> bool:
-    """Record a payee's Yes/No response to a payment claim. Runs resolution logic after."""
+async def record_payment_claim_response(payment_id: int, payee_id: int, claimed: bool) -> Dict[str, Any]:
+    """
+    Record a payee's Yes/No response to a payment claim. Runs resolution logic after.
+    Returns: {ok: bool, assignment?: {payee_id, payee_name, amount, payment_date}} when assignment occurs.
+    """
     await ensure_connected()
     try:
         conn = await _raw_conn()
@@ -950,15 +953,15 @@ async def record_payment_claim_response(payment_id: int, payee_id: int, claimed:
                 """,
                 payment_id, payee_id, claimed
             )
-            await run_claim_resolution(payment_id, conn=conn)
-            return True
+            assignment = await run_claim_resolution(payment_id, conn=conn)
+            return {"ok": True, "assignment": assignment}
         finally:
             await conn.close()
     except Exception as e:
         logger.warning(f"Failed to record claim response: {e}")
-        return False
+        return {"ok": False}
 
-async def run_claim_resolution(payment_id: int, conn=None):
+async def run_claim_resolution(payment_id: int, conn=None) -> Optional[Dict[str, Any]]:
     """
     Run assignment resolution after each Yes/No response.
     1. Eliminate No payees from pool
@@ -991,22 +994,38 @@ async def run_claim_resolution(payment_id: int, conn=None):
         yes_ids = [pid for pid, claimed in responded.items() if claimed]
         no_ids = [pid for pid, claimed in responded.items() if not claimed]
         non_responders = [pid for pid in payee_ids if pid not in responded]
+        payee_id_to_name = {u.id: getattr(u, "name", "Unknown") for u in payees}
+        amount_str = f"${decimal_to_float(p.amount):.2f}" if p.amount else "N/A"
+        payment_date_str = p.paymentDate.strftime("%m/%d/%Y") if p.paymentDate else "N/A"
         # Eliminate No from pool
-        candidates = [pid for pid in payee_ids if pid not in no_ids]
         if len(yes_ids) == 1:
-            await attribute_payment(payment_id, yes_ids[0], "verified", "notification_claim")
-            return
+            assigned_id = yes_ids[0]
+            await attribute_payment(payment_id, assigned_id, "verified", "notification_claim")
+            return {
+                "payee_id": assigned_id,
+                "payee_name": payee_id_to_name.get(assigned_id, "Unknown"),
+                "amount": amount_str,
+                "payment_date": payment_date_str,
+            }
         if len(yes_ids) >= 2:
             await db.payment.update(where={"id": payment_id}, data={"payeeStatus": "needs_admin_verification"})
-            return
+            return None
         if len(non_responders) == 1 and len(yes_ids) == 0:
             app_settings = await get_app_setting("app_settings")
             pv = (app_settings or {}).get("payment_verification") or {}
             auto_assign = pv.get("auto_assign_single_non_responder", True)
             if auto_assign:
-                await attribute_payment(payment_id, non_responders[0], "verified", "notification_claim_single_remaining")
-            return
+                assigned_id = non_responders[0]
+                await attribute_payment(payment_id, assigned_id, "verified", "notification_claim_single_remaining")
+                return {
+                    "payee_id": assigned_id,
+                    "payee_name": payee_id_to_name.get(assigned_id, "Unknown"),
+                    "amount": amount_str,
+                    "payment_date": payment_date_str,
+                }
+            return None
         # All said No: nothing to do here; resend task handles it
+        return None
     finally:
         if own_conn:
             await conn.close()
@@ -1387,6 +1406,21 @@ DEFAULT_NOTIFICATION_CONFIGS = [
         "title": "Con Edison Balance",
         "template": "Your account balance changed from {old_balance} to {new_balance}",
     },
+    {
+        "event_type": "late_fee",
+        "title": "Con Edison Late Fee",
+        "template": "{late_fee_amount} has been added to your account balance as a late fee charge. To avoid late fees pay bill by the due date.",
+    },
+    {
+        "event_type": "payment_claimed",
+        "title": "Con Edison Payment Claimed",
+        "template": "{payee_name} has claimed a payment of {amount} made on {payment_date}. If this was in error you can unclaim the payment via the account ledger.",
+    },
+    {
+        "event_type": "payment_unclaimed",
+        "title": "Con Edison Payment Unclaimed",
+        "template": "{payee_name} has unclaimed a payment of {amount} made on {payment_date}. If this was in error you can claim the payment via the account ledger.",
+    },
 ]
 
 async def get_notification_config(event_type: str) -> Optional[Dict[str, Any]]:
@@ -1411,6 +1445,9 @@ async def get_notification_config(event_type: str) -> Optional[Dict[str, Any]]:
 async def get_all_notification_configs() -> List[Dict[str, Any]]:
     """Get all notification configs, creating defaults if needed"""
     await ensure_connected()
+    
+    # Ensure any new default configs (e.g. late_fee) exist for existing installs
+    await ensure_notification_configs_exist()
     
     configs = await db.notificationconfig.find_many()
     
@@ -1593,8 +1630,11 @@ async def get_previous_balance() -> Optional[Dict[str, Any]]:
 # Scraped Data & Logs
 # =============================================================================
 
-async def save_scraped_data(data: Dict[str, Any], status: str, error_message: Optional[str] = None, screenshot_path: Optional[str] = None) -> int:
-    """Save raw scraped data"""
+async def save_scraped_data(data: Dict[str, Any], status: str, error_message: Optional[str] = None, screenshot_path: Optional[str] = None):
+    """
+    Save raw scraped data.
+    Returns: (record_id, recheck_info) where recheck_info is None or a dict with recheck data.
+    """
     await ensure_connected()
     
     record = await db.scrapeddata.create(
@@ -1606,11 +1646,13 @@ async def save_scraped_data(data: Dict[str, Any], status: str, error_message: Op
         }
     )
     
-    # Sync to normalized tables if successful
+    recheck_info = None
     if status == "success" and data:
-        await sync_from_scrape(data)
+        sync_result = await sync_from_scrape(data)
+        if isinstance(sync_result, dict) and not sync_result.get("recorded") and sync_result.get("recheck_needed"):
+            recheck_info = sync_result
     
-    return record.id
+    return record.id, recheck_info
 
 async def get_latest_scraped_data(limit: int = 1) -> List[Dict[str, Any]]:
     """Get latest scraped data records"""
@@ -2036,68 +2078,172 @@ async def calculate_expected_balance() -> Optional[float]:
     Calculate expected account balance based on latest bill minus payments.
     Returns None if insufficient data to calculate.
     """
+    result = await _calculate_expected_balance_with_bill()
+    return result[0] if result else None
+
+
+async def _calculate_expected_balance_with_bill() -> Optional[tuple]:
+    """Returns (expected_balance, bill_id) or None.
+    If late fee was reported for this bill cycle, adds it to expected so validation passes."""
     await ensure_connected()
     
-    # Get the latest bill
     latest_bill = await db.bill.find_first(order={"billCycleDate": "desc"})
     if not latest_bill or not latest_bill.billTotal:
         return None
     
     bill_total = decimal_to_float(latest_bill.billTotal)
-    
-    # Get all payments for this bill
     payments = await db.payment.find_many(where={"billId": latest_bill.id})
     total_payments = sum(decimal_to_float(p.amount) for p in payments if p.amount)
-    
-    # Expected balance = bill total - payments made
     expected = bill_total - total_payments
-    return expected
+
+    stored_late_fee = await get_stored_late_fee_amount(latest_bill.id)
+    if stored_late_fee is not None:
+        expected += stored_late_fee
+
+    return (expected, latest_bill.id)
 
 
-async def validate_and_record_balance(scraped_balance: str) -> bool:
+async def validate_and_record_balance(scraped_balance: str) -> Dict[str, Any]:
     """
     Validate scraped balance against expected balance before recording.
-    
+
     Logic: expected_balance = latest_bill_amount - payments_for_that_bill
     If scraped balance doesn't match expected, don't update.
-    
-    Returns True if balance was recorded, False if rejected.
+
+    Returns: {"recorded": True} if recorded; {"recorded": False, "recheck_needed": True, ...}
+    if rejected and scraped > expected (possible late fee - caller should re-scrape).
     """
     scraped_numeric = parse_amount(scraped_balance)
-    
-    # Get expected balance based on bill - payments
-    expected = await calculate_expected_balance()
-    
-    if expected is None:
-        # No bill data to validate against, accept the scraped balance
+    result = await _calculate_expected_balance_with_bill()
+
+    if result is None:
         await record_account_balance(scraped_balance)
         logger.info(f"Recorded balance ${scraped_numeric:.2f} (no bill data to validate against)")
-        return True
-    
-    # Allow small tolerance for rounding, fees, etc. ($1 tolerance)
+        return {"recorded": True}
+
+    expected, bill_id = result
     tolerance = 1.0
-    diff = abs(scraped_numeric - expected)
-    
-    if diff <= tolerance:
-        # Scraped balance matches expected, record it
+    diff = scraped_numeric - expected
+    diff_abs = abs(diff)
+
+    if diff_abs <= tolerance:
         await record_account_balance(scraped_balance)
         logger.info(f"Recorded balance ${scraped_numeric:.2f} (matches expected ${expected:.2f})")
-        return True
-    else:
-        # Scraped balance doesn't match expected - don't update
-        logger.warning(
-            f"Rejected scraped balance ${scraped_numeric:.2f}: "
-            f"expected ${expected:.2f} (latest bill - payments). Keeping previous balance."
-        )
-        await add_log(
-            "warning", 
-            f"Balance validation failed: scraped ${scraped_numeric:.2f} != expected ${expected:.2f}. "
-            f"Keeping previous balance."
-        )
+        return {"recorded": True}
+
+    # Rejected - log and maybe signal recheck (only when scraped > expected = possible late fee)
+    logger.warning(
+        f"Rejected scraped balance ${scraped_numeric:.2f}: "
+        f"expected ${expected:.2f} (latest bill - payments). Keeping previous balance."
+    )
+    await add_log(
+        "warning",
+        f"Balance validation failed: scraped ${scraped_numeric:.2f} != expected ${expected:.2f}. "
+        f"Keeping previous balance."
+    )
+    if diff > 0:
+        return {
+            "recorded": False,
+            "recheck_needed": True,
+            "scraped": scraped_numeric,
+            "expected": expected,
+            "bill_id": bill_id,
+        }
+    return {"recorded": False}
+
+
+async def late_fee_already_reported(bill_id: int) -> bool:
+    """Check if we already reported a late fee for this bill cycle."""
+    stored = await get_app_setting("late_fee_reported")
+    if stored and isinstance(stored, dict):
+        return stored.get("bill_id") == bill_id
+    # Legacy: old format stored bill_id only
+    legacy = await get_app_setting("late_fee_reported_bill_id")
+    if legacy is None:
+        return False
+    try:
+        return int(legacy) == bill_id
+    except (TypeError, ValueError):
         return False
 
 
-async def sync_from_scrape(data: Dict[str, Any]):
+async def get_stored_late_fee_amount(bill_id: int) -> Optional[float]:
+    """Return stored late fee amount if we reported for this bill; else None."""
+    stored = await get_app_setting("late_fee_reported")
+    if not stored or not isinstance(stored, dict):
+        return None
+    if stored.get("bill_id") != bill_id:
+        return None
+    try:
+        return float(stored.get("amount", 0))
+    except (TypeError, ValueError):
+        return None
+
+
+async def record_late_fee_reported(bill_id: int, late_fee_amount: float) -> None:
+    """Record that we reported a late fee for this bill cycle, with the amount for expected-balance adjustment."""
+    await set_app_setting("late_fee_reported", {"bill_id": bill_id, "amount": late_fee_amount})
+
+
+async def process_balance_recheck(
+    rescraped_balance: Optional[str],
+    original_scraped: float,
+    expected: float,
+    bill_id: int,
+) -> None:
+    """
+    Process recheck result after validation failed with scraped > expected.
+    If recheck matches original: record balance, trigger TTS+notification (or skip if already reported).
+    If recheck differs: reject, log inconclusive.
+    """
+    if not rescraped_balance:
+        logger.warning("Balance recheck: no balance found on rescrape, inconclusive.")
+        await add_log("warning", "Balance recheck returned no balance. Keeping previous balance.")
+        return
+
+    rescraped_numeric = parse_amount(rescraped_balance)
+    if abs(rescraped_numeric - original_scraped) > 0.01:
+        logger.warning(
+            f"Recheck returned different balance: ${rescraped_numeric:.2f} != ${original_scraped:.2f}. Inconclusive."
+        )
+        await add_log(
+            "warning",
+            f"Recheck returned different balance: ${rescraped_numeric:.2f} vs ${original_scraped:.2f}. Keeping previous balance.",
+        )
+        return
+
+    # Same balance - treat as late fee
+    if await late_fee_already_reported(bill_id):
+        await record_account_balance(rescraped_balance)
+        logger.info("Late fee already added for this bill cycle. Will reset at next bill cycle.")
+        await add_log("info", "Late fee already added. Will reset at next bill cycle.")
+        return
+
+    await record_account_balance(rescraped_balance)
+    late_fee_amount = original_scraped - expected
+    late_fee_str = f"${late_fee_amount:.2f}"
+
+    await record_late_fee_reported(bill_id, late_fee_amount)
+
+    try:
+        from tts_scheduler import trigger_late_fee_tts
+        await trigger_late_fee_tts(late_fee_str)
+    except Exception as e:
+        logger.warning(f"Late fee TTS failed: {e}")
+        await add_log("warning", f"Late fee TTS failed: {e}")
+
+    try:
+        from notifications import notify_late_fee
+        await notify_late_fee(late_fee_str)
+    except Exception as e:
+        logger.warning(f"Late fee notification failed: {e}")
+        await add_log("warning", f"Late fee notification failed: {e}")
+
+    logger.info(f"Recorded balance ${rescraped_numeric:.2f} (late fee {late_fee_str} added)")
+    await add_log("info", f"Late fee detected: {late_fee_str} added. Balance recorded.")
+
+
+async def sync_from_scrape(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Sync scraped data to normalized tables"""
     try:
         scraped_balance = data.get("account_balance")
@@ -2172,9 +2318,11 @@ async def sync_from_scrape(data: Dict[str, Any]):
         # AFTER all bills and payments are processed, validate and record balance
         # This ensures we have complete payment data before checking if balance makes sense
         if scraped_balance:
-            await validate_and_record_balance(scraped_balance)
+            validation_result = await validate_and_record_balance(scraped_balance)
+            return validation_result
     except Exception as e:
         logger.warning(f"Failed to sync scraped data: {e}")
+    return None
 
 # =============================================================================
 # Ledger Data

@@ -132,6 +132,39 @@ async def notify_balance_change(
     })
 
 
+async def notify_late_fee(late_fee_amount: str) -> int:
+    """Send late fee notification to all enabled payees."""
+    return await send_payee_notifications("late_fee", {
+        "late_fee_amount": late_fee_amount,
+    })
+
+
+async def notify_payment_claimed(
+    payee_name: str,
+    amount: str,
+    payment_date: str
+) -> int:
+    """Send payment claimed notification to all enabled payees (no prefix)."""
+    return await send_payee_notifications("payment_claimed", {
+        "payee_name": payee_name,
+        "amount": amount,
+        "payment_date": payment_date,
+    })
+
+
+async def notify_payment_unclaimed(
+    payee_name: str,
+    amount: str,
+    payment_date: str
+) -> int:
+    """Send payment unclaimed notification to all enabled payees (no prefix)."""
+    return await send_payee_notifications("payment_unclaimed", {
+        "payee_name": payee_name,
+        "amount": amount,
+        "payment_date": payment_date,
+    })
+
+
 async def send_payment_claim_request(payment: Dict[str, Any], payees: List[Dict[str, Any]]) -> int:
     """
     Send per-payee claim notifications for an unverified payment.

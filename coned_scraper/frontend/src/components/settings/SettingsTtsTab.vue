@@ -151,6 +151,79 @@
                   {{ testing === 'payment' ? 'Sending...' : '💳 Test Payment TTS' }}
                 </button>
               </div>
+
+              <div class="tts-form-group">
+                <label class="tts-label">Late Fee Message</label>
+                <div class="tts-var-chips">
+                  <span class="tts-var-chip tts-var-chip-prefix" @click="insertVar('late_fee', '{prefix}')">{prefix}</span>
+                  <span class="tts-var-chip" @click="insertVar('late_fee', '{late_fee_amount}')">{late_fee_amount}</span>
+                </div>
+                <textarea
+                  ref="lateFeeInput"
+                  v-model="config.messages.late_fee"
+                  class="tts-textarea"
+                  rows="2"
+                  placeholder="{prefix} {late_fee_amount} has been added to your account balance as a late fee charge. To avoid late fees pay bill by the due date."
+                ></textarea>
+                <button
+                  type="button"
+                  class="tts-btn tts-btn-test-inline"
+                  :disabled="!config.enabled || !config.media_player || testing === 'late_fee'"
+                  @click="testLateFeeTts"
+                >
+                  {{ testing === 'late_fee' ? 'Sending...' : '💰 Test Late Fee TTS' }}
+                </button>
+              </div>
+
+              <div class="tts-form-group">
+                <label class="tts-label">Payment Claimed Message</label>
+                <div class="tts-var-chips">
+                  <span class="tts-var-chip tts-var-chip-prefix" @click="insertVar('payment_claimed', '{prefix}')">{prefix}</span>
+                  <span class="tts-var-chip" @click="insertVar('payment_claimed', '{payee_name}')">{payee_name}</span>
+                  <span class="tts-var-chip" @click="insertVar('payment_claimed', '{amount}')">{amount}</span>
+                  <span class="tts-var-chip" @click="insertVar('payment_claimed', '{payment_date}')">{payment_date}</span>
+                </div>
+                <textarea
+                  ref="paymentClaimedInput"
+                  v-model="config.messages.payment_claimed"
+                  class="tts-textarea"
+                  rows="2"
+                  placeholder="{prefix} {payee_name} has claimed a payment of {amount} made on {payment_date}. If this was in error you can unclaim the payment via the account ledger."
+                ></textarea>
+                <button
+                  type="button"
+                  class="tts-btn tts-btn-test-inline"
+                  :disabled="!config.enabled || !config.media_player || testing === 'payment_claimed'"
+                  @click="testPaymentClaimedTts"
+                >
+                  {{ testing === 'payment_claimed' ? 'Sending...' : '✅ Test Payment Claimed TTS' }}
+                </button>
+              </div>
+
+              <div class="tts-form-group">
+                <label class="tts-label">Payment Unclaimed Message</label>
+                <div class="tts-var-chips">
+                  <span class="tts-var-chip tts-var-chip-prefix" @click="insertVar('payment_unclaimed', '{prefix}')">{prefix}</span>
+                  <span class="tts-var-chip" @click="insertVar('payment_unclaimed', '{payee_name}')">{payee_name}</span>
+                  <span class="tts-var-chip" @click="insertVar('payment_unclaimed', '{amount}')">{amount}</span>
+                  <span class="tts-var-chip" @click="insertVar('payment_unclaimed', '{payment_date}')">{payment_date}</span>
+                </div>
+                <textarea
+                  ref="paymentUnclaimedInput"
+                  v-model="config.messages.payment_unclaimed"
+                  class="tts-textarea"
+                  rows="2"
+                  placeholder="{prefix} {payee_name} has unclaimed a payment of {amount} made on {payment_date}. If this was in error you can claim the payment via the account ledger."
+                ></textarea>
+                <button
+                  type="button"
+                  class="tts-btn tts-btn-test-inline"
+                  :disabled="!config.enabled || !config.media_player || testing === 'payment_unclaimed'"
+                  @click="testPaymentUnclaimedTts"
+                >
+                  {{ testing === 'payment_unclaimed' ? 'Sending...' : '↩️ Test Payment Unclaimed TTS' }}
+                </button>
+              </div>
             </div>
           </template>
 
@@ -367,6 +440,9 @@ const ttsEntities = ref<HaEntity[]>([])
 
 const newBillInput = ref<HTMLTextAreaElement | null>(null)
 const paymentInput = ref<HTMLTextAreaElement | null>(null)
+const lateFeeInput = ref<HTMLTextAreaElement | null>(null)
+const paymentClaimedInput = ref<HTMLTextAreaElement | null>(null)
+const paymentUnclaimedInput = ref<HTMLTextAreaElement | null>(null)
 const scheduleMessageInput = ref<HTMLTextAreaElement | null>(null)
 
 const config = reactive({
@@ -379,6 +455,9 @@ const config = reactive({
   messages: {
     new_bill: '{prefix} Your new bill for {month_range} is now available. The total is {amount}, due {due_date}.',
     payment_received: '{prefix} Your payment of {amount} has been received. Your account balance is now {balance}.',
+    late_fee: '{prefix} {late_fee_amount} has been added to your account balance as a late fee charge. To avoid late fees pay bill by the due date.',
+    payment_claimed: '{prefix} {payee_name} has claimed a payment of {amount} made on {payment_date}. If this was in error you can unclaim the payment via the account ledger.',
+    payment_unclaimed: '{prefix} {payee_name} has unclaimed a payment of {amount} made on {payment_date}. If this was in error you can claim the payment via the account ledger.',
   }
 })
 
@@ -428,8 +507,9 @@ function toggleDay(day: string) {
   }
 }
 
-function insertVar(templateKey: 'new_bill' | 'payment_received', varName: string) {
-  const inputRef = templateKey === 'new_bill' ? newBillInput.value : paymentInput.value
+function insertVar(templateKey: 'new_bill' | 'payment_received' | 'late_fee' | 'payment_claimed' | 'payment_unclaimed', varName: string) {
+  const inputMap = { new_bill: newBillInput, payment_received: paymentInput, late_fee: lateFeeInput, payment_claimed: paymentClaimedInput, payment_unclaimed: paymentUnclaimedInput } as const
+  const inputRef = inputMap[templateKey]?.value
   if (!inputRef) {
     config.messages[templateKey] += varName
     return
@@ -660,6 +740,60 @@ async function testPaymentTts() {
     const data = await res.json().catch(() => ({}))
     if (res.ok) {
       alertMessage.value = { type: 'success', text: data.message || 'Payment TTS sent' }
+    } else {
+      alertMessage.value = { type: 'error', text: data.detail || 'Failed' }
+    }
+  } catch {
+    alertMessage.value = { type: 'error', text: 'Failed to connect' }
+  } finally {
+    testing.value = false
+  }
+}
+
+async function testLateFeeTts() {
+  testing.value = 'late_fee'
+  alertMessage.value = null
+  try {
+    const res = await fetch(`${getApiBase()}/tts/test-late-fee`, { method: 'POST' })
+    const data = await res.json().catch(() => ({}))
+    if (res.ok) {
+      alertMessage.value = { type: 'success', text: data.message || 'Late fee TTS sent' }
+    } else {
+      alertMessage.value = { type: 'error', text: data.detail || 'Failed' }
+    }
+  } catch {
+    alertMessage.value = { type: 'error', text: 'Failed to connect' }
+  } finally {
+    testing.value = false
+  }
+}
+
+async function testPaymentClaimedTts() {
+  testing.value = 'payment_claimed'
+  alertMessage.value = null
+  try {
+    const res = await fetch(`${getApiBase()}/tts/test-payment-claimed`, { method: 'POST' })
+    const data = await res.json().catch(() => ({}))
+    if (res.ok) {
+      alertMessage.value = { type: 'success', text: data.message || 'Payment claimed TTS sent' }
+    } else {
+      alertMessage.value = { type: 'error', text: data.detail || 'Failed' }
+    }
+  } catch {
+    alertMessage.value = { type: 'error', text: 'Failed to connect' }
+  } finally {
+    testing.value = false
+  }
+}
+
+async function testPaymentUnclaimedTts() {
+  testing.value = 'payment_unclaimed'
+  alertMessage.value = null
+  try {
+    const res = await fetch(`${getApiBase()}/tts/test-payment-unclaimed`, { method: 'POST' })
+    const data = await res.json().catch(() => ({}))
+    if (res.ok) {
+      alertMessage.value = { type: 'success', text: data.message || 'Payment unclaimed TTS sent' }
     } else {
       alertMessage.value = { type: 'error', text: data.detail || 'Failed' }
     }

@@ -15,6 +15,28 @@
       />
     </div>
 
+    <!-- Unclaim Payment Modal -->
+    <div v-if="unclaimPayment" class="ha-modal-overlay" @click.self="unclaimPayment = null">
+      <div class="ha-modal ha-unclaim-modal">
+        <div class="ha-modal-header">
+          <span>Unclaim Payment</span>
+          <button type="button" class="ha-modal-close" @click="unclaimPayment = null">×</button>
+        </div>
+        <div class="ha-modal-body">
+          <p>Would you like to unclaim this payment?</p>
+          <div v-if="unclaimPayment" class="ha-unclaim-payment-info">
+            <strong>{{ unclaimPayment.amount }}</strong> • {{ unclaimPayment.payment_date }} • {{ unclaimPayment.payee_name || 'Assigned' }}
+          </div>
+        </div>
+        <div class="ha-modal-footer">
+          <button type="button" class="ha-btn ha-btn-gray" @click="unclaimPayment = null">No</button>
+          <button type="button" class="ha-btn ha-btn-primary" :disabled="unclaimLoading" @click="confirmUnclaim">
+            {{ unclaimLoading ? 'Unclaiming...' : 'Yes, Unclaim' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- PDF Bill Modal -->
     <PdfViewer
       v-if="showPdfModal && viewingBillId"
@@ -208,7 +230,8 @@
                     <div
                       v-for="payment in bill.payments"
                       :key="payment.id"
-                      class="ha-payment-entry"
+                      :class="['ha-payment-entry', { 'ha-payment-clickable': payment.payee_user_id }]"
+                      @click="payment.payee_user_id ? openUnclaimModal(payment) : null"
                     >
                       <div class="ha-payment-row">
                         <div class="ha-payment-meta">
@@ -270,7 +293,8 @@
               <div
                 v-for="payment in ledgerData.orphan_payments"
                 :key="payment.id"
-                class="ha-payment-entry"
+                :class="['ha-payment-entry', { 'ha-payment-clickable': payment.payee_user_id }]"
+                @click="payment.payee_user_id ? openUnclaimModal(payment) : null"
               >
                 <div class="ha-payment-row">
                   <div class="ha-payment-meta">
@@ -387,6 +411,29 @@ const billSummaries = computed<Record<number, any>>(() => {
 const expandedBills = ref<Set<number>>(new Set())
 const expandedPayments = ref<Set<number>>(new Set())
 const breakdownShowRollover = ref(false)
+const unclaimPayment = ref<Payment | null>(null)
+const unclaimLoading = ref(false)
+
+function openUnclaimModal(payment: Payment) {
+  unclaimPayment.value = payment
+}
+async function confirmUnclaim() {
+  if (!unclaimPayment.value) return
+  unclaimLoading.value = true
+  try {
+    const res = await fetch(`${getApiBase()}/payments/${unclaimPayment.value.id}/unclaim`, { method: 'POST' })
+    if (res.ok) {
+      unclaimPayment.value = null
+      await loadLedgerData()
+    } else {
+      apiError.value = (await res.json().catch(() => ({}))).detail || 'Failed to unclaim'
+    }
+  } catch (e) {
+    apiError.value = 'Failed to connect'
+  } finally {
+    unclaimLoading.value = false
+  }
+}
 
 // Meter tracking state
 interface MeterReadingData {

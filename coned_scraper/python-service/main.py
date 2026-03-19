@@ -29,7 +29,7 @@ import db
 app = FastAPI(title="Con Edison API")
 
 # Code version for deployment verification
-CODE_VERSION = "1.3.39"
+CODE_VERSION = "1.3.46"
 
 @app.on_event("startup")
 async def startup():
@@ -166,6 +166,9 @@ DEFAULT_TTS_CONFIG = {
     "messages": {
         "new_bill": "{prefix} Your new bill for {month_range} is now available. The total is {amount}, due {due_date}.",
         "payment_received": "{prefix} Your payment of {amount} has been received. Your account balance is now {balance}.",
+        "late_fee": "{prefix} {late_fee_amount} has been added to your account balance as a late fee charge. To avoid late fees pay bill by the due date.",
+        "payment_claimed": "{prefix} {payee_name} has claimed a payment of {amount} made on {payment_date}. If this was in error you can unclaim the payment via the account ledger.",
+        "payment_unclaimed": "{prefix} {payee_name} has unclaimed a payment of {amount} made on {payment_date}. If this was in error you can claim the payment via the account ledger.",
     },
 }
 
@@ -1845,9 +1848,27 @@ async def record_payee_claim(payment_id: int, body: PayeeClaimModel):
             raise HTTPException(status_code=404, detail="Payment not found")
         if payment.get("payee_status") not in ("unverified", "needs_admin_verification"):
             raise HTTPException(status_code=400, detail="Payment already assigned")
-        ok = await db.record_payment_claim_response(payment_id, body.payee_id, body.claimed)
-        if not ok:
+        result = await db.record_payment_claim_response(payment_id, body.payee_id, body.claimed)
+        if not result.get("ok"):
             raise HTTPException(status_code=500, detail="Failed to record claim response")
+        # If payee claimed and was assigned, send notification + TTS to all users
+        assignment = result.get("assignment")
+        if assignment:
+            try:
+                from notifications import notify_payment_claimed
+                from tts_scheduler import trigger_payment_claimed_tts
+                await notify_payment_claimed(
+                    payee_name=assignment.get("payee_name", "Unknown"),
+                    amount=assignment.get("amount", "N/A"),
+                    payment_date=assignment.get("payment_date", "N/A"),
+                )
+                await trigger_payment_claimed_tts(
+                    payee_name=assignment.get("payee_name", "Unknown"),
+                    amount=assignment.get("amount", "N/A"),
+                    payment_date=assignment.get("payment_date", "N/A"),
+                )
+            except Exception as e:
+                await db.add_log("warning", f"Payment claimed notification/TTS failed: {e}")
         return {"success": True}
     except HTTPException:
         raise
@@ -2035,17 +2056,70 @@ async def attribute_payment_to_user(attribution: PaymentAttributionModel):
 
 @app.delete("/api/payments/{payment_id}/attribution")
 async def clear_payment_attribution_endpoint(payment_id: int):
-    """Clear payment attribution (unassign from user)"""
+    """Clear payment attribution (unassign from user). Used by admin via Settings. Resends payment claim notifications."""
     try:
+        payment = await db.get_payment_by_id(payment_id)
+        if not payment:
+            raise HTTPException(status_code=404, detail="Payment not found")
         success = await db.clear_payment_attribution(payment_id)
-        if success:
-            await db.add_log("info", f"Cleared attribution for payment {payment_id}")
-            return {"success": True}
-        raise HTTPException(status_code=404, detail="Payment not found")
+        if not success:
+            raise HTTPException(status_code=404, detail="Payment not found")
+        await db.add_log("info", f"Cleared attribution for payment {payment_id}")
+        # Resend payment claim notifications (like post-scrape) - no TTS
+        try:
+            await db.reset_claim_responses_for_resend(payment_id)
+            from notifications import send_payment_claim_request
+            payees = await db.get_payees_with_notifications()
+            payment_for_claim = {
+                "id": payment_id,
+                "amount": payment.get("amount", "N/A"),
+                "payment_date": payment.get("payment_date", "N/A"),
+                "amount_numeric": payment.get("amount_numeric", 0),
+                "description": payment.get("description"),
+                "bill_id": payment.get("bill_id"),
+            }
+            sent = await send_payment_claim_request(payment_for_claim, payees)
+            if sent > 0:
+                await db.add_log("info", f"Resent payment claim request for payment {payment_id}")
+        except Exception as claim_e:
+            await db.add_log("warning", f"Resend claim after admin unassign failed: {claim_e}")
+        return {"success": True}
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/payments/{payment_id}/unclaim")
+async def unclaim_payment_endpoint(payment_id: int):
+    """Unclaim a payment via Account Ledger. Clears attribution and sends TTS + notification (not used for admin Settings unassign)."""
+    try:
+        payment = await db.get_payment_by_id(payment_id)
+        if not payment:
+            raise HTTPException(status_code=404, detail="Payment not found")
+        payee_user_id = payment.get("payee_user_id")
+        if not payee_user_id:
+            raise HTTPException(status_code=400, detail="Payment is not assigned")
+        payee_name = payment.get("payee_name") or "Unknown"
+        amount = payment.get("amount", "N/A")
+        payment_date = payment.get("payment_date", "N/A")
+        success = await db.clear_payment_attribution(payment_id)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to unclaim")
+        await db.add_log("info", f"Payment {payment_id} unclaimed via Account Ledger")
+        try:
+            from notifications import notify_payment_unclaimed
+            from tts_scheduler import trigger_payment_unclaimed_tts
+            await notify_payment_unclaimed(payee_name=payee_name, amount=amount, payment_date=payment_date)
+            await trigger_payment_unclaimed_tts(payee_name=payee_name, amount=amount, payment_date=payment_date)
+        except Exception as e:
+            await db.add_log("warning", f"Payment unclaimed notification/TTS failed: {e}")
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/api/payments/{payment_id}")
 async def get_payment_endpoint(payment_id: int):
@@ -2752,6 +2826,61 @@ async def test_payment_tts():
     }
 
 
+@app.post("/api/tts/test-late-fee")
+async def test_late_fee_tts():
+    """Test late fee TTS using sample data"""
+    config = await load_tts_config()
+    if not config.get("enabled"):
+        raise HTTPException(status_code=400, detail="TTS is not enabled")
+    media_player = (config.get("media_player") or "").strip()
+    if not media_player:
+        raise HTTPException(status_code=400, detail="Media player not configured")
+
+    from tts_scheduler import trigger_late_fee_tts
+    await trigger_late_fee_tts("$3.25")
+
+    try:
+        from notifications import notify_late_fee
+        sent = await notify_late_fee("$3.25")
+        await db.add_log("info", f"Test late fee TTS+notification sent (notifications: {sent})")
+    except Exception as e:
+        await db.add_log("warning", f"Test late fee notification failed: {e}")
+
+    return {
+        "success": True,
+        "message": "Late fee TTS sent",
+        "data": {"late_fee_amount": "$3.25"}
+    }
+
+
+@app.post("/api/tts/test-payment-claimed")
+async def test_payment_claimed_tts():
+    """Test payment claimed TTS using sample data"""
+    config = await load_tts_config()
+    if not config.get("enabled"):
+        raise HTTPException(status_code=400, detail="TTS is not enabled")
+    media_player = (config.get("media_player") or "").strip()
+    if not media_player:
+        raise HTTPException(status_code=400, detail="Media player not configured")
+    from tts_scheduler import trigger_payment_claimed_tts
+    await trigger_payment_claimed_tts(payee_name="Sample Payee", amount="$50.00", payment_date="03/15/2026")
+    return {"success": True, "message": "Payment claimed TTS sent"}
+
+
+@app.post("/api/tts/test-payment-unclaimed")
+async def test_payment_unclaimed_tts():
+    """Test payment unclaimed TTS using sample data"""
+    config = await load_tts_config()
+    if not config.get("enabled"):
+        raise HTTPException(status_code=400, detail="TTS is not enabled")
+    media_player = (config.get("media_player") or "").strip()
+    if not media_player:
+        raise HTTPException(status_code=400, detail="Media player not configured")
+    from tts_scheduler import trigger_payment_unclaimed_tts
+    await trigger_payment_unclaimed_tts(payee_name="Sample Payee", amount="$50.00", payment_date="03/15/2026")
+    return {"success": True, "message": "Payment unclaimed TTS sent"}
+
+
 @app.post("/api/notifications/test-new-bill")
 async def test_new_bill_notification():
     """Test new bill push notification only (no TTS)"""
@@ -3207,6 +3336,21 @@ async def _get_real_test_data_for_notification(event_type: str) -> dict:
             "old_balance": old_balance,
             "new_balance": new_balance,
         }
+
+    if event_type == "late_fee":
+        return {"late_fee_amount": "$3.25"}
+
+    if event_type == "payment_claimed":
+        payee_name = latest_payment.get("payee_name", "Sample Payee") if latest_payment else "Sample Payee"
+        amount = latest_payment.get("amount", "$50.00") if latest_payment else "$50.00"
+        payment_date = latest_payment.get("payment_date", "03/15/2026") if latest_payment else "03/15/2026"
+        return {"payee_name": payee_name, "amount": amount, "payment_date": payment_date}
+
+    if event_type == "payment_unclaimed":
+        payee_name = latest_payment.get("payee_name", "Sample Payee") if latest_payment else "Sample Payee"
+        amount = latest_payment.get("amount", "$50.00") if latest_payment else "$50.00"
+        payment_date = latest_payment.get("payment_date", "03/15/2026") if latest_payment else "03/15/2026"
+        return {"payee_name": payee_name, "amount": amount, "payment_date": payment_date}
 
     return {}
 

@@ -506,3 +506,246 @@ async def trigger_payment_received_tts(amount: str, balance: str, payee_name: st
     except Exception as e:
         logger.error(f"Error sending payment TTS: {e}")
         await db.add_log("error", f"Payment TTS error: {e}")
+
+
+async def trigger_late_fee_tts(late_fee_amount: str):
+    """Trigger TTS for a late fee detected on account balance."""
+    import db
+
+    scheduler = get_scheduler()
+    tts_config = await scheduler.load_tts_config()
+
+    if not tts_config.get("enabled"):
+        await db.add_log("debug", "Late fee TTS skipped: TTS not enabled")
+        return
+
+    media_player = tts_config.get("media_player", "").strip()
+    if not media_player:
+        await db.add_log("debug", "Late fee TTS skipped: No media player configured")
+        return
+
+    template = tts_config.get("messages", {}).get("late_fee", "")
+    if not template:
+        template = "{prefix} {late_fee_amount} has been added to your account balance as a late fee charge. To avoid late fees pay bill by the due date."
+
+    prefix = tts_config.get("prefix", "Message from Con Edison.")
+
+    try:
+        message = template.format(prefix=prefix, late_fee_amount=late_fee_amount)
+    except KeyError:
+        message = template
+
+    from ha_tts import send_tts
+
+    try:
+        success, err = await send_tts(
+            message=message,
+            media_player=media_player,
+            volume=tts_config.get("volume", 0.7),
+            wait_for_idle=tts_config.get("wait_for_idle", True),
+            tts_service=tts_config.get("tts_service", "tts.google_translate_say"),
+        )
+        if success:
+            logger.info("Late fee TTS sent successfully")
+            await db.add_log("info", f"Late fee TTS sent: {late_fee_amount} added")
+        else:
+            logger.error(f"Late fee TTS failed: {err}")
+            await db.add_log("error", f"Late fee TTS failed: {err}")
+    except Exception as e:
+        logger.error(f"Error sending late fee TTS: {e}")
+        await db.add_log("error", f"Late fee TTS error: {e}")
+
+
+async def trigger_payment_claimed_tts(payee_name: str, amount: str, payment_date: str):
+    """Trigger TTS when a payee claims a payment (via notification Yes)."""
+    import db
+
+    scheduler = get_scheduler()
+    tts_config = await scheduler.load_tts_config()
+
+    if not tts_config.get("enabled"):
+        await db.add_log("debug", "Payment claimed TTS skipped: TTS not enabled")
+        return
+
+    media_player = tts_config.get("media_player", "").strip()
+    if not media_player:
+        await db.add_log("debug", "Payment claimed TTS skipped: No media player configured")
+        return
+
+    template = tts_config.get("messages", {}).get("payment_claimed", "")
+    if not template:
+        template = "{prefix} {payee_name} has claimed a payment of {amount} made on {payment_date}. If this was in error you can unclaim the payment via the account ledger."
+
+    prefix = tts_config.get("prefix", "Message from Con Edison.")
+
+    try:
+        message = template.format(prefix=prefix, payee_name=payee_name, amount=amount, payment_date=payment_date)
+    except KeyError:
+        message = template
+
+    from ha_tts import send_tts
+
+    try:
+        success, err = await send_tts(
+            message=message,
+            media_player=media_player,
+            volume=tts_config.get("volume", 0.7),
+            wait_for_idle=tts_config.get("wait_for_idle", True),
+            tts_service=tts_config.get("tts_service", "tts.google_translate_say"),
+        )
+        if success:
+            logger.info("Payment claimed TTS sent successfully")
+            await db.add_log("info", f"Payment claimed TTS sent: {payee_name} claimed {amount}")
+        else:
+            logger.error(f"Payment claimed TTS failed: {err}")
+            await db.add_log("error", f"Payment claimed TTS failed: {err}")
+    except Exception as e:
+        logger.error(f"Error sending payment claimed TTS: {e}")
+        await db.add_log("error", f"Payment claimed TTS error: {e}")
+
+
+async def trigger_payment_unclaimed_tts(payee_name: str, amount: str, payment_date: str):
+    """Trigger TTS when a payee unclaims a payment (via Account Ledger)."""
+    import db
+
+    scheduler = get_scheduler()
+    tts_config = await scheduler.load_tts_config()
+
+    if not tts_config.get("enabled"):
+        await db.add_log("debug", "Payment unclaimed TTS skipped: TTS not enabled")
+        return
+
+    media_player = tts_config.get("media_player", "").strip()
+    if not media_player:
+        await db.add_log("debug", "Payment unclaimed TTS skipped: No media player configured")
+        return
+
+    template = tts_config.get("messages", {}).get("payment_unclaimed", "")
+    if not template:
+        template = "{prefix} {payee_name} has unclaimed a payment of {amount} made on {payment_date}. If this was in error you can claim the payment via the account ledger."
+
+    prefix = tts_config.get("prefix", "Message from Con Edison.")
+
+    try:
+        message = template.format(prefix=prefix, payee_name=payee_name, amount=amount, payment_date=payment_date)
+    except KeyError:
+        message = template
+
+    from ha_tts import send_tts
+
+    try:
+        success, err = await send_tts(
+            message=message,
+            media_player=media_player,
+            volume=tts_config.get("volume", 0.7),
+            wait_for_idle=tts_config.get("wait_for_idle", True),
+            tts_service=tts_config.get("tts_service", "tts.google_translate_say"),
+        )
+        if success:
+            logger.info("Payment unclaimed TTS sent successfully")
+            await db.add_log("info", f"Payment unclaimed TTS sent: {payee_name} unclaimed {amount}")
+        else:
+            logger.error(f"Payment unclaimed TTS failed: {err}")
+            await db.add_log("error", f"Payment unclaimed TTS failed: {err}")
+    except Exception as e:
+        logger.error(f"Error sending payment unclaimed TTS: {e}")
+        await db.add_log("error", f"Payment unclaimed TTS error: {e}")
+
+
+async def trigger_late_fee_tts_duplicate_removed(late_fee_amount: str):
+    """Trigger TTS when a late fee is detected on account balance - placeholder to remove duplicate."""
+    import db
+
+    scheduler = get_scheduler()
+    tts_config = await scheduler.load_tts_config()
+
+    if not tts_config.get("enabled"):
+        await db.add_log("debug", "Late fee TTS skipped: TTS not enabled")
+        return
+
+    media_player = tts_config.get("media_player", "").strip()
+    if not media_player:
+        await db.add_log("debug", "Late fee TTS skipped: No media player configured")
+        return
+
+    template = tts_config.get("messages", {}).get("late_fee", "")
+    if not template:
+        template = "{prefix} {late_fee_amount} has been added to your account balance as a late fee charge. To avoid late fees pay bill by the due date."
+
+    prefix = tts_config.get("prefix", "Message from Con Edison.")
+
+    try:
+        message = template.format(prefix=prefix, late_fee_amount=late_fee_amount)
+    except KeyError:
+        message = template
+
+    from ha_tts import send_tts
+
+    try:
+        success, err = await send_tts(
+            message=message,
+            media_player=media_player,
+            volume=tts_config.get("volume", 0.7),
+            wait_for_idle=tts_config.get("wait_for_idle", True),
+            tts_service=tts_config.get("tts_service", "tts.google_translate_say"),
+        )
+        if success:
+            logger.info("Late fee TTS sent successfully")
+            await db.add_log("info", f"Late fee TTS sent: {late_fee_amount} added to balance")
+        else:
+            logger.error(f"Late fee TTS failed: {err}")
+            await db.add_log("error", f"Late fee TTS failed: {err}")
+    except Exception as e:
+        logger.error(f"Error sending late fee TTS: {e}")
+        await db.add_log("error", f"Late fee TTS error: {e}")
+
+
+async def trigger_late_fee_tts(late_fee_amount: str):
+    """Trigger TTS when a late fee is detected on the account balance."""
+    import db
+
+    scheduler = get_scheduler()
+    tts_config = await scheduler.load_tts_config()
+
+    if not tts_config.get("enabled"):
+        await db.add_log("debug", "Late fee TTS skipped: TTS not enabled")
+        return
+
+    media_player = tts_config.get("media_player", "").strip()
+    if not media_player:
+        await db.add_log("debug", "Late fee TTS skipped: No media player configured")
+        return
+
+    template = tts_config.get("messages", {}).get("late_fee", "")
+    if not template:
+        template = "{prefix} {late_fee_amount} has been added to your account balance as a late fee charge. To avoid late fees pay bill by the due date."
+
+    prefix = tts_config.get("prefix", "Message from Con Edison.")
+
+    try:
+        message = template.format(
+            prefix=prefix,
+            late_fee_amount=late_fee_amount,
+        )
+    except KeyError:
+        message = template
+
+    from ha_tts import send_tts
+
+    try:
+        success, err = await send_tts(
+            message=message,
+            media_player=media_player,
+            volume=tts_config.get("volume", 0.7),
+            wait_for_idle=tts_config.get("wait_for_idle", True),
+            tts_service=tts_config.get("tts_service", "tts.google_translate_say"),
+        )
+        if success:
+            logger.info("Late fee TTS sent successfully")
+            await db.add_log("info", f"Late fee TTS sent: {late_fee_amount} added")
+        else:
+            logger.error(f"Late fee TTS failed: {err}")
+            await db.add_log("error", f"Late fee TTS failed: {err}")
+    except Exception as e:
+        logger.error(f"Error sending late fee TTS: {e}")
+        await db.add_log("error", f"Late fee TTS error: {e}")
