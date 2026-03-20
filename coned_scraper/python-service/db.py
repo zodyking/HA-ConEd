@@ -5,8 +5,9 @@ Provides async database operations for the ConEd Scraper addon.
 import json
 import logging
 import hashlib
+import re
 from datetime import datetime, timezone, timedelta, date
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 from decimal import Decimal
 
 from prisma import Prisma
@@ -2370,27 +2371,87 @@ def _forecast_year_months(start: date, end: date) -> set:
     return months
 
 
+# Trailing label in month_range strings from ConEd (e.g. "JAN - FEB" -> February).
+_MONTH_ABBREV_TO_NUM = {
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+    "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+}
+_MONTH_FULL_TO_NUM = {
+    "january": 1, "february": 2, "march": 3, "april": 4, "may": 5, "june": 6,
+    "july": 7, "august": 8, "september": 9, "october": 10, "november": 11, "december": 12,
+}
+
+
+def _month_num_from_label(label: str) -> Optional[int]:
+    s = (label or "").strip().lower()
+    if not s:
+        return None
+    if s in _MONTH_FULL_TO_NUM:
+        return _MONTH_FULL_TO_NUM[s]
+    return _MONTH_ABBREV_TO_NUM.get(s[:3])
+
+
+def _month_range_trailing_month(month_range: Optional[str]) -> Optional[int]:
+    if not month_range or not str(month_range).strip():
+        return None
+    parts = re.split(r"\s*[-–—]\s*", str(month_range).strip())
+    if len(parts) < 2:
+        return None
+    return _month_num_from_label(parts[-1])
+
+
+def _bill_year_month_for_pending_gate(
+    latest_bill: Dict[str, Any],
+    forecast_start: Optional[date],
+) -> Optional[Tuple[int, int]]:
+    """
+    Year/month for pending-bill month gate: bill_date (statement) > month_range end month
+    (+ year from bill_cycle_date or forecast) > bill_cycle_date.
+    Avoids false negatives when bill_cycle_date is in the new month but the bill is still
+    the prior period (e.g. JAN-FEB with cycle date in March).
+    """
+    bill_date_raw = latest_bill.get("bill_date")
+    if bill_date_raw:
+        dt = parse_date(str(bill_date_raw))
+        if dt:
+            return (dt.year, dt.month)
+
+    cycle_dt = parse_date(latest_bill.get("bill_cycle_date") or "")
+    if cycle_dt:
+        year_hint = cycle_dt.year
+    elif forecast_start:
+        year_hint = forecast_start.year
+    else:
+        year_hint = utc_now().year
+
+    mnum = _month_range_trailing_month(latest_bill.get("month_range"))
+    if mnum is not None:
+        return (year_hint, mnum)
+
+    if cycle_dt:
+        return (cycle_dt.year, cycle_dt.month)
+    return None
+
+
 async def compute_pending_new_bill_state(
     latest_bill: Optional[Dict[str, Any]],
     account_balance_str: str,
 ) -> Dict[str, Any]:
     """
-    Detect when ConEd balance is ahead of the ledger: latest bill's calendar month does
-    not overlap any month in the meter forecast billing window, and balance exceeds
+    Detect when ConEd balance is ahead of the ledger: latest bill's period month does
+    not overlap any month in the meter forecast window, and balance exceeds
     bill_total - payments + late_fee by more than PENDING_NEW_BILL_BALANCE_THRESHOLD.
-    Requires meter enabled + cached forecast. Bill month uses bill_date then bill_cycle_date.
+    Uses DB meter_config.enabled + cached forecast (not only MeterService.is_enabled).
     """
     default: Dict[str, Any] = {"active": False, "implied_new_charges": None}
     if not latest_bill or latest_bill.get("id") is None:
         return default
 
-    from meter_service import get_meter_service
-
-    meter_service = get_meter_service()
-    if not meter_service.is_enabled():
+    meter_cfg = await get_meter_config_db() or {}
+    if not meter_cfg.get("enabled"):
         return default
 
-    forecast = await meter_service.get_cached_forecast()
+    forecast = await get_meter_forecast_db()
     if not forecast:
         return default
     window_start = _parse_iso_forecast_date(forecast.get("start_date"))
@@ -2400,16 +2461,8 @@ async def compute_pending_new_bill_state(
 
     forecast_months = _forecast_year_months(window_start, window_end)
 
-    bill_dt = None
-    bill_date_raw = latest_bill.get("bill_date")
-    if bill_date_raw:
-        bill_dt = parse_date(str(bill_date_raw))
-    if not bill_dt:
-        bill_dt = parse_date(latest_bill.get("bill_cycle_date") or "")
-    if not bill_dt:
-        return default
-    bill_ym = (bill_dt.year, bill_dt.month)
-    if bill_ym in forecast_months:
+    bill_ym = _bill_year_month_for_pending_gate(latest_bill, window_start)
+    if bill_ym is None:
         return default
 
     bill_total = latest_bill.get("amount_numeric")
@@ -2430,6 +2483,17 @@ async def compute_pending_new_bill_state(
     residual = bill_total_f - payments_sum + late_fee_f
     balance = parse_amount(str(account_balance_str or ""))
     delta = balance - residual
+
+    if bill_ym in forecast_months:
+        if delta > PENDING_NEW_BILL_BALANCE_THRESHOLD:
+            logger.debug(
+                "pending_new_bill: suppressed by month_gate bill_ym=%s forecast_months=%s "
+                "delta=%.2f (balance ahead of residual but bill month overlaps cycle)",
+                bill_ym,
+                sorted(forecast_months),
+                delta,
+            )
+        return default
 
     if delta <= PENDING_NEW_BILL_BALANCE_THRESHOLD:
         return default
