@@ -29,7 +29,7 @@ import db
 app = FastAPI(title="Con Edison API")
 
 # Code version for deployment verification
-CODE_VERSION = "1.3.62"
+CODE_VERSION = "1.3.63"
 
 @app.on_event("startup")
 async def startup():
@@ -1799,6 +1799,89 @@ async def get_ledger():
     except Exception as e:
         await db.add_log("error", f"Failed to get ledger: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/debug/pending-bill")
+async def debug_pending_bill():
+    """
+    Debug endpoint showing exactly what data is used for pending bill gap detection.
+    Use this to troubleshoot why the banner is or isn't showing.
+    """
+    try:
+        # Get all bills
+        bills = await db.db.bill.find_many(
+            order={"billCycleDate": "desc"},
+            include={"document": True, "details": True}
+        )
+        
+        # Build simplified bill list for debug
+        bills_debug = []
+        for bill in bills[:5]:  # Just show top 5
+            bills_debug.append({
+                "id": bill.id,
+                "month_range": bill.monthRange,
+                "bill_date": bill.billDate.strftime("%Y-%m-%d") if bill.billDate else None,
+                "bill_cycle_date": bill.billCycleDate.strftime("%Y-%m-%d") if bill.billCycleDate else None,
+                "has_document": bill.document is not None,
+                "billing_period_end": (
+                    bill.details.billingPeriodEnd.strftime("%Y-%m-%d")
+                    if bill.details and bill.details.billingPeriodEnd else None
+                ),
+            })
+        
+        # Get forecast from database
+        forecast = await db.get_meter_forecast_db()
+        
+        # Get the reference bill that would be selected
+        ledger_data = await db.get_ledger_data()
+        bills_data = ledger_data.get("bills", [])
+        reference_bill = db._select_reference_bill_for_pending_gap(bills_data)
+        
+        # Extract the key values for gap detection
+        month_range = reference_bill.get("month_range") if reference_bill else None
+        bill_end_month = db._month_range_trailing_month(month_range) if month_range else None
+        
+        forecast_start_str = forecast.get("start_date") if forecast else None
+        forecast_start = db._parse_iso_forecast_date(forecast_start_str) if forecast_start_str else None
+        forecast_month = forecast_start.month if forecast_start else None
+        
+        return {
+            "status": "debug",
+            "pending_new_bill_result": ledger_data.get("pending_new_bill"),
+            "calculation_inputs": {
+                "reference_bill": {
+                    "id": reference_bill.get("id") if reference_bill else None,
+                    "month_range": month_range,
+                    "bill_date": reference_bill.get("bill_date") if reference_bill else None,
+                    "has_statement_pdf": reference_bill.get("has_statement_pdf") if reference_bill else None,
+                    "pdf_exists": reference_bill.get("pdf_exists") if reference_bill else None,
+                },
+                "bill_end_month": bill_end_month,
+                "bill_end_month_name": db._MONTH_NUM_TO_ABBREV[bill_end_month] if bill_end_month else None,
+                "forecast_start_date": forecast_start_str,
+                "forecast_start_parsed": str(forecast_start) if forecast_start else None,
+                "forecast_month": forecast_month,
+                "forecast_month_name": db._MONTH_NUM_TO_ABBREV[forecast_month] if forecast_month else None,
+            },
+            "gap_detection": {
+                "expected_result": (
+                    f"forecast_month({forecast_month}) > bill_end_month({bill_end_month}) = "
+                    f"{forecast_month > bill_end_month if forecast_month and bill_end_month else 'N/A'}"
+                ) if forecast_month and bill_end_month else "Cannot calculate - missing data",
+            },
+            "raw_data": {
+                "bills_top_5": bills_debug,
+                "forecast_cache": forecast,
+            },
+        }
+    except Exception as e:
+        import traceback
+        return {
+            "status": "error",
+            "error": str(e),
+            "traceback": traceback.format_exc(),
+        }
+
 
 @app.get("/api/bills")
 async def get_bills(limit: int = 50):

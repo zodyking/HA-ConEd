@@ -2441,102 +2441,79 @@ def _missing_period_hint(
     return None
 
 
-def _posted_period_end_ym_for_pending_gap(
-    bill: Dict[str, Any],
-    forecast_start: Optional[date],
-) -> Optional[Tuple[int, int]]:
-    """
-    End (year, month) of the last *posted* statement for pending-bill gap detection.
-
-    Prefer **month_range** trailing month + year hint first so we match the printed
-    period (e.g. JAN–FEB ends in Feb) even when billing_period_end falls in the next
-    calendar month (e.g. March), which would falsely clear the gap vs the meter cycle.
-    Then billing_period_end, bill_date, bill_cycle_date.
-    """
-    mnum = _month_range_trailing_month(bill.get("month_range"))
-    if mnum is not None:
-        # Year for the statement label: bill_date (e.g. Feb 16) is more reliable than
-        # bill_cycle_date (often the next cycle anchor in March), which can mis-pair
-        # DEC–JAN-style ranges with the wrong year.
-        bill_dt = parse_date(str(bill.get("bill_date") or ""))
-        cycle_dt = parse_date(bill.get("bill_cycle_date") or "")
-        if bill_dt:
-            year_hint = bill_dt.year
-        elif cycle_dt:
-            year_hint = cycle_dt.year
-        elif forecast_start:
-            year_hint = forecast_start.year
-        else:
-            year_hint = utc_now().year
-        return (year_hint, mnum)
-
-    bpe = bill.get("billing_period_end")
-    if bpe:
-        dt = parse_date(str(bpe))
-        if dt:
-            return (dt.year, dt.month)
-
-    bill_date_raw = bill.get("bill_date")
-    if bill_date_raw:
-        dt = parse_date(str(bill_date_raw))
-        if dt:
-            return (dt.year, dt.month)
-
-    cycle_dt = parse_date(bill.get("bill_cycle_date") or "")
-    if cycle_dt:
-        return (cycle_dt.year, cycle_dt.month)
-    return None
-
-
 def _select_reference_bill_for_pending_gap(bills_data: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """
-    Bill whose month_range / period we trust for gap math — not a newer shell row.
-
-    1) First billCycleDate-desc row with a BillDocument row (has_statement_pdf).
-    2) Else first row with a PDF file on disk (pdf_exists) — document record can be missing.
-    3) Else latest by bill_date (true statement date).
-    4) Else first row (legacy).
+    Select the bill to use for gap detection. Priority:
+    1) First bill (by billCycleDate desc) with month_range AND has_statement_pdf
+    2) First bill with month_range AND pdf_exists
+    3) First bill with month_range (even without PDF)
+    4) First bill (legacy fallback)
     """
     if not bills_data:
         return None
-    with_doc = next((b for b in bills_data if b.get("has_statement_pdf")), None)
-    if with_doc:
-        return with_doc
-    with_file = next((b for b in bills_data if b.get("pdf_exists")), None)
-    if with_file:
-        return with_file
-    dated: List[Tuple[datetime, Dict[str, Any]]] = []
+    
+    # Priority 1: has month_range AND BillDocument row
     for b in bills_data:
-        d = parse_date(b.get("bill_date") or "")
-        if d:
-            dated.append((d, b))
-    if dated:
-        dated.sort(key=lambda x: x[0], reverse=True)
-        return dated[0][1]
+        if b.get("month_range") and b.get("has_statement_pdf"):
+            return b
+    
+    # Priority 2: has month_range AND PDF file on disk
+    for b in bills_data:
+        if b.get("month_range") and b.get("pdf_exists"):
+            return b
+    
+    # Priority 3: has month_range (no PDF required)
+    for b in bills_data:
+        if b.get("month_range"):
+            return b
+    
+    # Fallback: first bill
     return bills_data[0]
 
 
+async def _calculate_implied_new_charges(
+    reference_bill: Dict[str, Any],
+    account_balance_str: str,
+) -> Optional[float]:
+    """Calculate implied new charges: balance - (bill_total - payments + late_fee)."""
+    bill_total = reference_bill.get("amount_numeric")
+    if bill_total is None:
+        bill_total = parse_amount(str(reference_bill.get("bill_total") or ""))
+    bill_total_f = float(bill_total or 0.0)
+
+    payments_sum = 0.0
+    for p in reference_bill.get("payments") or []:
+        amt = p.get("amount_numeric")
+        if amt is None:
+            amt = parse_amount(str(p.get("amount") or ""))
+        payments_sum += float(amt or 0.0)
+
+    bill_id = reference_bill.get("id")
+    late_fee = await get_stored_late_fee_amount(int(bill_id)) if bill_id else 0
+    late_fee_f = float(late_fee or 0.0)
+
+    residual = bill_total_f - payments_sum + late_fee_f
+    balance = parse_amount(str(account_balance_str or ""))
+    delta = balance - residual
+
+    return round(delta, 2) if delta > 0 else None
+
+
 async def compute_pending_new_bill_state(
-    posted_statement_bill: Optional[Dict[str, Any]],
+    reference_bill: Optional[Dict[str, Any]],
     account_balance_str: str,
 ) -> Dict[str, Any]:
     """
-    Pending new bill: utility period gap — meter forecast cycle start month is strictly after
-    the last posted bill's service-period end month (see _posted_period_end_ym_for_pending_gap;
-    uses statement month_range before billing_period_end).
-
-    Activation is gap-only (no minimum balance delta). implied_new_charges is set when
-    balance > residual (bill_total - payments + late_fee) for optional UI copy.
-
-    posted_statement_bill: Bill used for gap math — see _select_reference_bill_for_pending_gap()
-    in get_ledger_data (document row, then pdf on disk, then latest bill_date).
-
-    Evaluated on every get_ledger_data() call (e.g. each GET /api/ledger; Account Ledger
-    UI polls /api/ledger every 30s). There is no separate background job for this check.
-
-    Uses **cached meter forecast in the database** (meter_forecast_cache). Does not require
-    MeterService.is_enabled() so detection still works if the in-memory service is not
-    initialized while forecast data remains in app settings.
+    SIMPLE GAP DETECTION for pending new bill.
+    
+    Logic:
+    1. Get last posted bill's month_range (e.g., "JAN - FEB")
+    2. Extract trailing month (February = 2)
+    3. Get current meter forecast start month (March = 3)
+    4. If forecast_month > bill_end_month -> GAP DETECTED -> pending bill
+    
+    Runs on every GET /api/ledger call (Account Ledger polls every 30s).
+    Uses meter_forecast_cache from database - no MeterService required.
     """
     default: Dict[str, Any] = {
         "active": False,
@@ -2544,67 +2521,94 @@ async def compute_pending_new_bill_state(
         "posted_month_range": None,
         "current_cycle_months": None,
         "missing_period_hint": None,
+        "debug_info": None,
     }
-    if not posted_statement_bill or posted_statement_bill.get("id") is None:
-        return default
-
+    
+    # Step 1: Must have a reference bill
+    if not reference_bill:
+        logger.info("pending_new_bill: NO reference bill found")
+        return {**default, "debug_info": "no_reference_bill"}
+    
+    # Step 2: Must have month_range on the bill
+    month_range = reference_bill.get("month_range")
+    if not month_range:
+        logger.info(f"pending_new_bill: reference bill id={reference_bill.get('id')} has NO month_range")
+        return {**default, "debug_info": f"no_month_range_on_bill_{reference_bill.get('id')}"}
+    
+    # Step 3: Extract trailing month from month_range (e.g., "JAN - FEB" -> 2)
+    bill_end_month = _month_range_trailing_month(month_range)
+    if bill_end_month is None:
+        logger.info(f"pending_new_bill: could not parse month_range '{month_range}'")
+        return {**default, "debug_info": f"parse_failed_month_range_{month_range}"}
+    
+    # Step 4: Get forecast from database
     forecast = await get_meter_forecast_db()
     if not forecast:
-        logger.debug("pending_new_bill: no cached meter forecast")
-        return default
-    window_start = _parse_iso_forecast_date(forecast.get("start_date"))
-    window_end = _parse_iso_forecast_date(forecast.get("end_date"))
-    if window_start is None or window_end is None:
-        logger.debug(
-            "pending_new_bill: unparsable forecast window start=%r end=%r",
-            forecast.get("start_date"),
-            forecast.get("end_date"),
-        )
-        return default
-
-    period_end_ym = _posted_period_end_ym_for_pending_gap(posted_statement_bill, window_start)
-    if period_end_ym is None:
-        return default
-
-    cycle_start_ym = (window_start.year, window_start.month)
-    period_gap = _year_month_sort_key(cycle_start_ym) > _year_month_sort_key(period_end_ym)
-
-    bill_total = posted_statement_bill.get("amount_numeric")
-    if bill_total is None:
-        bill_total = parse_amount(str(posted_statement_bill.get("bill_total") or ""))
-    bill_total_f = float(bill_total or 0.0)
-
-    payments_sum = 0.0
-    for p in posted_statement_bill.get("payments") or []:
-        amt = p.get("amount_numeric")
-        if amt is None:
-            amt = parse_amount(str(p.get("amount") or ""))
-        payments_sum += float(amt or 0.0)
-
-    late_fee = await get_stored_late_fee_amount(int(posted_statement_bill["id"]))
-    late_fee_f = float(late_fee or 0.0)
-
-    residual = bill_total_f - payments_sum + late_fee_f
-    balance = parse_amount(str(account_balance_str or ""))
-    delta = balance - residual
-
-    if not period_gap:
-        if delta > 0:
-            logger.debug(
-                "pending_new_bill: no period_gap period_end_ym=%s cycle_start_ym=%s delta=%.2f",
-                period_end_ym,
-                cycle_start_ym,
-                delta,
-            )
-        return default
-
-    implied = round(delta, 2) if delta > 0 else None
+        logger.info("pending_new_bill: NO meter_forecast_cache in database")
+        return {**default, "debug_info": "no_forecast_in_db"}
+    
+    # Step 5: Parse forecast start date
+    start_date_str = forecast.get("start_date")
+    forecast_start = _parse_iso_forecast_date(start_date_str)
+    if not forecast_start:
+        logger.info(f"pending_new_bill: could not parse forecast start_date '{start_date_str}'")
+        return {**default, "debug_info": f"parse_failed_forecast_start_{start_date_str}"}
+    
+    forecast_month = forecast_start.month
+    
+    # Step 6: Determine year for the bill's trailing month
+    # Use bill_date (actual statement date) for accurate year
+    bill_date = parse_date(reference_bill.get("bill_date") or "")
+    if bill_date:
+        bill_year = bill_date.year
+    else:
+        # Fallback: if bill end month > forecast month, probably previous year
+        # e.g., bill=DEC(12), forecast=JAN(1) -> bill is previous year
+        if bill_end_month > forecast_month:
+            bill_year = forecast_start.year - 1
+        else:
+            bill_year = forecast_start.year
+    
+    # Step 7: Compare months (with year consideration)
+    bill_end_ym = (bill_year, bill_end_month)
+    forecast_ym = (forecast_start.year, forecast_month)
+    
+    bill_sort_key = _year_month_sort_key(bill_end_ym)
+    forecast_sort_key = _year_month_sort_key(forecast_ym)
+    gap_detected = forecast_sort_key > bill_sort_key
+    
+    # Log the calculation for debugging
+    logger.info(
+        f"pending_new_bill: month_range='{month_range}' -> bill_end={_MONTH_NUM_TO_ABBREV[bill_end_month]}({bill_end_month}) year={bill_year}, "
+        f"forecast_start={forecast_start} -> {_MONTH_NUM_TO_ABBREV[forecast_month]}({forecast_month}), "
+        f"bill_key={bill_sort_key} forecast_key={forecast_sort_key} GAP={gap_detected}"
+    )
+    
+    if not gap_detected:
+        return {
+            **default,
+            "debug_info": f"no_gap: bill={bill_year}-{bill_end_month:02d} forecast={forecast_start.year}-{forecast_month:02d}"
+        }
+    
+    # GAP DETECTED - bill is generating!
+    forecast_end = _parse_iso_forecast_date(forecast.get("end_date"))
+    implied_charges = await _calculate_implied_new_charges(reference_bill, account_balance_str)
+    
+    cycle_label = _forecast_cycle_months_label(forecast_start, forecast_end) if forecast_end else _MONTH_NUM_TO_ABBREV[forecast_month]
+    missing_hint = _missing_period_hint(bill_end_ym, forecast_ym)
+    
+    logger.info(
+        f"pending_new_bill: GAP DETECTED! Bill ends {_MONTH_NUM_TO_ABBREV[bill_end_month]}, "
+        f"forecast starts {_MONTH_NUM_TO_ABBREV[forecast_month]}. Missing period: {missing_hint}"
+    )
+    
     return {
         "active": True,
-        "implied_new_charges": implied,
-        "posted_month_range": posted_statement_bill.get("month_range"),
-        "current_cycle_months": _forecast_cycle_months_label(window_start, window_end),
-        "missing_period_hint": _missing_period_hint(period_end_ym, cycle_start_ym),
+        "implied_new_charges": implied_charges,
+        "posted_month_range": month_range,
+        "current_cycle_months": cycle_label,
+        "missing_period_hint": missing_hint,
+        "debug_info": f"gap_detected: bill={bill_year}-{bill_end_month:02d} forecast={forecast_start.year}-{forecast_month:02d}",
     }
 
 
