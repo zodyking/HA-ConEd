@@ -559,17 +559,22 @@ async function generatePreview() {
       console.log('Debug info:', data._debug)
       console.log('Current usage:', data.current_usage)
       console.log('Projected usage:', data.projected_usage)
-      let msg = schedule.message_template || ''
-      msg = msg.replace(/{prefix}/g, config.prefix || 'Message from Con Edison.')
-      msg = msg.replace(/{balance}/g, data.balance ?? 'N/A')
-      msg = msg.replace(/{latest_bill_amount}/g, data.latest_bill?.amount || 'N/A')
-      msg = msg.replace(/{due_date}/g, data.latest_bill?.due_date || 'N/A')
-      msg = msg.replace(/{last_bill_kwh}/g, data.latest_bill?.kwh_used || 'N/A')
-      msg = msg.replace(/{current_usage_kwh}/g, data.current_usage?.kwh || 'N/A')
-      msg = msg.replace(/{current_usage_cost}/g, data.current_usage?.cost || 'N/A')
-      msg = msg.replace(/{projected_usage_kwh}/g, data.projected_usage?.kwh || 'N/A')
-      msg = msg.replace(/{projected_usage_cost}/g, data.projected_usage?.cost || 'N/A')
-      previewMessage.value = msg
+      const full = typeof data.full_scheduled_message === 'string' ? data.full_scheduled_message.trim() : ''
+      if (full) {
+        previewMessage.value = full
+      } else {
+        let msg = schedule.message_template || ''
+        msg = msg.replace(/{prefix}/g, config.prefix || 'Message from Con Edison.')
+        msg = msg.replace(/{balance}/g, data.balance ?? 'N/A')
+        msg = msg.replace(/{latest_bill_amount}/g, data.latest_bill?.amount || 'N/A')
+        msg = msg.replace(/{due_date}/g, data.latest_bill?.due_date || 'N/A')
+        msg = msg.replace(/{last_bill_kwh}/g, data.latest_bill?.kwh_used || 'N/A')
+        msg = msg.replace(/{current_usage_kwh}/g, data.current_usage?.kwh || 'N/A')
+        msg = msg.replace(/{current_usage_cost}/g, data.current_usage?.cost || 'N/A')
+        msg = msg.replace(/{projected_usage_kwh}/g, data.projected_usage?.kwh || 'N/A')
+        msg = msg.replace(/{projected_usage_cost}/g, data.projected_usage?.cost || 'N/A')
+        previewMessage.value = msg
+      }
     } else {
       console.error('Preview API returned error:', res.status)
       previewMessage.value = 'Error generating preview. Check the logs.'

@@ -20,6 +20,191 @@ TTS_CONFIG_FILE = DATA_DIR / "tts_config.json"
 
 DAY_MAP = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
 
+
+async def build_scheduled_bill_summary_message(
+    ledger: Dict[str, Any],
+    schedule_config: Dict[str, Any],
+    tts_config: Dict[str, Any],
+) -> str:
+    """
+    Build the same scheduled bill-summary string as the TTS scheduler (including pending-new-bill branch).
+    Used by TTSScheduler and /api/tts/preview-message.
+    """
+    import db
+    import aiohttp
+    import os
+    from meter_service import get_meter_service
+
+    template = schedule_config.get("message_template", "")
+    current_usage_sensor = schedule_config.get("current_usage_sensor", "")
+    future_usage_sensor = schedule_config.get("future_usage_sensor", "")
+    prefix = tts_config.get("prefix", "Message from Con Edison.")
+
+    if not template:
+        template = (
+            "{prefix} Your current balance is {balance}. Your last bill was {latest_bill_amount}, "
+            "using {last_bill_kwh}, due {due_date}."
+        )
+
+    bills = ledger.get("bills", [])
+    latest_bill = bills[0] if bills else {}
+    latest_bill_id = latest_bill.get("id")
+
+    bill_details = await db.get_bill_details(latest_bill_id) if latest_bill_id else None
+
+    balance = ledger.get("account_balance") or ledger.get("total_balance", "")
+    if isinstance(balance, (int, float)):
+        balance = f"${balance:.2f}"
+
+    def format_date_for_tts(date_str: str) -> str:
+        if not date_str:
+            return ""
+        try:
+            from dateutil import parser as date_parser
+
+            dt = date_parser.parse(date_str)
+            return dt.strftime("%B %d").replace(" 0", " ")
+        except Exception:
+            import re
+
+            match = re.search(r"(\w{3,9})\s+(\d{1,2})", date_str)
+            if match:
+                return f"{match.group(1)} {int(match.group(2))}"
+            return date_str
+
+    bill_amount = latest_bill.get("bill_total", "") or latest_bill.get("amount", "")
+
+    due_date_raw = latest_bill.get("due_date", "") or ""
+    due_date = format_date_for_tts(due_date_raw)
+
+    last_bill_kwh = ""
+    kwh_cost = None
+
+    if bill_details:
+        kwh_val = bill_details.get("kwh_used")
+        if kwh_val:
+            last_bill_kwh = f"{int(round(kwh_val))} kWh"
+        kwh_cost = bill_details.get("kwh_cost")
+        if not due_date:
+            due_date = format_date_for_tts(bill_details.get("due_date", "") or "")
+
+    current_usage_kwh = ""
+    current_usage_cost = ""
+    projected_usage_kwh = ""
+    projected_usage_cost = ""
+
+    forecast = None
+    meter_cfg = await db.get_meter_config_db() or {}
+    if meter_cfg.get("enabled"):
+        forecast = await db.get_meter_forecast_db()
+
+    meter_service = get_meter_service()
+    if forecast is None and meter_service.is_enabled():
+        try:
+            forecast = await meter_service.get_cached_forecast()
+        except Exception as e:
+            logger.warning(f"Failed to get meter service forecast: {e}")
+
+    if forecast:
+        try:
+            usage_to_date = forecast.get("usage_to_date")
+            if usage_to_date is not None:
+                current_usage_kwh = f"{int(round(usage_to_date))} kWh"
+                if kwh_cost:
+                    cost_val = usage_to_date * kwh_cost
+                    current_usage_cost = f"${cost_val:.2f}"
+
+            forecasted = forecast.get("forecasted_usage")
+            if forecasted is not None:
+                projected_usage_kwh = f"{int(round(forecasted))} kWh"
+                if kwh_cost:
+                    cost_val = forecasted * kwh_cost
+                    projected_usage_cost = f"${cost_val:.2f}"
+        except Exception as e:
+            logger.warning(f"Failed to apply meter forecast to TTS message: {e}")
+
+    elif current_usage_sensor or future_usage_sensor:
+        token = os.environ.get("SUPERVISOR_TOKEN")
+        if token:
+            async with aiohttp.ClientSession() as session:
+                if current_usage_sensor and current_usage_sensor.strip():
+                    try:
+                        async with session.get(
+                            f"http://supervisor/core/api/states/{current_usage_sensor.strip()}",
+                            headers={"Authorization": f"Bearer {token}"},
+                        ) as resp:
+                            if resp.status == 200:
+                                state_data = await resp.json()
+                                sensor_state = state_data.get("state", "")
+                                if sensor_state and sensor_state not in ("unknown", "unavailable"):
+                                    try:
+                                        kwh_value = float(sensor_state)
+                                        current_usage_kwh = f"{int(round(kwh_value))} kWh"
+                                        if kwh_cost:
+                                            cost_value = kwh_value * kwh_cost
+                                            current_usage_cost = f"${cost_value:.2f}"
+                                    except ValueError:
+                                        current_usage_kwh = f"{sensor_state} kWh"
+                    except Exception as e:
+                        logger.warning(f"Failed to fetch current usage sensor: {e}")
+
+                if future_usage_sensor and future_usage_sensor.strip():
+                    try:
+                        async with session.get(
+                            f"http://supervisor/core/api/states/{future_usage_sensor.strip()}",
+                            headers={"Authorization": f"Bearer {token}"},
+                        ) as resp:
+                            if resp.status == 200:
+                                state_data = await resp.json()
+                                sensor_state = state_data.get("state", "")
+                                if sensor_state and sensor_state not in ("unknown", "unavailable"):
+                                    try:
+                                        kwh_value = float(sensor_state)
+                                        projected_usage_kwh = f"{int(round(kwh_value))} kWh"
+                                        if kwh_cost:
+                                            cost_value = kwh_value * kwh_cost
+                                            projected_usage_cost = f"${cost_value:.2f}"
+                                    except ValueError:
+                                        projected_usage_kwh = f"{sensor_state} kWh"
+                    except Exception as e:
+                        logger.warning(f"Failed to fetch future usage sensor: {e}")
+
+    placeholders = {
+        "prefix": prefix,
+        "balance": balance or "N/A",
+        "latest_bill_amount": bill_amount or "N/A",
+        "due_date": due_date or "N/A",
+        "last_bill_kwh": last_bill_kwh or "N/A",
+        "current_usage_kwh": current_usage_kwh or "N/A",
+        "current_usage_cost": current_usage_cost or "N/A",
+        "projected_usage_kwh": projected_usage_kwh or "N/A",
+        "projected_usage_cost": projected_usage_cost or "N/A",
+    }
+
+    pending = ledger.get("pending_new_bill") or {}
+    if pending.get("active"):
+        pending_lead = (
+            "{prefix} A new bill is being generated; it typically takes one to three days to post. "
+            "Your account balance already reflects the new bill plus any unpaid balances. "
+        )
+        message = pending_lead
+        for key, value in placeholders.items():
+            message = message.replace(f"{{{key}}}", str(value) if value else "N/A")
+        usage_suffix = (
+            "So far this billing period, usage is about {current_usage_kwh} ({current_usage_cost}). "
+            "Projected by cycle end: about {projected_usage_kwh} ({projected_usage_cost})."
+        )
+        for key, value in placeholders.items():
+            usage_suffix = usage_suffix.replace(f"{{{key}}}", str(value) if value else "N/A")
+        message += " " + usage_suffix
+    else:
+        message = template
+        for key, value in placeholders.items():
+            message = message.replace(f"{{{key}}}", str(value) if value else "N/A")
+
+    return message
+
+
 class TTSScheduler:
     """Manages scheduled TTS announcements."""
     
@@ -229,185 +414,11 @@ class TTSScheduler:
         """Build the bill summary TTS message using ledger data and message template."""
         try:
             import db
-            import aiohttp
-            import os
-            from meter_service import get_meter_service
-            
+
             schedule_config = await self.load_schedule_config()
             tts_config = await self.load_tts_config()
-            template = schedule_config.get("message_template", "")
-            current_usage_sensor = schedule_config.get("current_usage_sensor", "")
-            future_usage_sensor = schedule_config.get("future_usage_sensor", "")
-            prefix = tts_config.get("prefix", "Message from Con Edison.")
-            
-            if not template:
-                template = "{prefix} Your current balance is {balance}. Your last bill was {latest_bill_amount}, using {last_bill_kwh}, due {due_date}."
-            
             ledger = await db.get_ledger_data()
-            
-            # Get latest bill from ledger (matches Account Ledger display order)
-            bills = ledger.get("bills", [])
-            latest_bill = bills[0] if bills else {}
-            latest_bill_id = latest_bill.get("id")
-            
-            # Get bill_details for the same bill
-            bill_details = await db.get_bill_details(latest_bill_id) if latest_bill_id else None
-            
-            # Get balance from ledger
-            balance = ledger.get("account_balance") or ledger.get("total_balance", "")
-            if isinstance(balance, (int, float)):
-                balance = f"${balance:.2f}"
-            
-            # Helper to format date as "Month Day" (no year) for TTS
-            def format_date_for_tts(date_str: str) -> str:
-                if not date_str:
-                    return ""
-                try:
-                    from dateutil import parser as date_parser
-                    dt = date_parser.parse(date_str)
-                    return dt.strftime("%B %d").replace(" 0", " ")
-                except:
-                    import re
-                    match = re.search(r'(\w{3,9})\s+(\d{1,2})', date_str)
-                    if match:
-                        return f"{match.group(1)} {int(match.group(2))}"
-                    return date_str
-            
-            bill_amount = latest_bill.get("bill_total", "") or latest_bill.get("amount", "")
-            
-            # Get due_date from ledger (now included via get_ledger_data) - format for TTS
-            due_date_raw = latest_bill.get("due_date", "") or ""
-            due_date = format_date_for_tts(due_date_raw)
-            
-            # Get kwh_used and kwh_cost from bill_details table (for the same bill)
-            last_bill_kwh = ""
-            kwh_cost = None
-            
-            if bill_details:
-                kwh_val = bill_details.get("kwh_used")
-                if kwh_val:
-                    # Format as whole number for TTS readability
-                    last_bill_kwh = f"{int(round(kwh_val))} kWh"
-                kwh_cost = bill_details.get("kwh_cost")
-                # Use due_date from bill_details if not already set
-                if not due_date:
-                    due_date = format_date_for_tts(bill_details.get("due_date", "") or "")
-            
-            # Initialize usage variables
-            current_usage_kwh = ""
-            current_usage_cost = ""
-            projected_usage_kwh = ""
-            projected_usage_cost = ""
-            
-            # Check if meter tracking is enabled - use addon's meter data directly
-            meter_service = get_meter_service()
-            if meter_service.is_enabled():
-                try:
-                    forecast = await meter_service.get_cached_forecast()
-                    if forecast:
-                        # Current cycle usage (usage_to_date)
-                        usage_to_date = forecast.get("usage_to_date")
-                        if usage_to_date is not None:
-                            current_usage_kwh = f"{int(round(usage_to_date))} kWh"
-                            if kwh_cost:
-                                cost_val = usage_to_date * kwh_cost
-                                current_usage_cost = f"${cost_val:.2f}"
-                        
-                        # Forecasted usage
-                        forecasted = forecast.get("forecasted_usage")
-                        if forecasted is not None:
-                            projected_usage_kwh = f"{int(round(forecasted))} kWh"
-                            if kwh_cost:
-                                cost_val = forecasted * kwh_cost
-                                projected_usage_cost = f"${cost_val:.2f}"
-                except Exception as e:
-                    logger.warning(f"Failed to get meter service data: {e}")
-            
-            # Fallback to custom sensors if meter tracking not enabled
-            elif current_usage_sensor or future_usage_sensor:
-                token = os.environ.get("SUPERVISOR_TOKEN")
-                if token:
-                    async with aiohttp.ClientSession() as session:
-                        # Fetch current usage sensor
-                        if current_usage_sensor and current_usage_sensor.strip():
-                            try:
-                                async with session.get(
-                                    f"http://supervisor/core/api/states/{current_usage_sensor.strip()}",
-                                    headers={"Authorization": f"Bearer {token}"},
-                                ) as resp:
-                                    if resp.status == 200:
-                                        state_data = await resp.json()
-                                        sensor_state = state_data.get("state", "")
-                                        if sensor_state and sensor_state not in ("unknown", "unavailable"):
-                                            try:
-                                                kwh_value = float(sensor_state)
-                                                current_usage_kwh = f"{int(round(kwh_value))} kWh"
-                                                if kwh_cost:
-                                                    cost_value = kwh_value * kwh_cost
-                                                    current_usage_cost = f"${cost_value:.2f}"
-                                            except ValueError:
-                                                current_usage_kwh = f"{sensor_state} kWh"
-                            except Exception as e:
-                                logger.warning(f"Failed to fetch current usage sensor: {e}")
-                        
-                        # Fetch future usage projection sensor
-                        if future_usage_sensor and future_usage_sensor.strip():
-                            try:
-                                async with session.get(
-                                    f"http://supervisor/core/api/states/{future_usage_sensor.strip()}",
-                                    headers={"Authorization": f"Bearer {token}"},
-                                ) as resp:
-                                    if resp.status == 200:
-                                        state_data = await resp.json()
-                                        sensor_state = state_data.get("state", "")
-                                        if sensor_state and sensor_state not in ("unknown", "unavailable"):
-                                            try:
-                                                kwh_value = float(sensor_state)
-                                                projected_usage_kwh = f"{int(round(kwh_value))} kWh"
-                                                if kwh_cost:
-                                                    cost_value = kwh_value * kwh_cost
-                                                    projected_usage_cost = f"${cost_value:.2f}"
-                                            except ValueError:
-                                                projected_usage_kwh = f"{sensor_state} kWh"
-                            except Exception as e:
-                                logger.warning(f"Failed to fetch future usage sensor: {e}")
-            
-            # Build placeholder values
-            placeholders = {
-                "prefix": prefix,
-                "balance": balance or "N/A",
-                "latest_bill_amount": bill_amount or "N/A",
-                "due_date": due_date or "N/A",
-                "last_bill_kwh": last_bill_kwh or "N/A",
-                "current_usage_kwh": current_usage_kwh or "N/A",
-                "current_usage_cost": current_usage_cost or "N/A",
-                "projected_usage_kwh": projected_usage_kwh or "N/A",
-                "projected_usage_cost": projected_usage_cost or "N/A",
-            }
-            
-            # Pending new bill: fixed lead-in + same usage/projection placeholders (not user template)
-            pending = ledger.get("pending_new_bill") or {}
-            if pending.get("active"):
-                pending_lead = (
-                    "{prefix} A new bill is being generated; it typically takes one to three days to post. "
-                    "Your account balance already reflects the new bill plus any unpaid balances. "
-                )
-                message = pending_lead
-                for key, value in placeholders.items():
-                    message = message.replace(f"{{{key}}}", str(value) if value else "N/A")
-                usage_suffix = (
-                    "So far this billing period, usage is about {current_usage_kwh} ({current_usage_cost}). "
-                    "Projected by cycle end: about {projected_usage_kwh} ({projected_usage_cost})."
-                )
-                for key, value in placeholders.items():
-                    usage_suffix = usage_suffix.replace(f"{{{key}}}", str(value) if value else "N/A")
-                message += " " + usage_suffix
-            else:
-                message = template
-                for key, value in placeholders.items():
-                    message = message.replace(f"{{{key}}}", str(value) if value else "N/A")
-
-            return message
+            return await build_scheduled_bill_summary_message(ledger, schedule_config, tts_config)
         except Exception as e:
             logger.error(f"Error building bill summary message: {e}")
             return "Your Con Edison bill summary is currently unavailable."

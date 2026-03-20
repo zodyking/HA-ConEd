@@ -29,7 +29,7 @@ import db
 app = FastAPI(title="Con Edison API")
 
 # Code version for deployment verification
-CODE_VERSION = "1.3.57"
+CODE_VERSION = "1.3.58"
 
 @app.on_event("startup")
 async def startup():
@@ -3474,7 +3474,7 @@ async def preview_tts_message(
     """
     from datetime import datetime
     from meter_service import get_meter_service
-    from tts_scheduler import get_scheduler
+    from tts_scheduler import get_scheduler, build_scheduled_bill_summary_message
 
     ledger = await db.get_ledger_data()
     meter_service = get_meter_service()
@@ -3485,6 +3485,19 @@ async def preview_tts_message(
     schedule_config = await scheduler.load_schedule_config()
     current_usage_sensor = current_sensor if current_sensor else schedule_config.get("current_usage_sensor", "")
     future_usage_sensor = future_sensor if future_sensor else schedule_config.get("future_usage_sensor", "")
+    schedule_for_preview = {
+        **schedule_config,
+        "current_usage_sensor": current_usage_sensor,
+        "future_usage_sensor": future_usage_sensor,
+    }
+    tts_config_preview = await scheduler.load_tts_config()
+    try:
+        full_scheduled_message = await build_scheduled_bill_summary_message(
+            ledger, schedule_for_preview, tts_config_preview
+        )
+    except Exception as e:
+        await db.add_log("warning", f"TTS preview full_scheduled_message failed: {e}")
+        full_scheduled_message = ""
     
     # Get time info
     now = datetime.now()
@@ -3685,6 +3698,8 @@ async def preview_tts_message(
             "kwh": projected_usage_kwh or "N/A",
             "cost": projected_usage_cost or "N/A"
         },
+        "full_scheduled_message": full_scheduled_message,
+        "pending_new_bill": ledger.get("pending_new_bill"),
         "_debug": {
             "sensors_requested": {
                 "current": current_usage_sensor,
