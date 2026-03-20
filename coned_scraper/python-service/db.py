@@ -2332,10 +2332,6 @@ async def sync_from_scrape(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 # Ledger Data
 # =============================================================================
 
-# Pending new bill: account balance materially above latest-bill residual (see plan).
-PENDING_NEW_BILL_BALANCE_THRESHOLD = 5.0
-
-
 def _parse_iso_forecast_date(iso_str: Optional[str]):
     """Parse forecast start_date/end_date (ISO) to date for cycle comparison."""
     if not iso_str or not str(iso_str).strip():
@@ -2417,10 +2413,14 @@ async def compute_pending_new_bill_state(
     account_balance_str: str,
 ) -> Dict[str, Any]:
     """
-    Detect when ConEd balance is ahead of the ledger: current meter cycle starts strictly
-    after the end month of the last posted bill period (utility gap), and balance exceeds
-    bill_total - payments + late_fee by more than PENDING_NEW_BILL_BALANCE_THRESHOLD.
-    Uses DB meter_config.enabled + cached forecast.
+    Pending new bill: utility period gap — meter forecast cycle start month is strictly after
+    the last posted bill's service-period end month (see _period_end_year_month_for_gap).
+    Activation is gap-only (no minimum balance delta). implied_new_charges is set when
+    balance > residual (bill_total - payments + late_fee) for optional UI copy.
+
+    Evaluated on every get_ledger_data() call (e.g. each GET /api/ledger; Account Ledger
+    UI polls /api/ledger every 30s). There is no separate background job for this check.
+    Requires meter_config.enabled and cached meter forecast with start/end dates.
     """
     default: Dict[str, Any] = {"active": False, "implied_new_charges": None}
     if not latest_bill or latest_bill.get("id") is None:
@@ -2465,20 +2465,17 @@ async def compute_pending_new_bill_state(
     delta = balance - residual
 
     if not period_gap:
-        if delta > PENDING_NEW_BILL_BALANCE_THRESHOLD:
+        if delta > 0:
             logger.debug(
-                "pending_new_bill: suppressed by period_gap period_end_ym=%s cycle_start_ym=%s "
-                "delta=%.2f",
+                "pending_new_bill: no period_gap period_end_ym=%s cycle_start_ym=%s delta=%.2f",
                 period_end_ym,
                 cycle_start_ym,
                 delta,
             )
         return default
 
-    if delta <= PENDING_NEW_BILL_BALANCE_THRESHOLD:
-        return default
-
-    return {"active": True, "implied_new_charges": round(delta, 2)}
+    implied = round(delta, 2) if delta > 0 else None
+    return {"active": True, "implied_new_charges": implied}
 
 
 async def get_ledger_data() -> Dict[str, Any]:
