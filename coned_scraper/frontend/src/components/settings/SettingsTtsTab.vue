@@ -388,6 +388,10 @@
                 <button class="tts-btn tts-btn-secondary tts-btn-sm" @click="generatePreview">
                   Preview Message
                 </button>
+                <p v-if="previewPendingNewBillActive" class="tts-pending-preview-hint" role="status">
+                  A new bill is pending: the spoken announcement uses the fixed lead-in below (not your template
+                  text), matching the scheduler.
+                </p>
                 <div v-if="previewMessage" class="tts-preview-box">
                   <span class="tts-preview-label">Preview:</span>
                   {{ previewMessage }}
@@ -481,6 +485,8 @@ const expandedSections = reactive({
 const alertMessage = ref<{ type: string; text: string } | null>(null)
 const scheduleMessage = ref<{ type: string; text: string } | null>(null)
 const previewMessage = ref('')
+/** When true, scheduled TTS uses fixed pending lead-in (same as preview below). */
+const previewPendingNewBillActive = ref(false)
 const meterTrackingEnabled = ref(false)
 
 const dayOptions = [
@@ -555,6 +561,7 @@ async function generatePreview() {
     const res = await fetch(url)
     if (res.ok) {
       const data = await res.json()
+      previewPendingNewBillActive.value = Boolean(data.pending_new_bill?.active)
       console.log('TTS Preview response:', JSON.stringify(data, null, 2))
       console.log('Debug info:', data._debug)
       console.log('Current usage:', data.current_usage)
@@ -577,10 +584,12 @@ async function generatePreview() {
       }
     } else {
       console.error('Preview API returned error:', res.status)
+      previewPendingNewBillActive.value = false
       previewMessage.value = 'Error generating preview. Check the logs.'
     }
   } catch (e) {
     console.error('Failed to generate preview:', e)
+    previewPendingNewBillActive.value = false
     previewMessage.value = 'Failed to connect to server.'
   }
 }
@@ -1206,6 +1215,17 @@ onMounted(async () => {
 .tts-preview-section {
   margin-top: 0.75rem;
   width: 100%;
+}
+
+.tts-pending-preview-hint {
+  margin: 0.5rem 0 0;
+  padding: 0.65rem 0.75rem;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  color: #1565c0;
+  background: #e3f2fd;
+  border: 1px solid #90caf9;
+  border-radius: 8px;
 }
 
 .tts-preview-box {

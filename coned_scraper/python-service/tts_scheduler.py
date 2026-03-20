@@ -93,17 +93,14 @@ async def build_scheduled_bill_summary_message(
     projected_usage_kwh = ""
     projected_usage_cost = ""
 
+    # Match GET /api/meter-reading: only use forecast when meter service is enabled
     forecast = None
-    meter_cfg = await db.get_meter_config_db() or {}
-    if meter_cfg.get("enabled"):
-        forecast = await db.get_meter_forecast_db()
-
     meter_service = get_meter_service()
-    if forecast is None and meter_service.is_enabled():
+    if meter_service.is_enabled():
         try:
-            forecast = await meter_service.get_cached_forecast()
+            forecast = await db.get_meter_forecast_db()
         except Exception as e:
-            logger.warning(f"Failed to get meter service forecast: {e}")
+            logger.warning(f"Failed to load cached meter forecast for TTS: {e}")
 
     if forecast:
         try:

@@ -2367,7 +2367,9 @@ def _month_num_from_label(label: str) -> Optional[int]:
 def _month_range_trailing_month(month_range: Optional[str]) -> Optional[int]:
     if not month_range or not str(month_range).strip():
         return None
-    parts = re.split(r"\s*[-–—]\s*", str(month_range).strip())
+    # Normalize "JAN / FEB", extra spaces, slashes → hyphen-separated labels
+    normalized = re.sub(r"\s+", " ", str(month_range).strip().replace("/", "-"))
+    parts = re.split(r"\s*[-–—]\s*", normalized)
     if len(parts) < 2:
         return None
     return _month_num_from_label(parts[-1])
@@ -2382,9 +2384,16 @@ def _period_end_year_month_for_gap(
     forecast_start: Optional[date],
 ) -> Optional[Tuple[int, int]]:
     """
-    End (year, month) of the last *posted* service period: prefer month_range trailing
-    month + year hint; if range unparsable, bill_date then bill_cycle_date.
+    End (year, month) of the last *posted* service period: prefer BillDetails-style
+    billing_period_end; else month_range trailing month + year hint; else bill_date
+    then bill_cycle_date.
     """
+    bpe = latest_bill.get("billing_period_end")
+    if bpe:
+        dt = parse_date(str(bpe))
+        if dt:
+            return (dt.year, dt.month)
+
     mnum = _month_range_trailing_month(latest_bill.get("month_range"))
     if mnum is not None:
         cycle_dt = parse_date(latest_bill.get("bill_cycle_date") or "")
@@ -2409,7 +2418,7 @@ def _period_end_year_month_for_gap(
 
 
 async def compute_pending_new_bill_state(
-    latest_bill: Optional[Dict[str, Any]],
+    posted_statement_bill: Optional[Dict[str, Any]],
     account_balance_str: str,
 ) -> Dict[str, Any]:
     """
@@ -2418,46 +2427,63 @@ async def compute_pending_new_bill_state(
     Activation is gap-only (no minimum balance delta). implied_new_charges is set when
     balance > residual (bill_total - payments + late_fee) for optional UI copy.
 
+    posted_statement_bill: Bill used for gap math — in get_ledger_data this is the first
+    bill in billCycleDate-desc order with has_statement_pdf (BillDocument row), else the
+    first bill (legacy fallback when no PDF records exist). This avoids shell/partial cycles
+    sorting above the last real statement.
+
     Evaluated on every get_ledger_data() call (e.g. each GET /api/ledger; Account Ledger
     UI polls /api/ledger every 30s). There is no separate background job for this check.
-    Requires meter_config.enabled and cached meter forecast with start/end dates.
+    Requires the same meter gate as GET /api/meter-reading (MeterService.is_enabled()) and
+    a cached meter forecast with parseable start/end dates.
     """
     default: Dict[str, Any] = {"active": False, "implied_new_charges": None}
-    if not latest_bill or latest_bill.get("id") is None:
+    if not posted_statement_bill or posted_statement_bill.get("id") is None:
         return default
 
-    meter_cfg = await get_meter_config_db() or {}
-    if not meter_cfg.get("enabled"):
+    try:
+        from meter_service import get_meter_service
+
+        if not get_meter_service().is_enabled():
+            return default
+    except Exception:
+        logger.debug("pending_new_bill: meter service unavailable or not enabled", exc_info=True)
         return default
 
     forecast = await get_meter_forecast_db()
     if not forecast:
+        logger.debug("pending_new_bill: no cached meter forecast")
         return default
     window_start = _parse_iso_forecast_date(forecast.get("start_date"))
     window_end = _parse_iso_forecast_date(forecast.get("end_date"))
     if window_start is None or window_end is None:
+        logger.debug(
+            "pending_new_bill: unparsable forecast window start=%r end=%r",
+            forecast.get("start_date"),
+            forecast.get("end_date"),
+        )
         return default
 
-    period_end_ym = _period_end_year_month_for_gap(latest_bill, window_start)
+    period_end_ym = _period_end_year_month_for_gap(posted_statement_bill, window_start)
     if period_end_ym is None:
         return default
 
     cycle_start_ym = (window_start.year, window_start.month)
     period_gap = _year_month_sort_key(cycle_start_ym) > _year_month_sort_key(period_end_ym)
 
-    bill_total = latest_bill.get("amount_numeric")
+    bill_total = posted_statement_bill.get("amount_numeric")
     if bill_total is None:
-        bill_total = parse_amount(str(latest_bill.get("bill_total") or ""))
+        bill_total = parse_amount(str(posted_statement_bill.get("bill_total") or ""))
     bill_total_f = float(bill_total or 0.0)
 
     payments_sum = 0.0
-    for p in latest_bill.get("payments") or []:
+    for p in posted_statement_bill.get("payments") or []:
         amt = p.get("amount_numeric")
         if amt is None:
             amt = parse_amount(str(p.get("amount") or ""))
         payments_sum += float(amt or 0.0)
 
-    late_fee = await get_stored_late_fee_amount(int(latest_bill["id"]))
+    late_fee = await get_stored_late_fee_amount(int(posted_statement_bill["id"]))
     late_fee_f = float(late_fee or 0.0)
 
     residual = bill_total_f - payments_sum + late_fee_f
@@ -2520,6 +2546,17 @@ async def get_ledger_data() -> Dict[str, Any]:
             "bill_total": f"${decimal_to_float(bill.billTotal):.2f}" if bill.billTotal else None,
             "amount_numeric": decimal_to_float(bill.billTotal),
             "due_date": due_date_str,
+            "has_statement_pdf": bill.document is not None,
+            "billing_period_start": (
+                bill.details.billingPeriodStart.strftime("%Y-%m-%d")
+                if bill.details and bill.details.billingPeriodStart
+                else None
+            ),
+            "billing_period_end": (
+                bill.details.billingPeriodEnd.strftime("%Y-%m-%d")
+                if bill.details and bill.details.billingPeriodEnd
+                else None
+            ),
             "pdf_exists": pdf_exists,
             "pdf_source_url": pdf_source_url,
             "payments": [
@@ -2595,8 +2632,15 @@ async def get_ledger_data() -> Dict[str, Any]:
 
     # Latest bill (first in list) - for due reminders and convenience
     latest_bill = bills_data[0] if bills_data else None
+    # Gap detection: compare forecast to last *posted* statement (PDF row), not a shell cycle
+    reference_bill_for_pending = None
+    if bills_data:
+        reference_bill_for_pending = next(
+            (b for b in bills_data if b.get("has_statement_pdf")),
+            bills_data[0],
+        )
 
-    pending_new_bill = await compute_pending_new_bill_state(latest_bill, account_balance)
+    pending_new_bill = await compute_pending_new_bill_state(reference_bill_for_pending, account_balance)
 
     return {
         "account_balance": account_balance,
