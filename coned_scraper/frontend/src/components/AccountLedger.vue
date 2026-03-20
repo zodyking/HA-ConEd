@@ -181,6 +181,24 @@
       </div>
       </div>
 
+      <div
+        v-if="ledgerData.pending_new_bill?.active"
+        class="ha-pending-bill-banner"
+        role="status"
+      >
+        <p class="ha-pending-bill-text">
+          Con Edison may be generating your next bill (often 1–3 days before it appears here).
+          Your <strong>account balance</strong> already includes the new charges plus any unpaid amounts;
+          the line below reflects the <strong>last posted</strong> bill only.
+        </p>
+        <p
+          v-if="ledgerData.pending_new_bill?.implied_new_charges != null"
+          class="ha-pending-bill-estimate"
+        >
+          Estimated unposted portion: ~${{ formatPendingCharges(ledgerData.pending_new_bill.implied_new_charges) }}
+        </p>
+      </div>
+
       <!-- Bill History Ledger -->
       <div class="ha-card ha-card-ledger">
         <div class="ha-card-header">
@@ -407,6 +425,11 @@ interface Bill {
   payments: Payment[]
 }
 
+interface PendingNewBill {
+  active: boolean
+  implied_new_charges: number | null
+}
+
 interface LedgerData {
   account_balance: string | null
   balance_updated_at: string | null
@@ -415,6 +438,7 @@ interface LedgerData {
   bills: Bill[]
   orphan_payments: Payment[]
   payee_summaries?: Record<number, unknown>
+  pending_new_bill?: PendingNewBill
 }
 
 const ledgerData = ref<LedgerData | null>(null)
@@ -775,6 +799,12 @@ const latestBillDueDate = computed(() => {
   return null
 })
 
+function formatPendingCharges(n: number): string {
+  const v = Number(n)
+  if (Number.isNaN(v)) return '0.00'
+  return v.toFixed(2)
+}
+
 async function loadLedgerData() {
   try {
     const api = getApiBase()
@@ -979,6 +1009,25 @@ onUnmounted(() => clearInterval(interval))
   padding: 2rem;
   text-align: center;
   color: #d32f2f;
+}
+.ha-pending-bill-banner {
+  margin: 0.75rem 0 1rem;
+  padding: 0.85rem 1rem;
+  border-radius: 8px;
+  border: 1px solid #90caf9;
+  background: linear-gradient(135deg, #e8f4fd 0%, #e3f2fd 100%);
+  color: #1565c0;
+}
+.ha-pending-bill-text {
+  margin: 0;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+.ha-pending-bill-estimate {
+  margin: 0.5rem 0 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #0d47a1;
 }
 .ha-empty-img {
   width: 80px;

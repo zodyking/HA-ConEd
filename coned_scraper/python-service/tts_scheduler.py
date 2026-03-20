@@ -385,11 +385,28 @@ class TTSScheduler:
                 "projected_usage_cost": projected_usage_cost or "N/A",
             }
             
-            # Replace placeholders in template
-            message = template
-            for key, value in placeholders.items():
-                message = message.replace(f"{{{key}}}", str(value) if value else "N/A")
-            
+            # Pending new bill: fixed lead-in + same usage/projection placeholders (not user template)
+            pending = ledger.get("pending_new_bill") or {}
+            if pending.get("active"):
+                pending_lead = (
+                    "{prefix} A new bill is being generated; it typically takes one to three days to post. "
+                    "Your account balance already reflects the new bill plus any unpaid balances. "
+                )
+                message = pending_lead
+                for key, value in placeholders.items():
+                    message = message.replace(f"{{{key}}}", str(value) if value else "N/A")
+                usage_suffix = (
+                    "So far this billing period, usage is about {current_usage_kwh} ({current_usage_cost}). "
+                    "Projected by cycle end: about {projected_usage_kwh} ({projected_usage_cost})."
+                )
+                for key, value in placeholders.items():
+                    usage_suffix = usage_suffix.replace(f"{{{key}}}", str(value) if value else "N/A")
+                message += " " + usage_suffix
+            else:
+                message = template
+                for key, value in placeholders.items():
+                    message = message.replace(f"{{{key}}}", str(value) if value else "N/A")
+
             return message
         except Exception as e:
             logger.error(f"Error building bill summary message: {e}")

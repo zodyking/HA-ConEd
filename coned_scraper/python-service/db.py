@@ -5,7 +5,7 @@ Provides async database operations for the ConEd Scraper addon.
 import json
 import logging
 import hashlib
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date
 from typing import Optional, List, Dict, Any
 from decimal import Decimal
 
@@ -2331,6 +2331,112 @@ async def sync_from_scrape(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 # Ledger Data
 # =============================================================================
 
+# Pending new bill: account balance materially above latest-bill residual (see plan).
+PENDING_NEW_BILL_BALANCE_THRESHOLD = 5.0
+
+
+def _parse_iso_forecast_date(iso_str: Optional[str]):
+    """Parse forecast start_date/end_date (ISO) to date for cycle comparison."""
+    if not iso_str or not str(iso_str).strip():
+        return None
+    try:
+        s = str(iso_str).strip().replace("Z", "+00:00")
+        dt = datetime.fromisoformat(s)
+        return dt.date()
+    except (ValueError, TypeError):
+        return None
+
+
+def _forecast_year_months(start: date, end: date) -> set:
+    """
+    All (year, month) pairs from the calendar month of start through end inclusive.
+    Handles year rollover (e.g. Dec–Jan). If start > end, arguments are swapped.
+    """
+    if start > end:
+        start, end = end, start
+    months = set()
+    y, m = start.year, start.month
+    ey, em = end.year, end.month
+    while True:
+        months.add((y, m))
+        if (y, m) == (ey, em):
+            break
+        m += 1
+        if m > 12:
+            m = 1
+            y += 1
+        if (y > ey) or (y == ey and m > em):
+            break
+    return months
+
+
+async def compute_pending_new_bill_state(
+    latest_bill: Optional[Dict[str, Any]],
+    account_balance_str: str,
+) -> Dict[str, Any]:
+    """
+    Detect when ConEd balance is ahead of the ledger: latest bill's calendar month does
+    not overlap any month in the meter forecast billing window, and balance exceeds
+    bill_total - payments + late_fee by more than PENDING_NEW_BILL_BALANCE_THRESHOLD.
+    Requires meter enabled + cached forecast. Bill month uses bill_date then bill_cycle_date.
+    """
+    default: Dict[str, Any] = {"active": False, "implied_new_charges": None}
+    if not latest_bill or latest_bill.get("id") is None:
+        return default
+
+    from meter_service import get_meter_service
+
+    meter_service = get_meter_service()
+    if not meter_service.is_enabled():
+        return default
+
+    forecast = await meter_service.get_cached_forecast()
+    if not forecast:
+        return default
+    window_start = _parse_iso_forecast_date(forecast.get("start_date"))
+    window_end = _parse_iso_forecast_date(forecast.get("end_date"))
+    if window_start is None or window_end is None:
+        return default
+
+    forecast_months = _forecast_year_months(window_start, window_end)
+
+    bill_dt = None
+    bill_date_raw = latest_bill.get("bill_date")
+    if bill_date_raw:
+        bill_dt = parse_date(str(bill_date_raw))
+    if not bill_dt:
+        bill_dt = parse_date(latest_bill.get("bill_cycle_date") or "")
+    if not bill_dt:
+        return default
+    bill_ym = (bill_dt.year, bill_dt.month)
+    if bill_ym in forecast_months:
+        return default
+
+    bill_total = latest_bill.get("amount_numeric")
+    if bill_total is None:
+        bill_total = parse_amount(str(latest_bill.get("bill_total") or ""))
+    bill_total_f = float(bill_total or 0.0)
+
+    payments_sum = 0.0
+    for p in latest_bill.get("payments") or []:
+        amt = p.get("amount_numeric")
+        if amt is None:
+            amt = parse_amount(str(p.get("amount") or ""))
+        payments_sum += float(amt or 0.0)
+
+    late_fee = await get_stored_late_fee_amount(int(latest_bill["id"]))
+    late_fee_f = float(late_fee or 0.0)
+
+    residual = bill_total_f - payments_sum + late_fee_f
+    balance = parse_amount(str(account_balance_str or ""))
+    delta = balance - residual
+
+    if delta <= PENDING_NEW_BILL_BALANCE_THRESHOLD:
+        return default
+
+    return {"active": True, "implied_new_charges": round(delta, 2)}
+
+
 async def get_ledger_data() -> Dict[str, Any]:
     """Get complete ledger data for UI"""
     await ensure_connected()
@@ -2449,6 +2555,8 @@ async def get_ledger_data() -> Dict[str, Any]:
     # Latest bill (first in list) - for due reminders and convenience
     latest_bill = bills_data[0] if bills_data else None
 
+    pending_new_bill = await compute_pending_new_bill_state(latest_bill, account_balance)
+
     return {
         "account_balance": account_balance,
         "bills": bills_data,
@@ -2456,6 +2564,7 @@ async def get_ledger_data() -> Dict[str, Any]:
         "orphan_payments": [],  # No separate section - merged into bills
         "payee_summaries": payee_summaries,
         "latest_payment": latest_payment,
+        "pending_new_bill": pending_new_bill,
     }
 
 # =============================================================================
