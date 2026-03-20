@@ -187,19 +187,8 @@
         role="status"
       >
         <p class="ha-pending-bill-text">
-          <template v-if="ledgerData.pending_new_bill?.missing_period_hint">
-            A bill for <strong>{{ ledgerData.pending_new_bill.missing_period_hint }}</strong> may still be
-            generating — Con Edison often needs <strong>1–3 days</strong> before it appears in the ledger.
-            Your last posted period is <strong>{{ ledgerData.pending_new_bill.posted_month_range || 'on file' }}</strong>;
-            the meter cycle is <strong>{{ ledgerData.pending_new_bill.current_cycle_months || 'current' }}</strong>.
-          </template>
-          <template v-else>
-            Your last posted period (<strong>{{ ledgerData.pending_new_bill.posted_month_range || 'on file' }}</strong>)
-            and the current meter cycle (<strong>{{ ledgerData.pending_new_bill.current_cycle_months || 'current' }}</strong>)
-            don’t match yet — Con Edison may still be preparing one or more bills (often <strong>1–3 days</strong> before they appear here).
-          </template>
-          Your <strong>account balance</strong> already includes the new charges plus any unpaid amounts;
-          the list below reflects the <strong>last posted</strong> bill only.
+          A new bill is being generated. Please give Con Edison <strong>1–3 days</strong> to post it to your account.
+          Your <strong>account balance</strong> already includes any new charges.
         </p>
         <p
           v-if="ledgerData.pending_new_bill?.implied_new_charges != null"

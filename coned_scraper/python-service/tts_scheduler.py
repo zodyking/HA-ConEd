@@ -180,20 +180,15 @@ async def build_scheduled_bill_summary_message(
 
     pending = ledger.get("pending_new_bill") or {}
     if pending.get("active"):
-        pending_lead = (
-            "{prefix} A new bill is being generated; it typically takes one to three days to post. "
-            "Your account balance already reflects the new bill plus any unpaid balances. "
+        pending_message = (
+            "{prefix} A new bill is being generated. Please allow Con Edison 1 to 3 days "
+            "until it posts to your account. Your account balance is {balance}. "
+            "Current usage: {current_usage_kwh} at {current_usage_cost}. "
+            "Projected usage: {projected_usage_kwh} at {projected_usage_cost}."
         )
-        message = pending_lead
+        message = pending_message
         for key, value in placeholders.items():
             message = message.replace(f"{{{key}}}", str(value) if value else "N/A")
-        usage_suffix = (
-            "So far this billing period, usage is about {current_usage_kwh} ({current_usage_cost}). "
-            "Projected by cycle end: about {projected_usage_kwh} ({projected_usage_cost})."
-        )
-        for key, value in placeholders.items():
-            usage_suffix = usage_suffix.replace(f"{{{key}}}", str(value) if value else "N/A")
-        message += " " + usage_suffix
     else:
         message = template
         for key, value in placeholders.items():
