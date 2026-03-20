@@ -2336,10 +2336,15 @@ def _parse_iso_forecast_date(iso_str: Optional[str]):
     """Parse forecast start_date/end_date (ISO) to date for cycle comparison."""
     if not iso_str or not str(iso_str).strip():
         return None
+    s = str(iso_str).strip().replace("Z", "+00:00")
     try:
-        s = str(iso_str).strip().replace("Z", "+00:00")
         dt = datetime.fromisoformat(s)
         return dt.date()
+    except (ValueError, TypeError):
+        pass
+    # Date-only strings (some caches / serializers)
+    try:
+        return date.fromisoformat(s[:10] if len(s) >= 10 and s[4] == "-" else s)
     except (ValueError, TypeError):
         return None
 
@@ -2450,8 +2455,14 @@ def _posted_period_end_ym_for_pending_gap(
     """
     mnum = _month_range_trailing_month(bill.get("month_range"))
     if mnum is not None:
+        # Year for the statement label: bill_date (e.g. Feb 16) is more reliable than
+        # bill_cycle_date (often the next cycle anchor in March), which can mis-pair
+        # DEC–JAN-style ranges with the wrong year.
+        bill_dt = parse_date(str(bill.get("bill_date") or ""))
         cycle_dt = parse_date(bill.get("bill_cycle_date") or "")
-        if cycle_dt:
+        if bill_dt:
+            year_hint = bill_dt.year
+        elif cycle_dt:
             year_hint = cycle_dt.year
         elif forecast_start:
             year_hint = forecast_start.year
@@ -2477,6 +2488,34 @@ def _posted_period_end_ym_for_pending_gap(
     return None
 
 
+def _select_reference_bill_for_pending_gap(bills_data: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """
+    Bill whose month_range / period we trust for gap math — not a newer shell row.
+
+    1) First billCycleDate-desc row with a BillDocument row (has_statement_pdf).
+    2) Else first row with a PDF file on disk (pdf_exists) — document record can be missing.
+    3) Else latest by bill_date (true statement date).
+    4) Else first row (legacy).
+    """
+    if not bills_data:
+        return None
+    with_doc = next((b for b in bills_data if b.get("has_statement_pdf")), None)
+    if with_doc:
+        return with_doc
+    with_file = next((b for b in bills_data if b.get("pdf_exists")), None)
+    if with_file:
+        return with_file
+    dated: List[Tuple[datetime, Dict[str, Any]]] = []
+    for b in bills_data:
+        d = parse_date(b.get("bill_date") or "")
+        if d:
+            dated.append((d, b))
+    if dated:
+        dated.sort(key=lambda x: x[0], reverse=True)
+        return dated[0][1]
+    return bills_data[0]
+
+
 async def compute_pending_new_bill_state(
     posted_statement_bill: Optional[Dict[str, Any]],
     account_balance_str: str,
@@ -2489,15 +2528,15 @@ async def compute_pending_new_bill_state(
     Activation is gap-only (no minimum balance delta). implied_new_charges is set when
     balance > residual (bill_total - payments + late_fee) for optional UI copy.
 
-    posted_statement_bill: Bill used for gap math — in get_ledger_data this is the first
-    bill in billCycleDate-desc order with has_statement_pdf (BillDocument row), else the
-    first bill (legacy fallback when no PDF records exist). This avoids shell/partial cycles
-    sorting above the last real statement.
+    posted_statement_bill: Bill used for gap math — see _select_reference_bill_for_pending_gap()
+    in get_ledger_data (document row, then pdf on disk, then latest bill_date).
 
     Evaluated on every get_ledger_data() call (e.g. each GET /api/ledger; Account Ledger
     UI polls /api/ledger every 30s). There is no separate background job for this check.
-    Requires the same meter gate as GET /api/meter-reading (MeterService.is_enabled()) and
-    a cached meter forecast with parseable start/end dates.
+
+    Uses **cached meter forecast in the database** (meter_forecast_cache). Does not require
+    MeterService.is_enabled() so detection still works if the in-memory service is not
+    initialized while forecast data remains in app settings.
     """
     default: Dict[str, Any] = {
         "active": False,
@@ -2507,15 +2546,6 @@ async def compute_pending_new_bill_state(
         "missing_period_hint": None,
     }
     if not posted_statement_bill or posted_statement_bill.get("id") is None:
-        return default
-
-    try:
-        from meter_service import get_meter_service
-
-        if not get_meter_service().is_enabled():
-            return default
-    except Exception:
-        logger.debug("pending_new_bill: meter service unavailable or not enabled", exc_info=True)
         return default
 
     forecast = await get_meter_forecast_db()
@@ -2706,13 +2736,8 @@ async def get_ledger_data() -> Dict[str, Any]:
 
     # Latest bill (first in list) - for due reminders and convenience
     latest_bill = bills_data[0] if bills_data else None
-    # Gap detection: compare forecast to last *posted* statement (PDF row), not a shell cycle
-    reference_bill_for_pending = None
-    if bills_data:
-        reference_bill_for_pending = next(
-            (b for b in bills_data if b.get("has_statement_pdf")),
-            bills_data[0],
-        )
+    # Gap detection: compare forecast to last real statement, not a newer shell cycle
+    reference_bill_for_pending = _select_reference_bill_for_pending_gap(bills_data)
 
     pending_new_bill = await compute_pending_new_bill_state(reference_bill_for_pending, account_balance)
 
