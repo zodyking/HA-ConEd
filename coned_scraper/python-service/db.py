@@ -2375,28 +2375,82 @@ def _month_range_trailing_month(month_range: Optional[str]) -> Optional[int]:
     return _month_num_from_label(parts[-1])
 
 
+def _month_range_leading_month(month_range: Optional[str]) -> Optional[int]:
+    """First month in a ConEd-style range (e.g. 'JAN - FEB' -> January)."""
+    if not month_range or not str(month_range).strip():
+        return None
+    normalized = re.sub(r"\s+", " ", str(month_range).strip().replace("/", "-"))
+    parts = re.split(r"\s*[-–—]\s*", normalized)
+    if len(parts) < 2:
+        return None
+    return _month_num_from_label(parts[0])
+
+
 def _year_month_sort_key(ym: Tuple[int, int]) -> int:
     return ym[0] * 12 + ym[1]
 
 
-def _period_end_year_month_for_gap(
-    latest_bill: Dict[str, Any],
+# 1..12 -> short label for UI strings
+_MONTH_NUM_TO_ABBREV = (
+    "",
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+)
+
+
+def _forecast_cycle_months_label(window_start: date, window_end: date) -> str:
+    """e.g. Mar 19–Apr 18 forecast -> 'Mar – Apr'."""
+    a = _MONTH_NUM_TO_ABBREV[window_start.month]
+    b = _MONTH_NUM_TO_ABBREV[window_end.month]
+    if window_start.year == window_end.year and window_start.month == window_end.month:
+        return a
+    return f"{a} – {b}"
+
+
+def _missing_period_hint(
+    period_end_ym: Tuple[int, int], cycle_start_ym: Tuple[int, int]
+) -> Optional[str]:
+    """
+    Human hint for the bridge bill (e.g. last posted JAN–FEB, current Mar–Apr -> 'Feb – Mar').
+    None when gap spans more than one month (UI shows generic copy).
+    """
+    pe_key = _year_month_sort_key(period_end_ym)
+    cs_key = _year_month_sort_key(cycle_start_ym)
+    if cs_key <= pe_key:
+        return None
+    diff = cs_key - pe_key
+    ta = _MONTH_NUM_TO_ABBREV[period_end_ym[1]]
+    tb = _MONTH_NUM_TO_ABBREV[cycle_start_ym[1]]
+    if diff == 1:
+        return f"{ta} – {tb}"
+    return None
+
+
+def _posted_period_end_ym_for_pending_gap(
+    bill: Dict[str, Any],
     forecast_start: Optional[date],
 ) -> Optional[Tuple[int, int]]:
     """
-    End (year, month) of the last *posted* service period: prefer BillDetails-style
-    billing_period_end; else month_range trailing month + year hint; else bill_date
-    then bill_cycle_date.
-    """
-    bpe = latest_bill.get("billing_period_end")
-    if bpe:
-        dt = parse_date(str(bpe))
-        if dt:
-            return (dt.year, dt.month)
+    End (year, month) of the last *posted* statement for pending-bill gap detection.
 
-    mnum = _month_range_trailing_month(latest_bill.get("month_range"))
+    Prefer **month_range** trailing month + year hint first so we match the printed
+    period (e.g. JAN–FEB ends in Feb) even when billing_period_end falls in the next
+    calendar month (e.g. March), which would falsely clear the gap vs the meter cycle.
+    Then billing_period_end, bill_date, bill_cycle_date.
+    """
+    mnum = _month_range_trailing_month(bill.get("month_range"))
     if mnum is not None:
-        cycle_dt = parse_date(latest_bill.get("bill_cycle_date") or "")
+        cycle_dt = parse_date(bill.get("bill_cycle_date") or "")
         if cycle_dt:
             year_hint = cycle_dt.year
         elif forecast_start:
@@ -2405,13 +2459,19 @@ def _period_end_year_month_for_gap(
             year_hint = utc_now().year
         return (year_hint, mnum)
 
-    bill_date_raw = latest_bill.get("bill_date")
+    bpe = bill.get("billing_period_end")
+    if bpe:
+        dt = parse_date(str(bpe))
+        if dt:
+            return (dt.year, dt.month)
+
+    bill_date_raw = bill.get("bill_date")
     if bill_date_raw:
         dt = parse_date(str(bill_date_raw))
         if dt:
             return (dt.year, dt.month)
 
-    cycle_dt = parse_date(latest_bill.get("bill_cycle_date") or "")
+    cycle_dt = parse_date(bill.get("bill_cycle_date") or "")
     if cycle_dt:
         return (cycle_dt.year, cycle_dt.month)
     return None
@@ -2423,7 +2483,9 @@ async def compute_pending_new_bill_state(
 ) -> Dict[str, Any]:
     """
     Pending new bill: utility period gap — meter forecast cycle start month is strictly after
-    the last posted bill's service-period end month (see _period_end_year_month_for_gap).
+    the last posted bill's service-period end month (see _posted_period_end_ym_for_pending_gap;
+    uses statement month_range before billing_period_end).
+
     Activation is gap-only (no minimum balance delta). implied_new_charges is set when
     balance > residual (bill_total - payments + late_fee) for optional UI copy.
 
@@ -2437,7 +2499,13 @@ async def compute_pending_new_bill_state(
     Requires the same meter gate as GET /api/meter-reading (MeterService.is_enabled()) and
     a cached meter forecast with parseable start/end dates.
     """
-    default: Dict[str, Any] = {"active": False, "implied_new_charges": None}
+    default: Dict[str, Any] = {
+        "active": False,
+        "implied_new_charges": None,
+        "posted_month_range": None,
+        "current_cycle_months": None,
+        "missing_period_hint": None,
+    }
     if not posted_statement_bill or posted_statement_bill.get("id") is None:
         return default
 
@@ -2464,7 +2532,7 @@ async def compute_pending_new_bill_state(
         )
         return default
 
-    period_end_ym = _period_end_year_month_for_gap(posted_statement_bill, window_start)
+    period_end_ym = _posted_period_end_ym_for_pending_gap(posted_statement_bill, window_start)
     if period_end_ym is None:
         return default
 
@@ -2501,7 +2569,13 @@ async def compute_pending_new_bill_state(
         return default
 
     implied = round(delta, 2) if delta > 0 else None
-    return {"active": True, "implied_new_charges": implied}
+    return {
+        "active": True,
+        "implied_new_charges": implied,
+        "posted_month_range": posted_statement_bill.get("month_range"),
+        "current_cycle_months": _forecast_cycle_months_label(window_start, window_end),
+        "missing_period_hint": _missing_period_hint(period_end_ym, cycle_start_ym),
+    }
 
 
 async def get_ledger_data() -> Dict[str, Any]:
