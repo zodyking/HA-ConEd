@@ -15,74 +15,105 @@
       />
     </div>
 
-    <!-- Unclaim Payment Modal -->
-    <div v-if="unclaimPayment" class="ha-modal-overlay ha-unclaim-overlay" @click.self="unclaimPayment = null">
-      <div class="ha-modal ha-unclaim-modal">
-        <div class="ha-modal-header">
-          <span>Unclaim Payment</span>
-          <button type="button" class="ha-modal-close" @click="unclaimPayment = null">×</button>
-        </div>
-        <div class="ha-modal-body">
-          <p>Would you like to unclaim this payment?</p>
-          <div v-if="unclaimPayment" class="ha-unclaim-payment-info">
-            <strong>{{ unclaimPayment.amount }}</strong> • {{ unclaimPayment.payment_date }} • {{ unclaimPayment.payee_name || 'Assigned' }}
-          </div>
-        </div>
-        <div class="ha-modal-footer">
-          <button type="button" class="ha-btn ha-btn-gray" @click="unclaimPayment = null">No</button>
-          <button type="button" class="ha-btn ha-btn-primary" :disabled="unclaimLoading" @click="confirmUnclaim">
-            {{ unclaimLoading ? 'Unclaiming...' : 'Yes, Unclaim' }}
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Petition Payment Modal -->
-    <div v-if="petitionPayment" class="ha-modal-overlay ha-unclaim-overlay" @click.self="petitionPayment = null">
-      <div class="ha-modal ha-unclaim-modal">
-        <div class="ha-modal-header">
-          <span>Claim This Payment?</span>
-          <button type="button" class="ha-modal-close" @click="petitionPayment = null">×</button>
-        </div>
-        <div class="ha-modal-body">
-          <p v-if="petitionPayment">
-            This payment is assigned to {{ petitionPayment.payee_name || 'someone else' }}. Did you make this payment?
-          </p>
-          <div v-if="petitionPayment" class="ha-unclaim-payment-info">
-            <strong>{{ petitionPayment.amount }}</strong> • {{ petitionPayment.payment_date }}
-          </div>
-        </div>
-        <div class="ha-modal-footer">
-          <button type="button" class="ha-btn ha-btn-gray" @click="petitionPayment = null">Cancel</button>
-          <button type="button" class="ha-btn ha-btn-primary" :disabled="petitionLoading" @click="confirmPetition">
-            {{ petitionLoading ? 'Submitting...' : 'Yes, I Made This Payment' }}
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Link HA user to payee (ledger payment actions) -->
+    <!-- Payment action sheet (Claim / Unclaim / Petition) -->
     <div
-      v-if="linkPayeeHintPayment"
+      v-if="paymentSheetPayment"
       class="ha-modal-overlay ha-unclaim-overlay"
-      @click.self="linkPayeeHintPayment = null"
+      @click.self="closePaymentSheet"
     >
-      <div class="ha-modal ha-unclaim-modal">
-        <div class="ha-modal-header">
-          <span>Payment actions</span>
-          <button type="button" class="ha-modal-close" @click="linkPayeeHintPayment = null">×</button>
+      <div class="ha-modal ha-payment-sheet" role="dialog" aria-labelledby="payment-sheet-title">
+        <div class="ha-modal-header ha-payment-sheet-header">
+          <span id="payment-sheet-title">{{ paymentSheetHeaderTitle }}</span>
+          <button type="button" class="ha-modal-close ha-payment-sheet-close" aria-label="Close" @click="closePaymentSheet">×</button>
         </div>
-        <div class="ha-modal-body">
-          <p>
-            To <strong>unclaim</strong> or <strong>petition</strong> a payment from the ledger, your Home Assistant user must be linked to a payee.
-          </p>
-          <p class="ha-modal-desc">
-            Open <strong>Settings → Payees</strong>, edit your payee, and set <strong>Home Assistant user</strong> to match the account you use in the sidebar panel.
-          </p>
-        </div>
-        <div class="ha-modal-footer">
-          <button type="button" class="ha-btn ha-btn-gray" @click="linkPayeeHintPayment = null">Close</button>
-          <button type="button" class="ha-btn ha-btn-primary" @click="openSettingsForPayeeLink">Open Settings</button>
+        <div class="ha-modal-body ha-payment-sheet-body">
+          <div v-if="paymentSheetPayment" class="ha-sheet-summary">
+            <strong>{{ paymentSheetPayment.amount }}</strong>
+            <span class="ha-sheet-meta">· {{ paymentSheetPayment.payment_date }}</span>
+            <div class="ha-sheet-assignee">
+              {{
+                paymentSheetPayment.payee_user_id && paymentSheetPayment.payee_name
+                  ? `Assigned: ${paymentSheetPayment.payee_name}`
+                  : 'Unassigned'
+              }}
+            </div>
+          </div>
+          <p v-if="paymentSheetInlineError" class="ha-sheet-inline-error" role="alert">{{ paymentSheetInlineError }}</p>
+
+          <template v-if="paymentSheetPhase === 'menu'">
+            <div class="ha-sheet-actions">
+              <button
+                v-if="sheetShowClaim"
+                type="button"
+                class="ha-btn ha-sheet-action ha-btn-primary"
+                :disabled="claimLoading"
+                @click="onSheetClaim"
+              >
+                {{ claimLoading ? 'Claiming…' : 'Claim' }}
+              </button>
+              <button
+                v-if="sheetShowUnclaim"
+                type="button"
+                class="ha-btn ha-sheet-action ha-btn-outline"
+                @click="paymentSheetPhase = 'confirm_unclaim'"
+              >
+                Unclaim
+              </button>
+              <button
+                v-if="sheetShowPetition"
+                type="button"
+                class="ha-btn ha-sheet-action ha-btn-outline"
+                @click="paymentSheetPhase = 'confirm_petition'"
+              >
+                Petition
+              </button>
+            </div>
+            <p
+              v-if="sheetShowClaim && currentViewerPayeeId === null && paymentSheetPhase === 'menu'"
+              class="ha-sheet-hint"
+            >
+              An administrator must link this Home Assistant user to your payee record before you can claim.
+            </p>
+            <p
+              v-if="!sheetShowClaim && !sheetShowUnclaim && !sheetShowPetition"
+              class="ha-sheet-no-actions"
+            >
+              {{ sheetNoActionsMessage }}
+            </p>
+          </template>
+
+          <template v-else-if="paymentSheetPhase === 'confirm_unclaim' && paymentSheetPayment">
+            <p class="ha-sheet-confirm-text">Unclaim this payment? Others can claim it again from notifications.</p>
+            <div class="ha-sheet-footer-row ha-sheet-confirm-actions">
+              <button type="button" class="ha-btn ha-btn-outline ha-sheet-action" @click="paymentSheetPhase = 'menu'">Back</button>
+              <button
+                type="button"
+                class="ha-btn ha-btn-primary ha-sheet-action"
+                :disabled="unclaimLoading"
+                @click="executeSheetUnclaim"
+              >
+                {{ unclaimLoading ? 'Unclaiming…' : 'Unclaim' }}
+              </button>
+            </div>
+          </template>
+
+          <template v-else-if="paymentSheetPhase === 'confirm_petition' && paymentSheetPayment">
+            <p class="ha-sheet-confirm-text">
+              Request a petition? The assigned payee ({{ paymentSheetPayment.payee_name || 'payee' }}) will be asked to
+              confirm they made this payment.
+            </p>
+            <div class="ha-sheet-footer-row ha-sheet-confirm-actions">
+              <button type="button" class="ha-btn ha-btn-outline ha-sheet-action" @click="paymentSheetPhase = 'menu'">Back</button>
+              <button
+                type="button"
+                class="ha-btn ha-btn-primary ha-sheet-action"
+                :disabled="petitionLoading"
+                @click="executeSheetPetition"
+              >
+                {{ petitionLoading ? 'Sending…' : 'Submit petition' }}
+              </button>
+            </div>
+          </template>
         </div>
       </div>
     </div>
@@ -297,9 +328,13 @@
                     <div
                       v-for="payment in bill.payments"
                       :key="payment.id"
-                      :class="['ha-payment-entry', { 'ha-payment-clickable': isPaymentRowInteractive(payment) }]"
+                      class="ha-payment-entry ha-payment-clickable"
+                      role="button"
+                      tabindex="0"
                       :title="getPaymentRowTitle(payment)"
                       @click="handlePaymentClick(payment)"
+                      @keydown.enter.prevent="handlePaymentClick(payment)"
+                      @keydown.space.prevent="handlePaymentClick(payment)"
                     >
                       <div class="ha-payment-row">
                         <div class="ha-payment-meta">
@@ -341,7 +376,7 @@
                         </div>
                         <div class="ha-payment-amount-wrap">
                           <span class="ha-payment-amount">{{ payment.amount || '-' }}</span>
-                          <span v-if="isPaymentRowInteractive(payment)" class="ha-payment-chevron" aria-hidden="true">›</span>
+                          <span class="ha-payment-chevron" aria-hidden="true">›</span>
                         </div>
                       </div>
                     </div>
@@ -364,9 +399,13 @@
               <div
                 v-for="payment in ledgerData.orphan_payments"
                 :key="payment.id"
-                :class="['ha-payment-entry', { 'ha-payment-clickable': isPaymentRowInteractive(payment) }]"
+                class="ha-payment-entry ha-payment-clickable"
+                role="button"
+                tabindex="0"
                 :title="getPaymentRowTitle(payment)"
                 @click="handlePaymentClick(payment)"
+                @keydown.enter.prevent="handlePaymentClick(payment)"
+                @keydown.space.prevent="handlePaymentClick(payment)"
               >
                 <div class="ha-payment-row">
                   <div class="ha-payment-meta">
@@ -396,7 +435,7 @@
                   </div>
                   <div class="ha-payment-amount-wrap">
                     <span class="ha-payment-amount">{{ payment.amount || '-' }}</span>
-                    <span v-if="isPaymentRowInteractive(payment)" class="ha-payment-chevron" aria-hidden="true">›</span>
+                    <span class="ha-payment-chevron" aria-hidden="true">›</span>
                   </div>
                 </div>
               </div>
@@ -435,7 +474,13 @@ interface Payment {
   last_scraped_at: string
   scrape_count: number
   scrape_order: number | null
-  payee_status: 'confirmed' | 'pending' | 'unverified' | 'auto_timeout'
+  payee_status:
+    | 'confirmed'
+    | 'pending'
+    | 'unverified'
+    | 'verified'
+    | 'needs_admin_verification'
+    | 'auto_timeout'
   payee_user_id: number | null
   payee_name: string | null
   card_last_four: string | null
@@ -499,12 +544,15 @@ const billSummaries = computed<Record<number, any>>(() => {
 const expandedBills = ref<Set<number>>(new Set())
 const expandedPayments = ref<Set<number>>(new Set())
 const breakdownShowRollover = ref(false)
-const unclaimPayment = ref<Payment | null>(null)
 const unclaimLoading = ref(false)
-const petitionPayment = ref<Payment | null>(null)
 const petitionLoading = ref(false)
+const claimLoading = ref(false)
 const petitionsEnabled = ref(true)
-const linkPayeeHintPayment = ref<Payment | null>(null)
+
+/** Single sheet: Claim / Unclaim / Petition */
+const paymentSheetPayment = ref<Payment | null>(null)
+const paymentSheetPhase = ref<'menu' | 'confirm_unclaim' | 'confirm_petition'>('menu')
+const paymentSheetInlineError = ref<string | null>(null)
 
 /** Set when panel iframe exposes hass.user.id (polled briefly after mount). */
 const viewerHaUserId = ref<string | null>(null)
@@ -541,32 +589,66 @@ function canPetitionPayment(payment: Payment): boolean {
   return petitionsEnabled.value
 }
 
-/** Assigned payments: show actions (unclaim, petition, or link-payee help). */
-function isPaymentRowInteractive(payment: Payment): boolean {
-  return !!payment.payee_user_id
+const sheetShowClaim = computed(() => {
+  const p = paymentSheetPayment.value
+  return !!p && p.payee_status === 'unverified'
+})
+
+const sheetShowUnclaim = computed(() => {
+  const p = paymentSheetPayment.value
+  return !!p && canUnclaimPayment(p)
+})
+
+const sheetShowPetition = computed(() => {
+  const p = paymentSheetPayment.value
+  return !!p && canPetitionPayment(p)
+})
+
+const paymentSheetHeaderTitle = computed(() => {
+  if (paymentSheetPhase.value === 'confirm_unclaim') return 'Unclaim payment?'
+  if (paymentSheetPhase.value === 'confirm_petition') return 'Request petition?'
+  return 'Payment actions'
+})
+
+const sheetNoActionsMessage = computed(() => {
+  const p = paymentSheetPayment.value
+  if (!p) return 'No actions are available for this payment.'
+  if (p.payee_status === 'needs_admin_verification') {
+    return 'More than one payee claimed this payment. An administrator must choose the correct assignee before ledger actions are available.'
+  }
+  if (p.payee_status === 'pending') {
+    return 'Payee information is still loading. Try opening this again in a moment.'
+  }
+  if (!p.payee_user_id) {
+    return 'This payment has no assignee yet. There are no ledger actions available for now.'
+  }
+  if (!petitionsEnabled.value && currentViewerPayeeId.value !== p.payee_user_id) {
+    return 'This payment is assigned to another payee. Reassignment requests are turned off, so you cannot petition from here.'
+  }
+  if (petitionsEnabled.value && currentViewerPayeeId.value === null && isInHaPanel()) {
+    return 'To petition, your Home Assistant user must be linked to a payee record. Ask an administrator to complete that link.'
+  }
+  if (!isInHaPanel()) {
+    return 'Open the Account Ledger in the Home Assistant sidebar to claim, unclaim, or petition as a linked payee.'
+  }
+  return 'No actions are available for this payment in your current context.'
+})
+
+function getPaymentRowTitle(_payment: Payment): string {
+  return 'Payment actions'
 }
 
-function getPaymentRowTitle(payment: Payment): string {
-  if (canUnclaimPayment(payment)) return 'Click to unclaim'
-  if (canPetitionPayment(payment)) return 'Click to petition'
-  if (payment.payee_user_id)
-    return 'Click for payment actions — link your HA user in Settings → Payees if needed'
-  return ''
+function closePaymentSheet() {
+  paymentSheetPayment.value = null
+  paymentSheetPhase.value = 'menu'
+  paymentSheetInlineError.value = null
 }
 
 function handlePaymentClick(payment: Payment) {
-  if (canUnclaimPayment(payment)) {
-    openUnclaimModal(payment)
-  } else if (canPetitionPayment(payment)) {
-    petitionPayment.value = payment
-  } else if (payment.payee_user_id) {
-    linkPayeeHintPayment.value = payment
-  }
-}
-
-function openSettingsForPayeeLink() {
-  linkPayeeHintPayment.value = null
-  emit('navigate', 'settings')
+  viewerHaUserId.value = getHaUserId()
+  paymentSheetInlineError.value = null
+  paymentSheetPhase.value = 'menu'
+  paymentSheetPayment.value = payment
 }
 
 async function loadPayees() {
@@ -581,44 +663,78 @@ async function loadPayees() {
   }
 }
 
-function openUnclaimModal(payment: Payment) {
-  unclaimPayment.value = payment
-}
-async function confirmUnclaim() {
-  if (!unclaimPayment.value) return
-  unclaimLoading.value = true
+async function onSheetClaim() {
+  paymentSheetInlineError.value = null
+  viewerHaUserId.value = getHaUserId()
+  if (currentViewerPayeeId.value === null) {
+    paymentSheetInlineError.value = 'This account is not a listed payee.'
+    return
+  }
+  const p = paymentSheetPayment.value
+  if (!p) return
+  claimLoading.value = true
   try {
-    const res = await fetch(`${getApiBase()}/payments/${unclaimPayment.value.id}/unclaim`, { method: 'POST' })
+    const res = await fetch(`${getApiBase()}/payments/${p.id}/payee-claim`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ payee_id: currentViewerPayeeId.value, claimed: true }),
+    })
     if (res.ok) {
-      unclaimPayment.value = null
+      closePaymentSheet()
       await loadLedgerData()
     } else {
-      apiError.value = (await res.json().catch(() => ({}))).detail || 'Failed to unclaim'
+      paymentSheetInlineError.value =
+        (await res.json().catch(() => ({}))).detail || 'Claim failed'
     }
-  } catch (e) {
-    apiError.value = 'Failed to connect'
+  } catch {
+    paymentSheetInlineError.value = 'Failed to connect'
+  } finally {
+    claimLoading.value = false
+  }
+}
+
+async function executeSheetUnclaim() {
+  const p = paymentSheetPayment.value
+  if (!p) return
+  unclaimLoading.value = true
+  try {
+    const res = await fetch(`${getApiBase()}/payments/${p.id}/unclaim`, { method: 'POST' })
+    if (res.ok) {
+      closePaymentSheet()
+      await loadLedgerData()
+    } else {
+      paymentSheetInlineError.value = (await res.json().catch(() => ({}))).detail || 'Failed to unclaim'
+      paymentSheetPhase.value = 'menu'
+    }
+  } catch {
+    paymentSheetInlineError.value = 'Failed to connect'
+    paymentSheetPhase.value = 'menu'
   } finally {
     unclaimLoading.value = false
   }
 }
 
-async function confirmPetition() {
-  if (!petitionPayment.value || currentViewerPayeeId.value === null) return
+async function executeSheetPetition() {
+  const p = paymentSheetPayment.value
+  if (!p || currentViewerPayeeId.value === null) return
   petitionLoading.value = true
   try {
-    const res = await fetch(`${getApiBase()}/payments/${petitionPayment.value.id}/petition`, {
+    const res = await fetch(`${getApiBase()}/payments/${p.id}/petition`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ payee_id: currentViewerPayeeId.value }),
     })
     if (res.ok) {
-      petitionPayment.value = null
+      closePaymentSheet()
       await loadLedgerData()
     } else {
-      apiError.value = (await res.json().catch(() => ({}))).detail || 'Failed to submit petition'
+      paymentSheetInlineError.value =
+        (await res.json().catch(() => ({}))).detail || 'Failed to submit petition'
+      paymentSheetPhase.value = 'menu'
     }
-  } catch (e) {
-    apiError.value = 'Failed to connect'
+  } catch {
+    paymentSheetInlineError.value = 'Failed to connect'
+    paymentSheetPhase.value = 'menu'
   } finally {
     petitionLoading.value = false
   }
@@ -1027,6 +1143,112 @@ onUnmounted(() => {
   color: #1976d2;
   line-height: 1;
   opacity: 0.85;
+}
+
+.ha-payment-sheet {
+  max-width: 22rem;
+  width: calc(100% - 2rem);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+}
+.ha-payment-sheet .ha-payment-sheet-header {
+  background: #1976d2;
+  color: #fff;
+  border-bottom: none;
+  padding: 0.875rem 1rem;
+  font-weight: 600;
+  font-size: 1rem;
+}
+.ha-payment-sheet .ha-payment-sheet-header .ha-payment-sheet-close {
+  color: rgba(255, 255, 255, 0.92);
+  line-height: 1;
+}
+.ha-payment-sheet .ha-payment-sheet-header .ha-payment-sheet-close:hover {
+  color: #fff;
+  opacity: 1;
+}
+.ha-payment-sheet-body {
+  padding-top: 0.75rem;
+  background: #fff;
+}
+.ha-sheet-summary {
+  margin-bottom: 1rem;
+  font-size: 0.95rem;
+  line-height: 1.4;
+}
+.ha-sheet-meta {
+  color: #666;
+  font-weight: 400;
+}
+.ha-sheet-assignee {
+  margin-top: 0.35rem;
+  font-size: 0.8rem;
+  color: #555;
+}
+.ha-sheet-inline-error {
+  color: #c62828;
+  font-size: 0.85rem;
+  margin: 0 0 0.75rem 0;
+}
+.ha-sheet-no-actions {
+  font-size: 0.85rem;
+  color: #555;
+  margin: 0;
+  line-height: 1.45;
+}
+.ha-sheet-hint {
+  font-size: 0.8rem;
+  color: #666;
+  margin: 0.65rem 0 0 0;
+  line-height: 1.4;
+}
+.ha-sheet-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.ha-sheet-action {
+  width: 100%;
+  justify-content: center;
+  padding: 0.6rem 1rem;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+.ha-payment-sheet .ha-btn-primary {
+  background: #1976d2;
+  color: #fff;
+}
+.ha-payment-sheet .ha-btn-primary:hover:not(:disabled) {
+  background: #1565c0;
+}
+.ha-btn-outline {
+  background: #fff;
+  color: #1976d2;
+  border: 1px solid #1976d2;
+}
+.ha-btn-outline:hover:not(:disabled) {
+  background: #e3f2fd;
+}
+.ha-sheet-confirm-text {
+  font-size: 0.88rem;
+  color: #444;
+  margin: 0 0 1rem 0;
+  line-height: 1.45;
+}
+.ha-sheet-footer-row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.ha-sheet-confirm-actions {
+  flex-direction: column;
+  align-items: stretch;
+}
+.ha-sheet-confirm-actions .ha-sheet-action {
+  min-height: 44px;
 }
 
 /* Unclaim modal: small box, readable light theme */
