@@ -1,4 +1,6 @@
-type HassElement = Element & { hass?: { user?: { id?: string; is_admin?: boolean } } }
+type HassElement = Element & {
+  hass?: { user?: { id?: string; name?: string; is_admin?: boolean } }
+}
 
 function findHomeAssistant(root: Document | ShadowRoot): HassElement | null {
   const el = root.querySelector?.('home-assistant') as HassElement | null
@@ -68,11 +70,27 @@ export function getHaUserId(): string | null {
 }
 
 /**
- * True when `<home-assistant>` has a usable `hass.user.id`.
+ * Current HA user's display name (`hass.user.name`), when available.
+ */
+export function getHaUserName(): string | null {
+  try {
+    if (typeof window === 'undefined') return null
+    const el = findFirstHomeAssistant()
+    const n = el?.hass?.user?.name
+    if (n == null) return null
+    const t = String(n).trim()
+    return t || null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * True when `hass.user.id` or `hass.user.name` is available.
  * `isInHaPanel()` can be true earlier (shell present) while this is still false.
  */
 export function isHaUserIdentityReady(): boolean {
-  return getHaUserId() != null
+  return getHaUserId() != null || getHaUserName() != null
 }
 
 /**

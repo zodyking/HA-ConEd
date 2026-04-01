@@ -456,12 +456,16 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { formatDate } from '../lib/timezone'
 import { getApiBase } from '../lib/api-base'
 import { ajaxLoader } from '../lib/assets'
-import { isInHaPanel, getHaUserId } from '../lib/ha-user-admin'
+import { isInHaPanel, getHaUserId, getHaUserName } from '../lib/ha-user-admin'
 import PdfViewer from './PdfViewer.vue'
 import BillPayeeSummary from './BillPayeeSummary.vue'
 
 function normalizeHaUserId(id: string | null | undefined): string {
   return String(id ?? '').trim()
+}
+
+function normalizePayeeNameKey(name: string | null | undefined): string {
+  return String(name ?? '').trim().toLowerCase()
 }
 
 const emit = defineEmits<{ (e: 'navigate', tab: 'console' | 'settings'): void }>()
@@ -557,8 +561,9 @@ const paymentSheetPayment = ref<Payment | null>(null)
 const paymentSheetPhase = ref<'menu' | 'confirm_unclaim' | 'confirm_petition'>('menu')
 const paymentSheetInlineError = ref<string | null>(null)
 
-/** Set when panel iframe exposes hass.user.id (polled briefly after mount). */
+/** Set when panel iframe exposes hass.user.id / name (polled briefly after mount). */
 const viewerHaUserId = ref<string | null>(null)
+const viewerHaUserName = ref<string | null>(null)
 let haUserPollTimer: ReturnType<typeof setInterval> | null = null
 let paymentSheetIdentityPollTimer: ReturnType<typeof setInterval> | null = null
 
@@ -567,6 +572,17 @@ function clearPaymentSheetIdentityPoll() {
     clearInterval(paymentSheetIdentityPollTimer)
     paymentSheetIdentityPollTimer = null
   }
+}
+
+function syncViewerHaIdentity() {
+  viewerHaUserId.value = getHaUserId()
+  viewerHaUserName.value = getHaUserName()
+}
+
+function effectiveHaUserName(): string | null {
+  const n = viewerHaUserName.value || getHaUserName()
+  const t = String(n ?? '').trim()
+  return t || null
 }
 
 interface PayeeUser {
@@ -583,9 +599,16 @@ function effectiveHaUserId(): string | null {
 const currentViewerPayeeId = computed<number | null>(() => {
   if (!isInHaPanel()) return null
   const haNorm = normalizeHaUserId(effectiveHaUserId())
-  if (!haNorm) return null
-  const payee = payees.value.find((p) => normalizeHaUserId(p.ha_user_id) === haNorm)
-  return payee?.id ?? null
+  if (haNorm) {
+    const byId = payees.value.find((p) => normalizeHaUserId(p.ha_user_id) === haNorm)
+    if (byId) return byId.id
+  }
+  const nameKey = normalizePayeeNameKey(effectiveHaUserName())
+  if (nameKey) {
+    const byName = payees.value.find((p) => normalizePayeeNameKey(p.name) === nameKey)
+    if (byName) return byName.id
+  }
+  return null
 })
 
 function canUnclaimPayment(payment: Payment): boolean {
@@ -621,7 +644,10 @@ const sheetClaimUnlinkedHint = computed(() => {
   const p = paymentSheetPayment.value
   if (!p || p.payee_status !== 'unverified') return false
   if (currentViewerPayeeId.value !== null) return false
-  return normalizeHaUserId(effectiveHaUserId()) !== ''
+  return (
+    normalizeHaUserId(effectiveHaUserId()) !== '' ||
+    normalizePayeeNameKey(effectiveHaUserName()) !== ''
+  )
 })
 
 const paymentSheetHeaderTitle = computed(() => {
@@ -646,7 +672,10 @@ const sheetNoActionsMessage = computed(() => {
     return 'Open the Account Ledger in the Home Assistant sidebar to claim, unclaim, or petition as a linked payee.'
   }
   const haId = effectiveHaUserId()
-  if (!normalizeHaUserId(haId)) {
+  if (
+    !normalizeHaUserId(haId) &&
+    normalizePayeeNameKey(effectiveHaUserName()) === ''
+  ) {
     return 'Could not read your Home Assistant user yet. Close and reopen this sheet, or refresh the panel.'
   }
   if (!petitionsEnabled.value && currentViewerPayeeId.value !== p.payee_user_id) {
@@ -671,18 +700,24 @@ function closePaymentSheet() {
 
 function handlePaymentClick(payment: Payment) {
   clearPaymentSheetIdentityPoll()
-  viewerHaUserId.value = getHaUserId()
+  syncViewerHaIdentity()
   paymentSheetInlineError.value = null
   paymentSheetPhase.value = 'menu'
   paymentSheetPayment.value = payment
   void loadPayees()
-  if (isInHaPanel() && !normalizeHaUserId(viewerHaUserId.value)) {
+  if (
+    isInHaPanel() &&
+    !normalizeHaUserId(viewerHaUserId.value) &&
+    normalizePayeeNameKey(viewerHaUserName.value) === ''
+  ) {
     let attempts = 0
     paymentSheetIdentityPollTimer = setInterval(() => {
       attempts++
-      const id = getHaUserId()
-      if (id) {
-        viewerHaUserId.value = id
+      syncViewerHaIdentity()
+      if (
+        normalizeHaUserId(viewerHaUserId.value) ||
+        normalizePayeeNameKey(viewerHaUserName.value) !== ''
+      ) {
         clearPaymentSheetIdentityPoll()
       } else if (attempts >= 20) {
         clearPaymentSheetIdentityPoll()
@@ -705,8 +740,11 @@ async function loadPayees() {
 
 async function onSheetClaim() {
   paymentSheetInlineError.value = null
-  viewerHaUserId.value = getHaUserId()
-  if (!normalizeHaUserId(effectiveHaUserId())) {
+  syncViewerHaIdentity()
+  if (
+    !normalizeHaUserId(effectiveHaUserId()) &&
+    normalizePayeeNameKey(effectiveHaUserName()) === ''
+  ) {
     paymentSheetInlineError.value =
       'Could not read your Home Assistant user yet. Try again in a moment.'
     return
@@ -1126,15 +1164,19 @@ onMounted(() => {
     loadLedgerData()
   }, 30000)
 
-  const idNow = getHaUserId()
-  if (idNow) viewerHaUserId.value = idNow
-  else {
+  syncViewerHaIdentity()
+  if (
+    !normalizeHaUserId(viewerHaUserId.value) &&
+    normalizePayeeNameKey(viewerHaUserName.value) === ''
+  ) {
     let attempts = 0
     haUserPollTimer = setInterval(() => {
       attempts++
-      const id = getHaUserId()
-      if (id) {
-        viewerHaUserId.value = id
+      syncViewerHaIdentity()
+      if (
+        normalizeHaUserId(viewerHaUserId.value) ||
+        normalizePayeeNameKey(viewerHaUserName.value) !== ''
+      ) {
         if (haUserPollTimer) clearInterval(haUserPollTimer)
         haUserPollTimer = null
       } else if (attempts >= 50) {
