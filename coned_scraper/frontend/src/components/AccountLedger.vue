@@ -24,7 +24,9 @@
       <div class="ha-modal ha-payment-sheet" role="dialog" aria-labelledby="payment-sheet-title">
         <div class="ha-modal-header ha-payment-sheet-header">
           <span id="payment-sheet-title">{{ paymentSheetHeaderTitle }}</span>
-          <button type="button" class="ha-modal-close ha-payment-sheet-close" aria-label="Close" @click="closePaymentSheet">×</button>
+          <button type="button" class="ha-payment-sheet-dismiss" aria-label="Close" @click="closePaymentSheet">
+            <span class="ha-payment-sheet-dismiss-icon" aria-hidden="true">×</span>
+          </button>
         </div>
         <div class="ha-modal-body ha-payment-sheet-body">
           <div v-if="paymentSheetPayment" class="ha-sheet-summary">
@@ -68,10 +70,7 @@
                 Petition
               </button>
             </div>
-            <p
-              v-if="sheetShowClaim && currentViewerPayeeId === null && paymentSheetPhase === 'menu'"
-              class="ha-sheet-hint"
-            >
+            <p v-if="sheetClaimUnlinkedHint" class="ha-sheet-hint">
               An administrator must link this Home Assistant user to your payee record before you can claim.
             </p>
             <p
@@ -461,6 +460,10 @@ import { isInHaPanel, getHaUserId } from '../lib/ha-user-admin'
 import PdfViewer from './PdfViewer.vue'
 import BillPayeeSummary from './BillPayeeSummary.vue'
 
+function normalizeHaUserId(id: string | null | undefined): string {
+  return String(id ?? '').trim()
+}
+
 const emit = defineEmits<{ (e: 'navigate', tab: 'console' | 'settings'): void }>()
 
 interface Payment {
@@ -557,6 +560,14 @@ const paymentSheetInlineError = ref<string | null>(null)
 /** Set when panel iframe exposes hass.user.id (polled briefly after mount). */
 const viewerHaUserId = ref<string | null>(null)
 let haUserPollTimer: ReturnType<typeof setInterval> | null = null
+let paymentSheetIdentityPollTimer: ReturnType<typeof setInterval> | null = null
+
+function clearPaymentSheetIdentityPoll() {
+  if (paymentSheetIdentityPollTimer) {
+    clearInterval(paymentSheetIdentityPollTimer)
+    paymentSheetIdentityPollTimer = null
+  }
+}
 
 interface PayeeUser {
   id: number
@@ -571,9 +582,9 @@ function effectiveHaUserId(): string | null {
 
 const currentViewerPayeeId = computed<number | null>(() => {
   if (!isInHaPanel()) return null
-  const haUserId = effectiveHaUserId()
-  if (!haUserId) return null
-  const payee = payees.value.find((p) => (p.ha_user_id ?? null) === haUserId)
+  const haNorm = normalizeHaUserId(effectiveHaUserId())
+  if (!haNorm) return null
+  const payee = payees.value.find((p) => normalizeHaUserId(p.ha_user_id) === haNorm)
   return payee?.id ?? null
 })
 
@@ -604,6 +615,15 @@ const sheetShowPetition = computed(() => {
   return !!p && canPetitionPayment(p)
 })
 
+/** Claim visible, HA user known, but no payee row matches (not "hass still loading"). */
+const sheetClaimUnlinkedHint = computed(() => {
+  if (paymentSheetPhase.value !== 'menu') return false
+  const p = paymentSheetPayment.value
+  if (!p || p.payee_status !== 'unverified') return false
+  if (currentViewerPayeeId.value !== null) return false
+  return normalizeHaUserId(effectiveHaUserId()) !== ''
+})
+
 const paymentSheetHeaderTitle = computed(() => {
   if (paymentSheetPhase.value === 'confirm_unclaim') return 'Unclaim payment?'
   if (paymentSheetPhase.value === 'confirm_petition') return 'Request petition?'
@@ -622,14 +642,18 @@ const sheetNoActionsMessage = computed(() => {
   if (!p.payee_user_id) {
     return 'This payment has no assignee yet. There are no ledger actions available for now.'
   }
+  if (!isInHaPanel()) {
+    return 'Open the Account Ledger in the Home Assistant sidebar to claim, unclaim, or petition as a linked payee.'
+  }
+  const haId = effectiveHaUserId()
+  if (!normalizeHaUserId(haId)) {
+    return 'Could not read your Home Assistant user yet. Close and reopen this sheet, or refresh the panel.'
+  }
   if (!petitionsEnabled.value && currentViewerPayeeId.value !== p.payee_user_id) {
     return 'This payment is assigned to another payee. Reassignment requests are turned off, so you cannot petition from here.'
   }
-  if (petitionsEnabled.value && currentViewerPayeeId.value === null && isInHaPanel()) {
+  if (petitionsEnabled.value && currentViewerPayeeId.value === null) {
     return 'To petition, your Home Assistant user must be linked to a payee record. Ask an administrator to complete that link.'
-  }
-  if (!isInHaPanel()) {
-    return 'Open the Account Ledger in the Home Assistant sidebar to claim, unclaim, or petition as a linked payee.'
   }
   return 'No actions are available for this payment in your current context.'
 })
@@ -639,16 +663,32 @@ function getPaymentRowTitle(_payment: Payment): string {
 }
 
 function closePaymentSheet() {
+  clearPaymentSheetIdentityPoll()
   paymentSheetPayment.value = null
   paymentSheetPhase.value = 'menu'
   paymentSheetInlineError.value = null
 }
 
 function handlePaymentClick(payment: Payment) {
+  clearPaymentSheetIdentityPoll()
   viewerHaUserId.value = getHaUserId()
   paymentSheetInlineError.value = null
   paymentSheetPhase.value = 'menu'
   paymentSheetPayment.value = payment
+  void loadPayees()
+  if (isInHaPanel() && !normalizeHaUserId(viewerHaUserId.value)) {
+    let attempts = 0
+    paymentSheetIdentityPollTimer = setInterval(() => {
+      attempts++
+      const id = getHaUserId()
+      if (id) {
+        viewerHaUserId.value = id
+        clearPaymentSheetIdentityPoll()
+      } else if (attempts >= 20) {
+        clearPaymentSheetIdentityPoll()
+      }
+    }, 150)
+  }
 }
 
 async function loadPayees() {
@@ -666,6 +706,11 @@ async function loadPayees() {
 async function onSheetClaim() {
   paymentSheetInlineError.value = null
   viewerHaUserId.value = getHaUserId()
+  if (!normalizeHaUserId(effectiveHaUserId())) {
+    paymentSheetInlineError.value =
+      'Could not read your Home Assistant user yet. Try again in a moment.'
+    return
+  }
   if (currentViewerPayeeId.value === null) {
     paymentSheetInlineError.value = 'This account is not a listed payee.'
     return
@@ -1102,6 +1147,7 @@ onMounted(() => {
 onUnmounted(() => {
   clearInterval(interval)
   if (haUserPollTimer) clearInterval(haUserPollTimer)
+  clearPaymentSheetIdentityPoll()
 })
 </script>
 
@@ -1162,7 +1208,7 @@ onUnmounted(() => {
   font-weight: 600;
   font-size: 1rem;
 }
-.ha-payment-sheet .ha-payment-sheet-header .ha-payment-sheet-close {
+.ha-payment-sheet .ha-payment-sheet-header .ha-payment-sheet-dismiss {
   flex-shrink: 0;
   width: 2.25rem;
   height: 2.25rem;
@@ -1171,19 +1217,26 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: transparent;
-  border: none;
+  background: transparent !important;
+  border: none !important;
   border-radius: 8px;
-  box-shadow: none;
-  color: #fff;
-  font-size: 1.35rem;
+  box-shadow: none !important;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.ha-payment-sheet .ha-payment-sheet-header .ha-payment-sheet-dismiss-icon {
+  color: #fff !important;
+  font-size: 1.5rem;
   font-weight: 300;
   line-height: 1;
+  display: block;
 }
-.ha-payment-sheet .ha-payment-sheet-header .ha-payment-sheet-close:hover {
-  background: rgba(255, 255, 255, 0.15);
-  color: #fff;
-  opacity: 1;
+.ha-payment-sheet .ha-payment-sheet-header .ha-payment-sheet-dismiss:hover {
+  background: rgba(255, 255, 255, 0.15) !important;
+}
+.ha-payment-sheet .ha-payment-sheet-header .ha-payment-sheet-dismiss:hover .ha-payment-sheet-dismiss-icon {
+  color: #fff !important;
 }
 .ha-payment-sheet-body {
   padding-top: 0.75rem;

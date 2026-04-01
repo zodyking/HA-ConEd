@@ -13,16 +13,54 @@ function findHomeAssistant(root: Document | ShadowRoot): HassElement | null {
   return null
 }
 
+/** Documents to search: own, parent (panel iframe), top (nested iframe layouts). */
+function getCandidateDocuments(): Document[] {
+  const out: Document[] = []
+  const seen = new Set<Document>()
+  const add = (doc: Document | null | undefined) => {
+    if (doc && !seen.has(doc)) {
+      seen.add(doc)
+      out.push(doc)
+    }
+  }
+  try {
+    add(typeof document !== 'undefined' ? document : undefined)
+    if (typeof window !== 'undefined') {
+      try {
+        add(window.parent?.document)
+      } catch {
+        /* cross-origin */
+      }
+      try {
+        if (window.top && window.top !== window)
+          add(window.top.document)
+      } catch {
+        /* cross-origin */
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return out
+}
+
+function findFirstHomeAssistant(): HassElement | null {
+  for (const doc of getCandidateDocuments()) {
+    const el = findHomeAssistant(doc)
+    if (el) return el
+  }
+  return null
+}
+
 /**
  * Gets the current HA user's ID when running inside a Home Assistant panel iframe.
  * Returns null when not in HA or when hass.user.id is unavailable.
- * Traverses shadow DOM for modern HA frontend.
+ * Traverses shadow DOM; checks document, parent, and top windows for nested iframes.
  */
 export function getHaUserId(): string | null {
   try {
     if (typeof window === 'undefined') return null
-    const doc = window.parent?.document ?? document
-    const el = findHomeAssistant(doc)
+    const el = findFirstHomeAssistant()
     return el?.hass?.user?.id ?? null
   } catch {
     return null
@@ -30,30 +68,32 @@ export function getHaUserId(): string | null {
 }
 
 /**
- * Whether we're running inside a Home Assistant panel iframe (parent has home-assistant).
- * Traverses shadow DOM for modern HA frontend.
+ * True when `<home-assistant>` has a usable `hass.user.id`.
+ * `isInHaPanel()` can be true earlier (shell present) while this is still false.
+ */
+export function isHaUserIdentityReady(): boolean {
+  return getHaUserId() != null
+}
+
+/**
+ * Whether we're running inside Home Assistant (panel iframe or nested layout).
  */
 export function isInHaPanel(): boolean {
   try {
     if (typeof window === 'undefined') return false
-    const doc = window.parent?.document ?? document
-    return !!findHomeAssistant(doc)
+    return !!findFirstHomeAssistant()
   } catch {
     return false
   }
 }
 
 /**
- * Detects if the current HA user is an admin when running inside a Home Assistant panel iframe.
- * Uses the parent window's hass object (hass.user.is_admin).
- * Returns false when not in HA or when the user is not an admin.
- * Traverses shadow DOM for modern HA frontend.
+ * Detects if the current HA user is an admin when running inside Home Assistant.
  */
 export function getHaUserIsAdmin(): boolean {
   try {
     if (typeof window === 'undefined') return false
-    const doc = window.parent?.document ?? document
-    const el = findHomeAssistant(doc)
+    const el = findFirstHomeAssistant()
     return el?.hass?.user?.is_admin === true
   } catch {
     return false
