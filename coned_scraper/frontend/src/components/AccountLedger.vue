@@ -6,7 +6,7 @@
       class="ha-modal-overlay"
       @click="showScreenshotModal = false"
     >
-      <button class="ha-modal-close" @click="showScreenshotModal = false">✕</button>
+      <button type="button" class="ha-modal-close ha-screenshot-modal-close" @click="showScreenshotModal = false">✕</button>
       <img
         :src="`${getApiBase()}/screenshot/${screenshotPath.split('/').pop() || screenshotPath}`"
         alt="Account Balance Screenshot"
@@ -1146,6 +1146,8 @@ onUnmounted(() => {
 }
 
 .ha-payment-sheet {
+  --payment-sheet-blue: #1976d2;
+  --payment-sheet-blue-hover: #1565c0;
   max-width: 22rem;
   width: calc(100% - 2rem);
   border-radius: 12px;
@@ -1153,7 +1155,7 @@ onUnmounted(() => {
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
 }
 .ha-payment-sheet .ha-payment-sheet-header {
-  background: #1976d2;
+  background: var(--payment-sheet-blue);
   color: #fff;
   border-bottom: none;
   padding: 0.875rem 1rem;
@@ -1161,10 +1163,25 @@ onUnmounted(() => {
   font-size: 1rem;
 }
 .ha-payment-sheet .ha-payment-sheet-header .ha-payment-sheet-close {
-  color: rgba(255, 255, 255, 0.92);
+  flex-shrink: 0;
+  width: 2.25rem;
+  height: 2.25rem;
+  margin: 0;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  box-shadow: none;
+  color: #fff;
+  font-size: 1.35rem;
+  font-weight: 300;
   line-height: 1;
 }
 .ha-payment-sheet .ha-payment-sheet-header .ha-payment-sheet-close:hover {
+  background: rgba(255, 255, 255, 0.15);
   color: #fff;
   opacity: 1;
 }
@@ -1217,18 +1234,18 @@ onUnmounted(() => {
   font-size: 0.9rem;
 }
 .ha-payment-sheet .ha-btn-primary {
-  background: #1976d2;
+  background: var(--payment-sheet-blue);
   color: #fff;
 }
 .ha-payment-sheet .ha-btn-primary:hover:not(:disabled) {
-  background: #1565c0;
+  background: var(--payment-sheet-blue-hover);
 }
-.ha-btn-outline {
+.ha-payment-sheet .ha-btn-outline {
   background: #fff;
-  color: #1976d2;
-  border: 1px solid #1976d2;
+  color: var(--payment-sheet-blue);
+  border: 1px solid var(--payment-sheet-blue);
 }
-.ha-btn-outline:hover:not(:disabled) {
+.ha-payment-sheet .ha-btn-outline:hover:not(:disabled) {
   background: #e3f2fd;
 }
 .ha-sheet-confirm-text {
@@ -1271,7 +1288,8 @@ onUnmounted(() => {
   font-size: 1rem;
 }
 
-.ha-modal-close {
+/* Floating close on dark screenshot overlay only — do not use on payment sheet (would hide the ×). */
+.ha-screenshot-modal-close {
   position: relative;
   top: 0;
   right: 0;
@@ -1287,6 +1305,10 @@ onUnmounted(() => {
   justify-content: center;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
   z-index: 10000;
+  color: #333;
+}
+.ha-screenshot-modal-close:hover {
+  color: #111;
 }
 .ha-modal-img {
   max-width: 100%;
