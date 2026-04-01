@@ -29,7 +29,7 @@ import db
 app = FastAPI(title="Con Edison API")
 
 # Code version for deployment verification
-CODE_VERSION = "1.3.65"
+CODE_VERSION = "1.3.66"
 
 @app.on_event("startup")
 async def startup():
@@ -3593,6 +3593,22 @@ async def _get_real_test_data_for_notification(event_type: str) -> dict:
         return {"payee_name": payee_name, "amount": amount, "payment_date": payment_date}
 
     if event_type == "payment_unclaimed":
+        payee_name = latest_payment.get("payee_name", "Sample Payee") if latest_payment else "Sample Payee"
+        amount = latest_payment.get("amount", "$50.00") if latest_payment else "$50.00"
+        payment_date = latest_payment.get("payment_date", "03/15/2026") if latest_payment else "03/15/2026"
+        return {"payee_name": payee_name, "amount": amount, "payment_date": payment_date}
+
+    if event_type == "payment_claim_prompt":
+        amount = latest_payment.get("amount", "$50.00") if latest_payment else "$50.00"
+        payment_date = latest_payment.get("payment_date", "03/15/2026") if latest_payment else "03/15/2026"
+        return {"amount": amount, "payment_date": payment_date}
+
+    if event_type == "petition_assignee_question":
+        amount = latest_payment.get("amount", "$50.00") if latest_payment else "$50.00"
+        payment_date = latest_payment.get("payment_date", "03/15/2026") if latest_payment else "03/15/2026"
+        return {"petitioner_name": "Sample Petitioner", "amount": amount, "payment_date": payment_date}
+
+    if event_type == "petition_resolved_no_change":
         payee_name = latest_payment.get("payee_name", "Sample Payee") if latest_payment else "Sample Payee"
         amount = latest_payment.get("amount", "$50.00") if latest_payment else "$50.00"
         payment_date = latest_payment.get("payment_date", "03/15/2026") if latest_payment else "03/15/2026"
