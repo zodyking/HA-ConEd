@@ -1,9 +1,0 @@
-https://github.com/bvlaicu/coned is a project that allows us to get near realtime meter values from con edison
-
-we want to implement this in our addon.
-
-1: Make a new settings tab and page with required settings inputs that save to database so we can use inputs
-2: We want current usage from it and to register the sensors via mqtt, and we will multiply it by our kwh sensor we already have registered and create a new one current usage cost and resgister it too
-3: on account ledgar we want new fields under current ballance and due date in same styling "Curent Meter Usage" "Current usage Cost" which use the sensor value we registered :) these values/fields and sensors are visisble and register once this new feature is toggle on with working creditials
-
-Implement it!

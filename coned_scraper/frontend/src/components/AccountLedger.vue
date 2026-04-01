@@ -61,6 +61,32 @@
       </div>
     </div>
 
+    <!-- Link HA user to payee (ledger payment actions) -->
+    <div
+      v-if="linkPayeeHintPayment"
+      class="ha-modal-overlay ha-unclaim-overlay"
+      @click.self="linkPayeeHintPayment = null"
+    >
+      <div class="ha-modal ha-unclaim-modal">
+        <div class="ha-modal-header">
+          <span>Payment actions</span>
+          <button type="button" class="ha-modal-close" @click="linkPayeeHintPayment = null">×</button>
+        </div>
+        <div class="ha-modal-body">
+          <p>
+            To <strong>unclaim</strong> or <strong>petition</strong> a payment from the ledger, your Home Assistant user must be linked to a payee.
+          </p>
+          <p class="ha-modal-desc">
+            Open <strong>Settings → Payees</strong>, edit your payee, and set <strong>Home Assistant user</strong> to match the account you use in the sidebar panel.
+          </p>
+        </div>
+        <div class="ha-modal-footer">
+          <button type="button" class="ha-btn ha-btn-gray" @click="linkPayeeHintPayment = null">Close</button>
+          <button type="button" class="ha-btn ha-btn-primary" @click="openSettingsForPayeeLink">Open Settings</button>
+        </div>
+      </div>
+    </div>
+
     <!-- PDF Bill Modal -->
     <PdfViewer
       v-if="showPdfModal && viewingBillId"
@@ -271,7 +297,7 @@
                     <div
                       v-for="payment in bill.payments"
                       :key="payment.id"
-                      :class="['ha-payment-entry', { 'ha-payment-clickable': isPaymentClickable(payment) }]"
+                      :class="['ha-payment-entry', { 'ha-payment-clickable': isPaymentRowInteractive(payment) }]"
                       :title="getPaymentRowTitle(payment)"
                       @click="handlePaymentClick(payment)"
                     >
@@ -313,7 +339,10 @@
                             </div>
                           </div>
                         </div>
-                        <div class="ha-payment-amount">{{ payment.amount || '-' }}</div>
+                        <div class="ha-payment-amount-wrap">
+                          <span class="ha-payment-amount">{{ payment.amount || '-' }}</span>
+                          <span v-if="isPaymentRowInteractive(payment)" class="ha-payment-chevron" aria-hidden="true">›</span>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -335,7 +364,7 @@
               <div
                 v-for="payment in ledgerData.orphan_payments"
                 :key="payment.id"
-                :class="['ha-payment-entry', { 'ha-payment-clickable': isPaymentClickable(payment) }]"
+                :class="['ha-payment-entry', { 'ha-payment-clickable': isPaymentRowInteractive(payment) }]"
                 :title="getPaymentRowTitle(payment)"
                 @click="handlePaymentClick(payment)"
               >
@@ -365,7 +394,10 @@
                       </div>
                     </div>
                   </div>
-                  <div class="ha-payment-amount">{{ payment.amount || '-' }}</div>
+                  <div class="ha-payment-amount-wrap">
+                    <span class="ha-payment-amount">{{ payment.amount || '-' }}</span>
+                    <span v-if="isPaymentRowInteractive(payment)" class="ha-payment-chevron" aria-hidden="true">›</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -472,6 +504,11 @@ const unclaimLoading = ref(false)
 const petitionPayment = ref<Payment | null>(null)
 const petitionLoading = ref(false)
 const petitionsEnabled = ref(true)
+const linkPayeeHintPayment = ref<Payment | null>(null)
+
+/** Set when panel iframe exposes hass.user.id (polled briefly after mount). */
+const viewerHaUserId = ref<string | null>(null)
+let haUserPollTimer: ReturnType<typeof setInterval> | null = null
 
 interface PayeeUser {
   id: number
@@ -480,9 +517,13 @@ interface PayeeUser {
 }
 const payees = ref<PayeeUser[]>([])
 
+function effectiveHaUserId(): string | null {
+  return viewerHaUserId.value || getHaUserId()
+}
+
 const currentViewerPayeeId = computed<number | null>(() => {
   if (!isInHaPanel()) return null
-  const haUserId = getHaUserId()
+  const haUserId = effectiveHaUserId()
   if (!haUserId) return null
   const payee = payees.value.find((p) => (p.ha_user_id ?? null) === haUserId)
   return payee?.id ?? null
@@ -500,15 +541,16 @@ function canPetitionPayment(payment: Payment): boolean {
   return petitionsEnabled.value
 }
 
-function isPaymentClickable(payment: Payment): boolean {
-  return canUnclaimPayment(payment) || canPetitionPayment(payment)
+/** Assigned payments: show actions (unclaim, petition, or link-payee help). */
+function isPaymentRowInteractive(payment: Payment): boolean {
+  return !!payment.payee_user_id
 }
 
 function getPaymentRowTitle(payment: Payment): string {
   if (canUnclaimPayment(payment)) return 'Click to unclaim'
   if (canPetitionPayment(payment)) return 'Click to petition'
-  if (payment.payee_user_id && payment.payee_name)
-    return 'Link your payee to your HA user in Settings → Payees to unclaim or petition'
+  if (payment.payee_user_id)
+    return 'Click for payment actions — link your HA user in Settings → Payees if needed'
   return ''
 }
 
@@ -517,7 +559,14 @@ function handlePaymentClick(payment: Payment) {
     openUnclaimModal(payment)
   } else if (canPetitionPayment(payment)) {
     petitionPayment.value = payment
+  } else if (payment.payee_user_id) {
+    linkPayeeHintPayment.value = payment
   }
+}
+
+function openSettingsForPayeeLink() {
+  linkPayeeHintPayment.value = null
+  emit('navigate', 'settings')
 }
 
 async function loadPayees() {
@@ -915,8 +964,29 @@ onMounted(() => {
   interval = setInterval(() => {
     loadLedgerData()
   }, 30000)
+
+  const idNow = getHaUserId()
+  if (idNow) viewerHaUserId.value = idNow
+  else {
+    let attempts = 0
+    haUserPollTimer = setInterval(() => {
+      attempts++
+      const id = getHaUserId()
+      if (id) {
+        viewerHaUserId.value = id
+        if (haUserPollTimer) clearInterval(haUserPollTimer)
+        haUserPollTimer = null
+      } else if (attempts >= 50) {
+        if (haUserPollTimer) clearInterval(haUserPollTimer)
+        haUserPollTimer = null
+      }
+    }, 150)
+  }
 })
-onUnmounted(() => clearInterval(interval))
+onUnmounted(() => {
+  clearInterval(interval)
+  if (haUserPollTimer) clearInterval(haUserPollTimer)
+})
 </script>
 
 <style scoped>
@@ -944,6 +1014,20 @@ onUnmounted(() => clearInterval(interval))
 .ha-message.success { background: #e8f5e9; color: #2e7d32; }
 .ha-message.error { background: #ffebee; color: #c62828; }
 .ha-modal-overlay .ha-modal { margin: auto; }
+
+.ha-payment-amount-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+.ha-payment-chevron {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #1976d2;
+  line-height: 1;
+  opacity: 0.85;
+}
 
 /* Unclaim modal: small box, readable light theme */
 .ha-unclaim-overlay {

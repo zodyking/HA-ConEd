@@ -23,11 +23,13 @@ PLATFORMS: list[Platform] = [Platform.SENSOR]
 
 
 def _create_payment_claim_handler(hass: HomeAssistant, addon_url: str) -> Callable[[Event], None]:
-    """Create a callback that forwards CONED_CLAIM_* events to the addon."""
+    """Create a callback that forwards CONED_CLAIM_* and CONED_PETITION_* events to the addon."""
 
     def handler(event: Event) -> None:
         action = event.data.get("action") or ""
-        if not action.startswith("CONED_CLAIM_"):
+        if not (
+            action.startswith("CONED_CLAIM_") or action.startswith("CONED_PETITION_")
+        ):
             return
 
         async def _post() -> None:

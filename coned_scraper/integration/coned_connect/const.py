@@ -17,7 +17,6 @@ SENSOR_BILL_PDF_URL = "bill_pdf_url"
 SENSOR_DUE_DATE = "due_date"
 SENSOR_KWH_COST = "kwh_cost"
 SENSOR_LAST_BILL_KWH = "last_bill_kwh"
-SENSOR_CURRENT_METER_USAGE = "current_meter_usage"
 SENSOR_CURRENT_USAGE_COST = "current_usage_cost"
 SENSOR_BILLING_START_DATE = "billing_start_date"
 SENSOR_BILLING_END_DATE = "billing_end_date"
@@ -72,13 +71,6 @@ SENSORS = {
         "unit": "kWh",
         "device_class": "energy",
         "icon": "mdi:flash",
-    },
-    SENSOR_CURRENT_METER_USAGE: {
-        "name": "Current Meter Usage",
-        "unit": "kWh",
-        "device_class": "energy",
-        "state_class": "total_increasing",
-        "icon": "mdi:gauge",
     },
     SENSOR_CURRENT_USAGE_COST: {
         "name": "Current Usage Cost",

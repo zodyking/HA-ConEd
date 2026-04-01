@@ -29,7 +29,7 @@ import db
 app = FastAPI(title="Con Edison API")
 
 # Code version for deployment verification
-CODE_VERSION = "1.3.64"
+CODE_VERSION = "1.3.65"
 
 @app.on_event("startup")
 async def startup():
@@ -1924,6 +1924,77 @@ class ClaimActionModel(BaseModel):
     action: str
 
 
+async def handle_petition_notification_action(action: str) -> Dict[str, Any]:
+    """
+    Handle CONED_PETITION_YES_<payment_id>_<assignee_payee_id>_<petitioner_payee_id>
+    or CONED_PETITION_NO_... (assignee taps Yes/No on petition question).
+    """
+    parts = action.split("_")
+    if len(parts) != 6 or parts[0] != "CONED" or parts[1] != "PETITION":
+        raise HTTPException(status_code=400, detail="Invalid petition action format")
+    verdict = parts[2].upper()
+    if verdict not in ("YES", "NO"):
+        raise HTTPException(status_code=400, detail="Invalid petition action")
+    try:
+        payment_id = int(parts[3])
+        assignee_id = int(parts[4])
+        petitioner_id = int(parts[5])
+    except (ValueError, IndexError):
+        raise HTTPException(status_code=400, detail="Invalid petition action")
+
+    payment = await db.get_payment_by_id(payment_id)
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment not found")
+    if payment.get("payee_user_id") != assignee_id:
+        raise HTTPException(status_code=400, detail="Payment assignment changed")
+
+    if not await db.has_payment_petition(payment_id, petitioner_id):
+        raise HTTPException(status_code=400, detail="No active petition for this action")
+
+    assignee = await db.get_payee_user_by_id(assignee_id)
+    petitioner = await db.get_payee_user_by_id(petitioner_id)
+    if not assignee or not petitioner:
+        raise HTTPException(status_code=400, detail="Payee not found")
+
+    amount = payment.get("amount", "N/A")
+    payment_date = payment.get("payment_date", "N/A")
+    payee_name = assignee.get("name") or "Payee"
+
+    if verdict == "YES":
+        await db.delete_payment_petition_pair(payment_id, petitioner_id)
+        from notifications import notify_petition_assignee_confirmed
+
+        await notify_petition_assignee_confirmed(
+            assignee, petitioner, payee_name, amount, payment_date
+        )
+        return {"success": True, "result": "assignee_confirmed"}
+
+    await db.delete_payment_petition_pair(payment_id, petitioner_id)
+    ok = await db.attribute_payment(
+        payment_id, petitioner_id, "verified", "petition_reassign"
+    )
+    if not ok:
+        raise HTTPException(status_code=500, detail="Failed to assign payment")
+    try:
+        from notifications import notify_payment_claimed
+        from tts_scheduler import trigger_payment_claimed_tts
+
+        pname = petitioner.get("name", "Unknown")
+        await notify_payment_claimed(
+            payee_name=pname,
+            amount=amount,
+            payment_date=payment_date,
+        )
+        await trigger_payment_claimed_tts(
+            payee_name=pname,
+            amount=amount,
+            payment_date=payment_date,
+        )
+    except Exception as e:
+        await db.add_log("warning", f"Petition reassign notification/TTS failed: {e}")
+    return {"success": True, "result": "reassigned_to_petitioner"}
+
+
 @app.post("/api/payments/claim-action")
 async def record_payee_claim_by_action(body: ClaimActionModel):
     """
@@ -1931,8 +2002,11 @@ async def record_payee_claim_by_action(body: ClaimActionModel):
     Simpler for automations: no need to parse, just forward trigger.event.data.action.
 
     Action format: CONED_CLAIM_YES_<payment_id>_<payee_id> or CONED_CLAIM_NO_<payment_id>_<payee_id>
+    Petition: CONED_PETITION_YES_<payment_id>_<assignee_id>_<petitioner_id> or CONED_PETITION_NO_...
     """
     action = (body.action or "").strip()
+    if action.startswith("CONED_PETITION_"):
+        return await handle_petition_notification_action(action)
     if not action.startswith("CONED_CLAIM_"):
         raise HTTPException(status_code=400, detail="Invalid action format")
     parts = action.split("_")
@@ -1990,14 +2064,44 @@ async def record_payee_claim(payment_id: int, body: PayeeClaimModel):
 
 @app.post("/api/payments/{payment_id}/petition")
 async def create_payment_petition(payment_id: int, body: PetitionModel):
-    """Record a petition - payee claiming a payment already assigned to someone else."""
+    """Start a petition: notify the assigned payee to confirm or deny they made the payment."""
     try:
         pv = await get_payment_verification_settings()
         if not pv.get("petitions_enabled", True):
             raise HTTPException(status_code=400, detail="Petitions are disabled")
+        payment = await db.get_payment_by_id(payment_id)
+        if not payment:
+            raise HTTPException(status_code=404, detail="Payment not found")
+        assignee_id = payment.get("payee_user_id")
+        if not assignee_id:
+            raise HTTPException(status_code=400, detail="Payment is not assigned to a payee")
+        if assignee_id == body.payee_id:
+            raise HTTPException(status_code=400, detail="Cannot petition a payment already assigned to you")
+        assignee = await db.get_payee_user_by_id(assignee_id)
+        petitioner = await db.get_payee_user_by_id(body.payee_id)
+        if not assignee or not petitioner:
+            raise HTTPException(status_code=400, detail="Payee not found")
+        if not assignee.get("notify_service"):
+            raise HTTPException(
+                status_code=400,
+                detail="Assigned payee has no notify service — cannot send petition question",
+            )
         ok = await db.create_payment_petition(payment_id, body.payee_id)
         if not ok:
             raise HTTPException(status_code=500, detail="Failed to create petition")
+        from notifications import send_petition_assignee_question
+
+        sent = await send_petition_assignee_question(
+            assignee,
+            petitioner.get("name") or "Someone",
+            payment,
+            body.payee_id,
+        )
+        if not sent:
+            await db.add_log(
+                "warning",
+                f"Petition created for payment {payment_id} but assignee notification was not sent",
+            )
         return {"success": True}
     except HTTPException:
         raise
@@ -2227,14 +2331,28 @@ async def unclaim_payment_endpoint(payment_id: int):
         success = await db.clear_payment_attribution(payment_id)
         if not success:
             raise HTTPException(status_code=500, detail="Failed to unclaim")
-        await db.add_log("info", f"Payment {payment_id} unclaimed via Account Ledger")
+        await db.add_log("info", f"Payment {payment_id} unclaimed via Account Ledger ({payee_name})")
         try:
-            from notifications import notify_payment_unclaimed
-            from tts_scheduler import trigger_payment_unclaimed_tts
-            await notify_payment_unclaimed(payee_name=payee_name, amount=amount, payment_date=payment_date)
-            await trigger_payment_unclaimed_tts(payee_name=payee_name, amount=amount, payment_date=payment_date)
+            await db.reset_claim_responses_for_resend(payment_id)
+            payees = await db.get_payees_with_notifications()
+            if payees:
+                from notifications import send_payment_claim_request
+
+                payment_for_claim = {
+                    "id": payment["id"],
+                    "payment_date": payment["payment_date"],
+                    "amount": payment["amount"],
+                    "description": payment.get("description"),
+                    "bill_id": payment.get("bill_id"),
+                }
+                sent = await send_payment_claim_request(payment_for_claim, payees)
+                if sent:
+                    await db.add_log(
+                        "info",
+                        f"Sent payment claim request to {sent} payee(s) after ledger unclaim",
+                    )
         except Exception as e:
-            await db.add_log("warning", f"Payment unclaimed notification/TTS failed: {e}")
+            await db.add_log("warning", f"Resend claim notifications after unclaim failed: {e}")
         return {"success": True}
     except HTTPException:
         raise

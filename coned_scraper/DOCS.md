@@ -58,7 +58,38 @@ When new unverified payments are detected, the addon sends "Did you make this $X
 
 **ConEd Connect integration (recommended):** Add the ConEd Connect integration (Settings → Devices & services → Add integration → ConEd Connect) and configure the addon URL. Yes/No taps are then handled automatically—no manual automation or YAML changes needed.
 
-**Manual automation (fallback):** If you use only the addon panel without the integration, see `../Agent-Files/payment-claim-automation-example.md` for a YAML example that triggers on `mobile_app_notification_action` / `ios.notification_action` and calls the addon's claim-action endpoint.
+**Manual automation (fallback):** If you use only the addon panel without the integration, add a `rest_command` and automation so notification actions reach the addon. Replace `core_coned` with your addon slug (Settings → Add-ons → Con Edison).
+
+```yaml
+rest_command:
+  coned_payment_notification_action:
+    method: POST
+    url: "http://homeassistant.local:8123/api/coned/ingress/core_coned/api/payments/claim-action"
+    content_type: "application/json"
+    payload_template: '{"action": "{{ action }}"}'
+```
+
+Replace `core_coned` with your add-on slug and adjust host/port or ingress path if your HA uses a different URL. The addon accepts the raw `action` string for both payment **claim** responses (`CONED_CLAIM_YES_...` / `CONED_CLAIM_NO_...`) and **petition** responses (`CONED_PETITION_YES_...` / `CONED_PETITION_NO_...`).
+
+```yaml
+alias: ConEd Payment & Petition - Record notification actions
+description: Forward claim and petition Yes/No taps to the Con Edison addon
+trigger:
+  - platform: event
+    event_type: mobile_app_notification_action
+  - platform: event
+    event_type: ios.notification_action
+condition:
+  - condition: template
+    value_template: >
+      {{ trigger.event.data.action is defined
+         and (trigger.event.data.action.startswith('CONED_CLAIM_')
+              or trigger.event.data.action.startswith('CONED_PETITION_')) }}
+action:
+  - service: rest_command.coned_payment_notification_action
+    data:
+      action: "{{ trigger.event.data.action }}"
+```
 
 **Resend after all No:** If all payees say No (e.g. accidental taps), the addon resends the claim request after a configurable delay (default 24 hours). Configure `claim_resend_delay_hours` in App Settings.
 

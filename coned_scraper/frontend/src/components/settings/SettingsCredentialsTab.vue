@@ -201,7 +201,6 @@
           <div class="mqtt-sensor-info">
             <div class="mqtt-sensor-header">MQTT Sensors Created</div>
             <ul class="mqtt-sensor-list">
-              <li><code>sensor.ConEd_current_meter_usage</code> — Current meter reading (kWh)</li>
               <li><code>sensor.ConEd_current_usage_cost</code> — Calculated cost (USD)</li>
               <li><code>sensor.ConEd_billing_start_date</code> — Billing period start date</li>
               <li><code>sensor.ConEd_billing_end_date</code> — Billing period end date</li>

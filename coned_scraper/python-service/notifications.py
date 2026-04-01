@@ -242,6 +242,133 @@ async def send_payment_claim_request(payment: Dict[str, Any], payees: List[Dict[
     return sent_count
 
 
+async def _notify_one_device(
+    session,
+    token: str,
+    notify_service: str,
+    title: str,
+    message: str,
+    data_payload: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """Send a single mobile_app notify via Supervisor API."""
+    body: Dict[str, Any] = {"title": title, "message": message}
+    if data_payload:
+        body["data"] = data_payload
+    try:
+        async with session.post(
+            f"http://supervisor/core/api/services/notify/{notify_service}",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+            json=body,
+        ) as resp:
+            if resp.status == 200:
+                return True
+            logger.warning("notify %s failed: %s", notify_service, resp.status)
+    except Exception as e:
+        logger.error("notify %s error: %s", notify_service, e)
+    return False
+
+
+async def send_petition_assignee_question(
+    assignee: Dict[str, Any],
+    petitioner_name: str,
+    payment: Dict[str, Any],
+    petitioner_payee_id: int,
+) -> bool:
+    """
+    Notify the payee currently assigned to the payment (assignee) with Yes/No.
+    YES = assignee confirms they made the payment (no reassignment).
+    NO = payment is reassigned to the petitioner.
+    """
+    import aiohttp
+    import db
+
+    token = os.environ.get("SUPERVISOR_TOKEN")
+    if not token:
+        logger.debug("Not running as HA addon, skipping petition notification")
+        return False
+    notify_service = assignee.get("notify_service")
+    if not notify_service:
+        logger.warning("Assignee has no notify_service; cannot send petition question")
+        return False
+    payment_id = payment.get("id")
+    assignee_id = assignee.get("id")
+    if not payment_id or not assignee_id:
+        return False
+    amount = payment.get("amount", "N/A")
+    payment_date = payment.get("payment_date", "N/A")
+    title = ensure_con_edison_title("Payment petition")
+    message = (
+        f"{petitioner_name} has requested a payment petition for payment made on {payment_date} "
+        f"in the amount of {amount}. Are you sure you made this payment? (Tap & hold to respond)"
+    )
+    data_payload = {
+        "actions": [
+            {
+                "action": f"CONED_PETITION_YES_{payment_id}_{assignee_id}_{petitioner_payee_id}",
+                "title": "Yes",
+            },
+            {
+                "action": f"CONED_PETITION_NO_{payment_id}_{assignee_id}_{petitioner_payee_id}",
+                "title": "No",
+            },
+        ],
+        "tag": f"coned_petition_{payment_id}_{petitioner_payee_id}",
+        "ttl": 0,
+        "priority": "high",
+    }
+    try:
+        async with aiohttp.ClientSession() as session:
+            ok = await _notify_one_device(
+                session, token, notify_service, title, message, data_payload
+            )
+            if ok:
+                await db.add_log("info", f"Sent petition question to assignee payee id {assignee_id}")
+            return ok
+    except Exception as e:
+        logger.error("send_petition_assignee_question failed: %s", e)
+        return False
+
+
+async def notify_petition_assignee_confirmed(
+    assignee: Dict[str, Any],
+    petitioner: Dict[str, Any],
+    payee_name: str,
+    amount: str,
+    payment_date: str,
+) -> int:
+    """
+    Inform assignee and petitioner that assignee is sure they made the payment; ledger unchanged.
+    """
+    import aiohttp
+
+    token = os.environ.get("SUPERVISOR_TOKEN")
+    if not token:
+        return 0
+    title = ensure_con_edison_title("Payment petition resolved")
+    message = (
+        f"{payee_name} is sure they made the payment posted on {payment_date}, "
+        f"in the amount of {amount}. No changes have been made."
+    )
+    sent = 0
+    seen = set()
+    try:
+        async with aiohttp.ClientSession() as session:
+            for p in (assignee, petitioner):
+                ns = p.get("notify_service")
+                pid = p.get("id")
+                if not ns or pid in seen:
+                    continue
+                seen.add(pid)
+                if await _notify_one_device(session, token, ns, title, message):
+                    sent += 1
+    except Exception as e:
+        logger.error("notify_petition_assignee_confirmed failed: %s", e)
+    return sent
+
+
 async def notify_due_reminder(
     amount: str,
     due_date: str,

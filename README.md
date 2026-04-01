@@ -20,12 +20,11 @@ Home Assistant add-on for Con Edison account integration — bills, payments, ba
 | `ConEd_latest_bill` | Latest bill amount |
 | `ConEd_previous_bill` | Previous bill amount |
 | `ConEd_last_payment` | Last payment amount |
-| `ConEd_bill_pdf_url` | Latest bill PDF URL |
+| `ConEd_bill_pdf_url` | State shows "Check attributes"; open attributes for the PDF URL |
 | `ConEd_payee_summary` | Payee breakdown (balance, shares) |
 | `ConEd_due_date` | Bill due date |
 | `ConEd_kwh_cost` | $/kWh from bill |
 | `ConEd_last_bill_kwh` | kWh from last bill |
-| `ConEd_current_meter_usage` | Meter reading (kWh) |
 | `ConEd_current_usage_cost` | Cost to date (USD) |
 | `ConEd_billing_start_date` | Billing period start |
 | `ConEd_billing_end_date` | Billing period end |

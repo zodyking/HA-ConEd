@@ -138,10 +138,6 @@ class ConEdisonDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ) as response:
                 if response.status == 200:
                     meter = await response.json()
-                    if meter.get("enabled") and meter.get("reading"):
-                        reading = meter["reading"]
-                        data["current_meter_usage"] = reading.get("value")
-                    
                     data["current_usage_cost"] = meter.get("cost")
                     
                     forecast = meter.get("forecast", {})
@@ -158,15 +154,15 @@ class ConEdisonDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 allow_redirects=False,
             ) as response:
                 if response.status == 200:
-                    # PDF exists - construct external Ingress URL
+                    # PDF exists - construct external Ingress URL (full URL in attributes only)
                     ingress_entry = await self._get_ingress_url()
                     if ingress_entry:
-                        # Use get_url for proper base URL (handles external/internal/cloud correctly)
                         base_url = get_url(self.hass, prefer_external=True, require_ssl=False)
-                        data["bill_pdf_url"] = f"{base_url.rstrip('/')}{ingress_entry}/api/bill-document"
+                        pdf_url = f"{base_url.rstrip('/')}{ingress_entry}/api/bill-document"
                     else:
-                        # Fallback to addon URL
-                        data["bill_pdf_url"] = f"{self.addon_url}/api/bill-document"
+                        pdf_url = f"{self.addon_url}/api/bill-document"
+                    data["bill_pdf_url"] = "Check attributes"
+                    data["bill_pdf_url_data"] = {"url": pdf_url}
 
             return data
 

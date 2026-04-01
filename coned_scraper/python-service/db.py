@@ -1124,21 +1124,56 @@ async def reset_claim_responses_for_resend(payment_id: int) -> bool:
         await conn.close()
 
 async def create_payment_petition(payment_id: int, payee_id: int) -> bool:
-    """Record a petition (payee claiming a payment already assigned elsewhere). Sets needs_admin_verification."""
+    """Record a petition (payee disputing assignment). Does not change payment attribution; assignee is notified."""
     await ensure_connected()
     try:
         conn = await _raw_conn()
         try:
             await conn.execute(
-                "INSERT INTO payment_petitions (payment_id, petitioning_payee_id) VALUES ($1, $2)",
-                payment_id, payee_id
+                "DELETE FROM payment_petitions WHERE payment_id = $1 AND petitioning_payee_id = $2",
+                payment_id,
+                payee_id,
             )
-            await db.payment.update(where={"id": payment_id}, data={"payeeStatus": "needs_admin_verification"})
+            await conn.execute(
+                "INSERT INTO payment_petitions (payment_id, petitioning_payee_id) VALUES ($1, $2)",
+                payment_id,
+                payee_id,
+            )
             return True
         finally:
             await conn.close()
     except Exception:
         return False
+
+
+async def delete_payment_petition_pair(payment_id: int, petitioning_payee_id: int) -> bool:
+    """Remove a petition row after assignee responds (Yes or No)."""
+    conn = await _raw_conn()
+    try:
+        await conn.execute(
+            "DELETE FROM payment_petitions WHERE payment_id = $1 AND petitioning_payee_id = $2",
+            payment_id,
+            petitioning_payee_id,
+        )
+        return True
+    except Exception:
+        return False
+    finally:
+        await conn.close()
+
+
+async def has_payment_petition(payment_id: int, petitioning_payee_id: int) -> bool:
+    """Whether an open petition exists for this payment and petitioner."""
+    conn = await _raw_conn()
+    try:
+        row = await conn.fetchrow(
+            "SELECT 1 FROM payment_petitions WHERE payment_id = $1 AND petitioning_payee_id = $2 LIMIT 1",
+            payment_id,
+            petitioning_payee_id,
+        )
+        return row is not None
+    finally:
+        await conn.close()
 
 async def get_payment_petitions(payment_id: Optional[int] = None) -> List[Dict[str, Any]]:
     """Get petitions, optionally filtered by payment_id."""
@@ -1195,6 +1230,21 @@ async def create_payee_user(name: str, is_default: bool = False, responsibility_
             "isAdmin": is_admin
         }
     )
+
+async def get_payee_user_by_id(user_id: int) -> Optional[Dict[str, Any]]:
+    """Single payee for notifications / petition flow."""
+    await ensure_connected()
+    u = await db.payeeuser.find_unique(where={"id": user_id})
+    if not u:
+        return None
+    return {
+        "id": u.id,
+        "name": u.name,
+        "ha_user_id": u.haUserId,
+        "notify_service": u.notifyService,
+        "notifications_enabled": u.notificationsEnabled,
+    }
+
 
 async def get_payee_users() -> List[Dict[str, Any]]:
     """Get all payee users"""
