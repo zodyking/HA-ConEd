@@ -29,7 +29,7 @@ import db
 app = FastAPI(title="Con Edison API")
 
 # Code version for deployment verification
-CODE_VERSION = "1.3.71"
+CODE_VERSION = "1.3.72"
 
 @app.on_event("startup")
 async def startup():
@@ -3652,6 +3652,26 @@ async def _get_real_test_data_for_notification(event_type: str) -> dict:
         amount = latest_payment.get("amount", "$50.00") if latest_payment else "$50.00"
         payment_date = latest_payment.get("payment_date", "03/15/2026") if latest_payment else "03/15/2026"
         return {"payee_name": payee_name, "amount": amount, "payment_date": payment_date}
+
+    if event_type == "petition_submitted":
+        amount = latest_payment.get("amount", "$50.00") if latest_payment else "$50.00"
+        payment_date = latest_payment.get("payment_date", "03/15/2026") if latest_payment else "03/15/2026"
+        return {"amount": amount, "payment_date": payment_date, "assignee_name": "Sample Assignee"}
+
+    if event_type == "petition_reassigned_to_you":
+        amount = latest_payment.get("amount", "$50.00") if latest_payment else "$50.00"
+        payment_date = latest_payment.get("payment_date", "03/15/2026") if latest_payment else "03/15/2026"
+        return {"amount": amount, "payment_date": payment_date}
+
+    if event_type == "petition_lost":
+        amount = latest_payment.get("amount", "$50.00") if latest_payment else "$50.00"
+        payment_date = latest_payment.get("payment_date", "03/15/2026") if latest_payment else "03/15/2026"
+        return {"amount": amount, "payment_date": payment_date, "petitioner_name": "Sample Petitioner"}
+
+    if event_type == "petition_cancelled":
+        amount = latest_payment.get("amount", "$50.00") if latest_payment else "$50.00"
+        payment_date = latest_payment.get("payment_date", "03/15/2026") if latest_payment else "03/15/2026"
+        return {"amount": amount, "payment_date": payment_date}
 
     return {}
 

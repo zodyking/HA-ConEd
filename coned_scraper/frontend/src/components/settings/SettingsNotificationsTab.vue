@@ -470,6 +470,160 @@
           </div>
         </div>
 
+        <!-- Petition: submitted (petitioner confirmation) -->
+        <div class="notify-section">
+          <div class="notify-section-header" @click="toggleSection('petition_submitted')">
+            <div class="notify-section-title">
+              <span class="notify-section-icon">📨</span>
+              <span>Petition — request sent</span>
+            </div>
+            <span class="notify-section-sub">Sent to the petitioner after they start a petition</span>
+            <span class="notify-section-chevron" :class="{ expanded: expandedSections.petition_submitted }">▼</span>
+          </div>
+          <div v-if="expandedSections.petition_submitted" class="notify-section-content">
+            <div class="notify-toggle-row">
+              <label class="notify-toggle">
+                <input v-model="configs.petition_submitted.enabled" type="checkbox" />
+                <span class="notify-toggle-slider"></span>
+              </label>
+              <span class="notify-toggle-label">Enable</span>
+            </div>
+            <template v-if="configs.petition_submitted.enabled">
+              <div class="notify-form-group">
+                <label class="notify-label">Title</label>
+                <input v-model="configs.petition_submitted.title" type="text" class="notify-input" />
+              </div>
+              <div class="notify-form-group">
+                <label class="notify-label">Message template</label>
+                <div class="notify-var-chips">
+                  <span class="notify-var-chip" @click="insertVar('petition_submitted', '{amount}')">{amount}</span>
+                  <span class="notify-var-chip" @click="insertVar('petition_submitted', '{payment_date}')">{payment_date}</span>
+                  <span class="notify-var-chip" @click="insertVar('petition_submitted', '{assignee_name}')">{assignee_name}</span>
+                </div>
+                <textarea ref="petitionSubmittedInput" v-model="configs.petition_submitted.template" class="notify-textarea" rows="3"></textarea>
+              </div>
+              <button class="notify-btn notify-btn-test" :disabled="testing === 'petition_submitted'" @click="testNotification('petition_submitted')">
+                {{ testing === 'petition_submitted' ? 'Sending...' : '📱 Test Notification' }}
+              </button>
+            </template>
+          </div>
+        </div>
+
+        <!-- Petition: reassigned to petitioner -->
+        <div class="notify-section">
+          <div class="notify-section-header" @click="toggleSection('petition_reassigned_to_you')">
+            <div class="notify-section-title">
+              <span class="notify-section-icon">↪️</span>
+              <span>Petition — reassigned to you</span>
+            </div>
+            <span class="notify-section-sub">When assignee says No and the payment moves to the petitioner</span>
+            <span class="notify-section-chevron" :class="{ expanded: expandedSections.petition_reassigned_to_you }">▼</span>
+          </div>
+          <div v-if="expandedSections.petition_reassigned_to_you" class="notify-section-content">
+            <div class="notify-toggle-row">
+              <label class="notify-toggle">
+                <input v-model="configs.petition_reassigned_to_you.enabled" type="checkbox" />
+                <span class="notify-toggle-slider"></span>
+              </label>
+              <span class="notify-toggle-label">Enable</span>
+            </div>
+            <template v-if="configs.petition_reassigned_to_you.enabled">
+              <div class="notify-form-group">
+                <label class="notify-label">Title</label>
+                <input v-model="configs.petition_reassigned_to_you.title" type="text" class="notify-input" />
+              </div>
+              <div class="notify-form-group">
+                <label class="notify-label">Message template</label>
+                <div class="notify-var-chips">
+                  <span class="notify-var-chip" @click="insertVar('petition_reassigned_to_you', '{amount}')">{amount}</span>
+                  <span class="notify-var-chip" @click="insertVar('petition_reassigned_to_you', '{payment_date}')">{payment_date}</span>
+                </div>
+                <textarea ref="petitionReassignedInput" v-model="configs.petition_reassigned_to_you.template" class="notify-textarea" rows="3"></textarea>
+              </div>
+              <button class="notify-btn notify-btn-test" :disabled="testing === 'petition_reassigned_to_you'" @click="testNotification('petition_reassigned_to_you')">
+                {{ testing === 'petition_reassigned_to_you' ? 'Sending...' : '📱 Test Notification' }}
+              </button>
+            </template>
+          </div>
+        </div>
+
+        <!-- Petition: assignee lost payment -->
+        <div class="notify-section">
+          <div class="notify-section-header" @click="toggleSection('petition_lost')">
+            <div class="notify-section-title">
+              <span class="notify-section-icon">📤</span>
+              <span>Petition — reassigned away</span>
+            </div>
+            <span class="notify-section-sub">Sent to assignee when they answer No and lose the payment</span>
+            <span class="notify-section-chevron" :class="{ expanded: expandedSections.petition_lost }">▼</span>
+          </div>
+          <div v-if="expandedSections.petition_lost" class="notify-section-content">
+            <div class="notify-toggle-row">
+              <label class="notify-toggle">
+                <input v-model="configs.petition_lost.enabled" type="checkbox" />
+                <span class="notify-toggle-slider"></span>
+              </label>
+              <span class="notify-toggle-label">Enable</span>
+            </div>
+            <template v-if="configs.petition_lost.enabled">
+              <div class="notify-form-group">
+                <label class="notify-label">Title</label>
+                <input v-model="configs.petition_lost.title" type="text" class="notify-input" />
+              </div>
+              <div class="notify-form-group">
+                <label class="notify-label">Message template</label>
+                <div class="notify-var-chips">
+                  <span class="notify-var-chip" @click="insertVar('petition_lost', '{amount}')">{amount}</span>
+                  <span class="notify-var-chip" @click="insertVar('petition_lost', '{payment_date}')">{payment_date}</span>
+                  <span class="notify-var-chip" @click="insertVar('petition_lost', '{petitioner_name}')">{petitioner_name}</span>
+                </div>
+                <textarea ref="petitionLostInput" v-model="configs.petition_lost.template" class="notify-textarea" rows="3"></textarea>
+              </div>
+              <button class="notify-btn notify-btn-test" :disabled="testing === 'petition_lost'" @click="testNotification('petition_lost')">
+                {{ testing === 'petition_lost' ? 'Sending...' : '📱 Test Notification' }}
+              </button>
+            </template>
+          </div>
+        </div>
+
+        <!-- Petition: cancelled (prior petition closed) -->
+        <div class="notify-section">
+          <div class="notify-section-header" @click="toggleSection('petition_cancelled')">
+            <div class="notify-section-title">
+              <span class="notify-section-icon">🛑</span>
+              <span>Petition — closed</span>
+            </div>
+            <span class="notify-section-sub">Sent to both parties when a prior petition is cancelled (e.g. new petition started)</span>
+            <span class="notify-section-chevron" :class="{ expanded: expandedSections.petition_cancelled }">▼</span>
+          </div>
+          <div v-if="expandedSections.petition_cancelled" class="notify-section-content">
+            <div class="notify-toggle-row">
+              <label class="notify-toggle">
+                <input v-model="configs.petition_cancelled.enabled" type="checkbox" />
+                <span class="notify-toggle-slider"></span>
+              </label>
+              <span class="notify-toggle-label">Enable</span>
+            </div>
+            <template v-if="configs.petition_cancelled.enabled">
+              <div class="notify-form-group">
+                <label class="notify-label">Title</label>
+                <input v-model="configs.petition_cancelled.title" type="text" class="notify-input" />
+              </div>
+              <div class="notify-form-group">
+                <label class="notify-label">Message template</label>
+                <div class="notify-var-chips">
+                  <span class="notify-var-chip" @click="insertVar('petition_cancelled', '{amount}')">{amount}</span>
+                  <span class="notify-var-chip" @click="insertVar('petition_cancelled', '{payment_date}')">{payment_date}</span>
+                </div>
+                <textarea ref="petitionCancelledInput" v-model="configs.petition_cancelled.template" class="notify-textarea" rows="3"></textarea>
+              </div>
+              <button class="notify-btn notify-btn-test" :disabled="testing === 'petition_cancelled'" @click="testNotification('petition_cancelled')">
+                {{ testing === 'petition_cancelled' ? 'Sending...' : '📱 Test Notification' }}
+              </button>
+            </template>
+          </div>
+        </div>
+
         <!-- Save Button -->
         <div class="notify-actions">
           <button class="notify-btn notify-btn-primary" :disabled="saving" @click="saveAll">
@@ -516,6 +670,10 @@ const expandedSections = reactive({
   payment_claim_prompt: false,
   petition_assignee_question: false,
   petition_resolved_no_change: false,
+  petition_submitted: false,
+  petition_reassigned_to_you: false,
+  petition_lost: false,
+  petition_cancelled: false,
 })
 
 const configs = reactive<Record<string, NotificationConfig>>({
@@ -535,16 +693,42 @@ const configs = reactive<Record<string, NotificationConfig>>({
   petition_assignee_question: {
     event_type: 'petition_assignee_question',
     enabled: true,
-    title: 'Payment petition',
+    title: 'Payment Petition',
     template:
-      '{petitioner_name} has requested a payment petition for payment made on {payment_date} in the amount of {amount}. Are you sure you made this payment? (Tap & hold to respond)',
+      '{petitioner_name} claims the {amount} payment on {payment_date}. Did you make it? (Tap & Hold To Respond)',
   },
   petition_resolved_no_change: {
     event_type: 'petition_resolved_no_change',
     enabled: true,
-    title: 'Payment petition resolved',
+    title: 'Petition Resolved',
     template:
-      '{payee_name} is sure they made the payment posted on {payment_date}, in the amount of {amount}. No changes have been made.',
+      '{payee_name} confirmed the {amount} payment on {payment_date} is theirs. No changes made.',
+  },
+  petition_submitted: {
+    event_type: 'petition_submitted',
+    enabled: true,
+    title: 'Petition Sent',
+    template:
+      'Your petition for the {amount} payment on {payment_date} was sent to {assignee_name}.',
+  },
+  petition_reassigned_to_you: {
+    event_type: 'petition_reassigned_to_you',
+    enabled: true,
+    title: 'Payment Reassigned',
+    template: 'The {amount} payment on {payment_date} has been reassigned to you.',
+  },
+  petition_lost: {
+    event_type: 'petition_lost',
+    enabled: true,
+    title: 'Payment Reassigned',
+    template:
+      'Per your response, the {amount} payment on {payment_date} was reassigned to {petitioner_name}.',
+  },
+  petition_cancelled: {
+    event_type: 'petition_cancelled',
+    enabled: true,
+    title: 'Petition Closed',
+    template: 'The petition for the {amount} payment on {payment_date} has been closed.',
   },
 })
 
@@ -558,6 +742,10 @@ const paymentUnclaimedInput = ref<HTMLTextAreaElement | null>(null)
 const paymentClaimPromptInput = ref<HTMLTextAreaElement | null>(null)
 const petitionAssigneeInput = ref<HTMLTextAreaElement | null>(null)
 const petitionResolvedInput = ref<HTMLTextAreaElement | null>(null)
+const petitionSubmittedInput = ref<HTMLTextAreaElement | null>(null)
+const petitionReassignedInput = ref<HTMLTextAreaElement | null>(null)
+const petitionLostInput = ref<HTMLTextAreaElement | null>(null)
+const petitionCancelledInput = ref<HTMLTextAreaElement | null>(null)
 const testPayeeId = ref<number | ''>('')
 
 function toggleSection(section: keyof typeof expandedSections) {
@@ -576,6 +764,10 @@ function insertVar(eventType: string, variable: string) {
     payment_claim_prompt: paymentClaimPromptInput,
     petition_assignee_question: petitionAssigneeInput,
     petition_resolved_no_change: petitionResolvedInput,
+    petition_submitted: petitionSubmittedInput,
+    petition_reassigned_to_you: petitionReassignedInput,
+    petition_lost: petitionLostInput,
+    petition_cancelled: petitionCancelledInput,
   }
   
   const inputRef = inputMap[eventType]
@@ -651,6 +843,10 @@ async function saveAll() {
       'payment_claim_prompt',
       'petition_assignee_question',
       'petition_resolved_no_change',
+      'petition_submitted',
+      'petition_reassigned_to_you',
+      'petition_lost',
+      'petition_cancelled',
     ]
     let success = true
     
