@@ -29,7 +29,7 @@ import db
 app = FastAPI(title="Con Edison API")
 
 # Code version for deployment verification
-CODE_VERSION = "1.3.72"
+CODE_VERSION = "1.3.73"
 
 @app.on_event("startup")
 async def startup():
@@ -2099,22 +2099,23 @@ async def create_payment_petition(payment_id: int, body: PetitionModel):
         existing_petition = await db.get_active_petition_for_payee(body.payee_id)
         if existing_petition:
             old_payment_id = existing_petition.get("payment_id")
-            old_amount = existing_petition.get("amount", "N/A")
-            old_payment_date = existing_petition.get("payment_date", "N/A")
-            old_assignee_id = existing_petition.get("assignee_id")
+            if old_payment_id != payment_id:
+                old_amount = existing_petition.get("amount", "N/A")
+                old_payment_date = existing_petition.get("payment_date", "N/A")
+                old_assignee_id = existing_petition.get("assignee_id")
 
-            await db.cancel_petition(old_payment_id, body.payee_id)
+                await db.cancel_petition(old_payment_id, body.payee_id)
 
-            old_assignee = None
-            if old_assignee_id:
-                old_assignee = await db.get_payee_user_by_id(old_assignee_id)
+                old_assignee = None
+                if old_assignee_id:
+                    old_assignee = await db.get_payee_user_by_id(old_assignee_id)
 
-            from notifications import notify_petition_cancelled
-            await notify_petition_cancelled(old_assignee, petitioner, old_amount, old_payment_date)
-            await db.add_log(
-                "info",
-                f"Cancelled existing petition on payment {old_payment_id} before creating new one",
-            )
+                from notifications import notify_petition_cancelled
+                await notify_petition_cancelled(old_assignee, petitioner, old_amount, old_payment_date)
+                await db.add_log(
+                    "info",
+                    f"Cancelled existing petition on payment {old_payment_id} before creating new one",
+                )
 
         ok = await db.create_payment_petition(payment_id, body.payee_id)
         if not ok:
