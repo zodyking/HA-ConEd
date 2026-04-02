@@ -177,23 +177,32 @@ async def notify_payment_unclaimed(
 async def send_payment_claim_request(payment: Dict[str, Any], payees: List[Dict[str, Any]]) -> int:
     """
     Send per-payee claim notifications for an unverified payment.
-    Title: "Payment to claim"
-    Message: "Did you make the $X.XX payment on [date]?"
+    Title/message from notification config payment_claim_prompt (editable in Settings).
     Actions: Yes (CONED_CLAIM_YES_<payment_id>_<payee_id>), No (CONED_CLAIM_NO_<payment_id>_<payee_id>)
-    Main tap does nothing; only Yes/No actions trigger the automation.
     """
     import aiohttp
-    
+    import db
+
+    await db.ensure_notification_configs_exist()
+    cfg = await db.get_notification_config("payment_claim_prompt")
+    if cfg and not cfg.get("enabled", True):
+        logger.debug("payment_claim_prompt notifications disabled, skipping claim request sends")
+        return 0
+
     token = os.environ.get("SUPERVISOR_TOKEN")
     if not token:
         logger.debug("Not running as HA addon, skipping payment claim notifications")
         return 0
-    
+
     payment_id = payment.get("id")
     amount = payment.get("amount", "N/A")
     payment_date = payment.get("payment_date", "N/A")
-    title = ensure_con_edison_title("Payment to claim")
-    message = f"Did you make the {amount} payment on {payment_date}? (Tap & Hold to respond)"
+    if cfg:
+        title = ensure_con_edison_title(cfg.get("title") or "Payment to claim")
+        message = format_template(cfg.get("template") or "", {"amount": amount, "payment_date": payment_date})
+    else:
+        title = ensure_con_edison_title("Payment to claim")
+        message = f"Did you make the {amount} payment on {payment_date}? (Tap & Hold to respond)"
     
     sent_count = 0
     try:
@@ -285,6 +294,12 @@ async def send_petition_assignee_question(
     import aiohttp
     import db
 
+    await db.ensure_notification_configs_exist()
+    cfg = await db.get_notification_config("petition_assignee_question")
+    if cfg and not cfg.get("enabled", True):
+        logger.debug("petition_assignee_question disabled, skipping petition question notify")
+        return False
+
     token = os.environ.get("SUPERVISOR_TOKEN")
     if not token:
         logger.debug("Not running as HA addon, skipping petition notification")
@@ -299,11 +314,20 @@ async def send_petition_assignee_question(
         return False
     amount = payment.get("amount", "N/A")
     payment_date = payment.get("payment_date", "N/A")
-    title = ensure_con_edison_title("Payment petition")
-    message = (
-        f"{petitioner_name} has requested a payment petition for payment made on {payment_date} "
-        f"in the amount of {amount}. Are you sure you made this payment? (Tap & hold to respond)"
-    )
+    tmpl_data = {
+        "petitioner_name": petitioner_name,
+        "amount": amount,
+        "payment_date": payment_date,
+    }
+    if cfg:
+        title = ensure_con_edison_title(cfg.get("title") or "Payment petition")
+        message = format_template(cfg.get("template") or "", tmpl_data)
+    else:
+        title = ensure_con_edison_title("Payment petition")
+        message = (
+            f"{petitioner_name} has requested a payment petition for payment made on {payment_date} "
+            f"in the amount of {amount}. Are you sure you made this payment? (Tap & hold to respond)"
+        )
     data_payload = {
         "actions": [
             {
@@ -343,15 +367,27 @@ async def notify_petition_assignee_confirmed(
     Inform assignee and petitioner that assignee is sure they made the payment; ledger unchanged.
     """
     import aiohttp
+    import db
+
+    await db.ensure_notification_configs_exist()
+    cfg = await db.get_notification_config("petition_resolved_no_change")
+    if cfg and not cfg.get("enabled", True):
+        logger.debug("petition_resolved_no_change disabled, skipping dual notify")
+        return 0
 
     token = os.environ.get("SUPERVISOR_TOKEN")
     if not token:
         return 0
-    title = ensure_con_edison_title("Payment petition resolved")
-    message = (
-        f"{payee_name} is sure they made the payment posted on {payment_date}, "
-        f"in the amount of {amount}. No changes have been made."
-    )
+    tmpl_data = {"payee_name": payee_name, "amount": amount, "payment_date": payment_date}
+    if cfg:
+        title = ensure_con_edison_title(cfg.get("title") or "Payment petition resolved")
+        message = format_template(cfg.get("template") or "", tmpl_data)
+    else:
+        title = ensure_con_edison_title("Payment petition resolved")
+        message = (
+            f"{payee_name} is sure they made the payment posted on {payment_date}, "
+            f"in the amount of {amount}. No changes have been made."
+        )
     sent = 0
     seen = set()
     try:
@@ -366,6 +402,175 @@ async def notify_petition_assignee_confirmed(
                     sent += 1
     except Exception as e:
         logger.error("notify_petition_assignee_confirmed failed: %s", e)
+    return sent
+
+
+async def notify_petition_submitted(
+    petitioner: Dict[str, Any],
+    assignee_name: str,
+    amount: str,
+    payment_date: str,
+) -> bool:
+    """Notify the petitioner that their petition request was sent to the assignee."""
+    import aiohttp
+    import db
+
+    await db.ensure_notification_configs_exist()
+    cfg = await db.get_notification_config("petition_submitted")
+    if cfg and not cfg.get("enabled", True):
+        logger.debug("petition_submitted disabled, skipping notify")
+        return False
+
+    token = os.environ.get("SUPERVISOR_TOKEN")
+    if not token:
+        return False
+
+    notify_service = petitioner.get("notify_service")
+    if not notify_service:
+        logger.debug("Petitioner has no notify_service, skipping petition_submitted")
+        return False
+
+    tmpl_data = {"amount": amount, "payment_date": payment_date, "assignee_name": assignee_name}
+    if cfg:
+        title = ensure_con_edison_title(cfg.get("title") or "Petition Sent")
+        message = format_template(cfg.get("template") or "", tmpl_data)
+    else:
+        title = ensure_con_edison_title("Petition Sent")
+        message = f"Your petition for the {amount} payment on {payment_date} was sent to {assignee_name}."
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            return await _notify_one_device(session, token, notify_service, title, message)
+    except Exception as e:
+        logger.error("notify_petition_submitted failed: %s", e)
+        return False
+
+
+async def notify_petition_reassigned_to_you(
+    petitioner: Dict[str, Any],
+    amount: str,
+    payment_date: str,
+) -> bool:
+    """Notify the petitioner that the payment has been reassigned to them."""
+    import aiohttp
+    import db
+
+    await db.ensure_notification_configs_exist()
+    cfg = await db.get_notification_config("petition_reassigned_to_you")
+    if cfg and not cfg.get("enabled", True):
+        logger.debug("petition_reassigned_to_you disabled, skipping notify")
+        return False
+
+    token = os.environ.get("SUPERVISOR_TOKEN")
+    if not token:
+        return False
+
+    notify_service = petitioner.get("notify_service")
+    if not notify_service:
+        logger.debug("Petitioner has no notify_service, skipping petition_reassigned_to_you")
+        return False
+
+    tmpl_data = {"amount": amount, "payment_date": payment_date}
+    if cfg:
+        title = ensure_con_edison_title(cfg.get("title") or "Payment Reassigned")
+        message = format_template(cfg.get("template") or "", tmpl_data)
+    else:
+        title = ensure_con_edison_title("Payment Reassigned")
+        message = f"The {amount} payment on {payment_date} has been reassigned to you."
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            return await _notify_one_device(session, token, notify_service, title, message)
+    except Exception as e:
+        logger.error("notify_petition_reassigned_to_you failed: %s", e)
+        return False
+
+
+async def notify_petition_lost(
+    assignee: Dict[str, Any],
+    petitioner_name: str,
+    amount: str,
+    payment_date: str,
+) -> bool:
+    """Notify the original assignee that the payment was reassigned per their response."""
+    import aiohttp
+    import db
+
+    await db.ensure_notification_configs_exist()
+    cfg = await db.get_notification_config("petition_lost")
+    if cfg and not cfg.get("enabled", True):
+        logger.debug("petition_lost disabled, skipping notify")
+        return False
+
+    token = os.environ.get("SUPERVISOR_TOKEN")
+    if not token:
+        return False
+
+    notify_service = assignee.get("notify_service")
+    if not notify_service:
+        logger.debug("Assignee has no notify_service, skipping petition_lost")
+        return False
+
+    tmpl_data = {"amount": amount, "payment_date": payment_date, "petitioner_name": petitioner_name}
+    if cfg:
+        title = ensure_con_edison_title(cfg.get("title") or "Payment Reassigned")
+        message = format_template(cfg.get("template") or "", tmpl_data)
+    else:
+        title = ensure_con_edison_title("Payment Reassigned")
+        message = f"Per your response, the {amount} payment on {payment_date} was reassigned to {petitioner_name}."
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            return await _notify_one_device(session, token, notify_service, title, message)
+    except Exception as e:
+        logger.error("notify_petition_lost failed: %s", e)
+        return False
+
+
+async def notify_petition_cancelled(
+    assignee: Dict[str, Any],
+    petitioner: Dict[str, Any],
+    amount: str,
+    payment_date: str,
+) -> int:
+    """Notify both parties that a petition has been closed/cancelled."""
+    import aiohttp
+    import db
+
+    await db.ensure_notification_configs_exist()
+    cfg = await db.get_notification_config("petition_cancelled")
+    if cfg and not cfg.get("enabled", True):
+        logger.debug("petition_cancelled disabled, skipping notify")
+        return 0
+
+    token = os.environ.get("SUPERVISOR_TOKEN")
+    if not token:
+        return 0
+
+    tmpl_data = {"amount": amount, "payment_date": payment_date}
+    if cfg:
+        title = ensure_con_edison_title(cfg.get("title") or "Petition Closed")
+        message = format_template(cfg.get("template") or "", tmpl_data)
+    else:
+        title = ensure_con_edison_title("Petition Closed")
+        message = f"The petition for the {amount} payment on {payment_date} has been closed."
+
+    sent = 0
+    seen = set()
+    try:
+        async with aiohttp.ClientSession() as session:
+            for p in (assignee, petitioner):
+                if not p:
+                    continue
+                ns = p.get("notify_service")
+                pid = p.get("id")
+                if not ns or pid in seen:
+                    continue
+                seen.add(pid)
+                if await _notify_one_device(session, token, ns, title, message):
+                    sent += 1
+    except Exception as e:
+        logger.error("notify_petition_cancelled failed: %s", e)
     return sent
 
 

@@ -1207,6 +1207,51 @@ async def get_payment_petitions(payment_id: Optional[int] = None) -> List[Dict[s
     finally:
         await conn.close()
 
+
+async def get_active_petition_for_payee(payee_id: int) -> Optional[Dict[str, Any]]:
+    """Get the active petition for a payee (if any). Only one petition per payee allowed."""
+    conn = await _raw_conn()
+    try:
+        row = await conn.fetchrow(
+            """SELECT pp.id, pp.payment_id, pp.petitioning_payee_id, pp.created_at,
+                      p.amount, p.payment_date, p.payee_user_id as assignee_id
+               FROM payment_petitions pp
+               JOIN payments p ON p.id = pp.payment_id
+               WHERE pp.petitioning_payee_id = $1
+               LIMIT 1""",
+            payee_id,
+        )
+        if not row:
+            return None
+        return {
+            "id": row["id"],
+            "payment_id": row["payment_id"],
+            "petitioning_payee_id": row["petitioning_payee_id"],
+            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+            "amount": row["amount"],
+            "payment_date": row["payment_date"],
+            "assignee_id": row["assignee_id"],
+        }
+    finally:
+        await conn.close()
+
+
+async def cancel_petition(payment_id: int, petitioning_payee_id: int) -> bool:
+    """Cancel/delete a petition. Returns True if a row was deleted."""
+    conn = await _raw_conn()
+    try:
+        result = await conn.execute(
+            "DELETE FROM payment_petitions WHERE payment_id = $1 AND petitioning_payee_id = $2",
+            payment_id,
+            petitioning_payee_id,
+        )
+        return result == "DELETE 1"
+    except Exception:
+        return False
+    finally:
+        await conn.close()
+
+
 # =============================================================================
 # Payee Users
 # =============================================================================
@@ -1474,6 +1519,41 @@ DEFAULT_NOTIFICATION_CONFIGS = [
         "event_type": "payment_unclaimed",
         "title": "Con Edison Payment Unclaimed",
         "template": "{payee_name} has unclaimed a payment of {amount} made on {payment_date}. If this was in error you can claim the payment via the account ledger.",
+    },
+    {
+        "event_type": "payment_claim_prompt",
+        "title": "Payment to claim",
+        "template": "Did you make the {amount} payment on {payment_date}? (Tap & hold to respond)",
+    },
+    {
+        "event_type": "petition_assignee_question",
+        "title": "Payment Petition",
+        "template": "{petitioner_name} claims the {amount} payment on {payment_date}. Did you make it? (Tap & Hold To Respond)",
+    },
+    {
+        "event_type": "petition_resolved_no_change",
+        "title": "Petition Resolved",
+        "template": "{payee_name} confirmed the {amount} payment on {payment_date} is theirs. No changes made.",
+    },
+    {
+        "event_type": "petition_submitted",
+        "title": "Petition Sent",
+        "template": "Your petition for the {amount} payment on {payment_date} was sent to {assignee_name}.",
+    },
+    {
+        "event_type": "petition_reassigned_to_you",
+        "title": "Payment Reassigned",
+        "template": "The {amount} payment on {payment_date} has been reassigned to you.",
+    },
+    {
+        "event_type": "petition_lost",
+        "title": "Payment Reassigned",
+        "template": "Per your response, the {amount} payment on {payment_date} was reassigned to {petitioner_name}.",
+    },
+    {
+        "event_type": "petition_cancelled",
+        "title": "Petition Closed",
+        "template": "The petition for the {amount} payment on {payment_date} has been closed.",
     },
 ]
 

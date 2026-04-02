@@ -354,6 +354,122 @@
           </div>
         </div>
 
+        <!-- Payment claim prompt (per-payee Yes/No push) -->
+        <div class="notify-section">
+          <div class="notify-section-header" @click="toggleSection('payment_claim_prompt')">
+            <div class="notify-section-title">
+              <span class="notify-section-icon">❓</span>
+              <span>Payment claim prompt</span>
+            </div>
+            <span class="notify-section-sub">“Did you make this payment?” — sent to each payee (actions unchanged)</span>
+            <span class="notify-section-chevron" :class="{ expanded: expandedSections.payment_claim_prompt }">▼</span>
+          </div>
+          <div v-if="expandedSections.payment_claim_prompt" class="notify-section-content">
+            <div class="notify-toggle-row">
+              <label class="notify-toggle">
+                <input v-model="configs.payment_claim_prompt.enabled" type="checkbox" />
+                <span class="notify-toggle-slider"></span>
+              </label>
+              <span class="notify-toggle-label">Enable</span>
+            </div>
+            <template v-if="configs.payment_claim_prompt.enabled">
+              <div class="notify-form-group">
+                <label class="notify-label">Title</label>
+                <input v-model="configs.payment_claim_prompt.title" type="text" class="notify-input" />
+              </div>
+              <div class="notify-form-group">
+                <label class="notify-label">Message template</label>
+                <div class="notify-var-chips">
+                  <span class="notify-var-chip" @click="insertVar('payment_claim_prompt', '{amount}')">{amount}</span>
+                  <span class="notify-var-chip" @click="insertVar('payment_claim_prompt', '{payment_date}')">{payment_date}</span>
+                </div>
+                <textarea ref="paymentClaimPromptInput" v-model="configs.payment_claim_prompt.template" class="notify-textarea" rows="3"></textarea>
+              </div>
+              <button class="notify-btn notify-btn-test" :disabled="testing === 'payment_claim_prompt'" @click="testNotification('payment_claim_prompt')">
+                {{ testing === 'payment_claim_prompt' ? 'Sending...' : '📱 Test Notification' }}
+              </button>
+            </template>
+          </div>
+        </div>
+
+        <!-- Petition: question to assignee -->
+        <div class="notify-section">
+          <div class="notify-section-header" @click="toggleSection('petition_assignee_question')">
+            <div class="notify-section-title">
+              <span class="notify-section-icon">📣</span>
+              <span>Petition — assignee question</span>
+            </div>
+            <span class="notify-section-sub">Sent to the payee currently assigned when someone petitions</span>
+            <span class="notify-section-chevron" :class="{ expanded: expandedSections.petition_assignee_question }">▼</span>
+          </div>
+          <div v-if="expandedSections.petition_assignee_question" class="notify-section-content">
+            <div class="notify-toggle-row">
+              <label class="notify-toggle">
+                <input v-model="configs.petition_assignee_question.enabled" type="checkbox" />
+                <span class="notify-toggle-slider"></span>
+              </label>
+              <span class="notify-toggle-label">Enable</span>
+            </div>
+            <template v-if="configs.petition_assignee_question.enabled">
+              <div class="notify-form-group">
+                <label class="notify-label">Title</label>
+                <input v-model="configs.petition_assignee_question.title" type="text" class="notify-input" />
+              </div>
+              <div class="notify-form-group">
+                <label class="notify-label">Message template</label>
+                <div class="notify-var-chips">
+                  <span class="notify-var-chip" @click="insertVar('petition_assignee_question', '{petitioner_name}')">{petitioner_name}</span>
+                  <span class="notify-var-chip" @click="insertVar('petition_assignee_question', '{amount}')">{amount}</span>
+                  <span class="notify-var-chip" @click="insertVar('petition_assignee_question', '{payment_date}')">{payment_date}</span>
+                </div>
+                <textarea ref="petitionAssigneeInput" v-model="configs.petition_assignee_question.template" class="notify-textarea" rows="3"></textarea>
+              </div>
+              <button class="notify-btn notify-btn-test" :disabled="testing === 'petition_assignee_question'" @click="testNotification('petition_assignee_question')">
+                {{ testing === 'petition_assignee_question' ? 'Sending...' : '📱 Test Notification' }}
+              </button>
+            </template>
+          </div>
+        </div>
+
+        <!-- Petition: no change (both parties) -->
+        <div class="notify-section">
+          <div class="notify-section-header" @click="toggleSection('petition_resolved_no_change')">
+            <div class="notify-section-title">
+              <span class="notify-section-icon">✔️</span>
+              <span>Petition — no change</span>
+            </div>
+            <span class="notify-section-sub">When assignee confirms they made the payment (notify both parties)</span>
+            <span class="notify-section-chevron" :class="{ expanded: expandedSections.petition_resolved_no_change }">▼</span>
+          </div>
+          <div v-if="expandedSections.petition_resolved_no_change" class="notify-section-content">
+            <div class="notify-toggle-row">
+              <label class="notify-toggle">
+                <input v-model="configs.petition_resolved_no_change.enabled" type="checkbox" />
+                <span class="notify-toggle-slider"></span>
+              </label>
+              <span class="notify-toggle-label">Enable</span>
+            </div>
+            <template v-if="configs.petition_resolved_no_change.enabled">
+              <div class="notify-form-group">
+                <label class="notify-label">Title</label>
+                <input v-model="configs.petition_resolved_no_change.title" type="text" class="notify-input" />
+              </div>
+              <div class="notify-form-group">
+                <label class="notify-label">Message template</label>
+                <div class="notify-var-chips">
+                  <span class="notify-var-chip" @click="insertVar('petition_resolved_no_change', '{payee_name}')">{payee_name}</span>
+                  <span class="notify-var-chip" @click="insertVar('petition_resolved_no_change', '{amount}')">{amount}</span>
+                  <span class="notify-var-chip" @click="insertVar('petition_resolved_no_change', '{payment_date}')">{payment_date}</span>
+                </div>
+                <textarea ref="petitionResolvedInput" v-model="configs.petition_resolved_no_change.template" class="notify-textarea" rows="3"></textarea>
+              </div>
+              <button class="notify-btn notify-btn-test" :disabled="testing === 'petition_resolved_no_change'" @click="testNotification('petition_resolved_no_change')">
+                {{ testing === 'petition_resolved_no_change' ? 'Sending...' : '📱 Test Notification' }}
+              </button>
+            </template>
+          </div>
+        </div>
+
         <!-- Save Button -->
         <div class="notify-actions">
           <button class="notify-btn notify-btn-primary" :disabled="saving" @click="saveAll">
@@ -396,7 +512,10 @@ const expandedSections = reactive({
   balance_change: false,
   late_fee: false,
   payment_claimed: false,
-  payment_unclaimed: false
+  payment_unclaimed: false,
+  payment_claim_prompt: false,
+  petition_assignee_question: false,
+  petition_resolved_no_change: false,
 })
 
 const configs = reactive<Record<string, NotificationConfig>>({
@@ -406,7 +525,27 @@ const configs = reactive<Record<string, NotificationConfig>>({
   balance_change: { event_type: 'balance_change', enabled: true, title: 'Con Edison Balance', template: 'Your account balance changed from {old_balance} to {new_balance}' },
   late_fee: { event_type: 'late_fee', enabled: true, title: 'Con Edison Late Fee', template: '{late_fee_amount} has been added to your account balance as a late fee charge. To avoid late fees pay bill by the due date.' },
   payment_claimed: { event_type: 'payment_claimed', enabled: true, title: 'Con Edison Payment Claimed', template: '{payee_name} has claimed a payment of {amount} made on {payment_date}. If this was in error you can unclaim the payment via the account ledger.' },
-  payment_unclaimed: { event_type: 'payment_unclaimed', enabled: true, title: 'Con Edison Payment Unclaimed', template: '{payee_name} has unclaimed a payment of {amount} made on {payment_date}. If this was in error you can claim the payment via the account ledger.' }
+  payment_unclaimed: { event_type: 'payment_unclaimed', enabled: true, title: 'Con Edison Payment Unclaimed', template: '{payee_name} has unclaimed a payment of {amount} made on {payment_date}. If this was in error you can claim the payment via the account ledger.' },
+  payment_claim_prompt: {
+    event_type: 'payment_claim_prompt',
+    enabled: true,
+    title: 'Payment to claim',
+    template: 'Did you make the {amount} payment on {payment_date}? (Tap & hold to respond)',
+  },
+  petition_assignee_question: {
+    event_type: 'petition_assignee_question',
+    enabled: true,
+    title: 'Payment petition',
+    template:
+      '{petitioner_name} has requested a payment petition for payment made on {payment_date} in the amount of {amount}. Are you sure you made this payment? (Tap & hold to respond)',
+  },
+  petition_resolved_no_change: {
+    event_type: 'petition_resolved_no_change',
+    enabled: true,
+    title: 'Payment petition resolved',
+    template:
+      '{payee_name} is sure they made the payment posted on {payment_date}, in the amount of {amount}. No changes have been made.',
+  },
 })
 
 const newBillInput = ref<HTMLTextAreaElement | null>(null)
@@ -416,10 +555,13 @@ const balanceChangeInput = ref<HTMLTextAreaElement | null>(null)
 const lateFeeInput = ref<HTMLTextAreaElement | null>(null)
 const paymentClaimedInput = ref<HTMLTextAreaElement | null>(null)
 const paymentUnclaimedInput = ref<HTMLTextAreaElement | null>(null)
+const paymentClaimPromptInput = ref<HTMLTextAreaElement | null>(null)
+const petitionAssigneeInput = ref<HTMLTextAreaElement | null>(null)
+const petitionResolvedInput = ref<HTMLTextAreaElement | null>(null)
 const testPayeeId = ref<number | ''>('')
 
-function toggleSection(section: string) {
-  expandedSections[section as keyof typeof expandedSections] = !expandedSections[section as keyof typeof expandedSections]
+function toggleSection(section: keyof typeof expandedSections) {
+  expandedSections[section] = !expandedSections[section]
 }
 
 function insertVar(eventType: string, variable: string) {
@@ -430,7 +572,10 @@ function insertVar(eventType: string, variable: string) {
     balance_change: balanceChangeInput,
     late_fee: lateFeeInput,
     payment_claimed: paymentClaimedInput,
-    payment_unclaimed: paymentUnclaimedInput
+    payment_unclaimed: paymentUnclaimedInput,
+    payment_claim_prompt: paymentClaimPromptInput,
+    petition_assignee_question: petitionAssigneeInput,
+    petition_resolved_no_change: petitionResolvedInput,
   }
   
   const inputRef = inputMap[eventType]
@@ -495,7 +640,18 @@ async function saveAll() {
   message.value = null
   
   try {
-    const eventTypes = ['new_bill', 'payment_received', 'due_reminder', 'balance_change', 'late_fee', 'payment_claimed', 'payment_unclaimed']
+    const eventTypes = [
+      'new_bill',
+      'payment_received',
+      'due_reminder',
+      'balance_change',
+      'late_fee',
+      'payment_claimed',
+      'payment_unclaimed',
+      'payment_claim_prompt',
+      'petition_assignee_question',
+      'petition_resolved_no_change',
+    ]
     let success = true
     
     for (const eventType of eventTypes) {

@@ -29,7 +29,7 @@ import db
 app = FastAPI(title="Con Edison API")
 
 # Code version for deployment verification
-CODE_VERSION = "1.3.70"
+CODE_VERSION = "1.3.71"
 
 @app.on_event("startup")
 async def startup():
@@ -1976,15 +1976,24 @@ async def handle_petition_notification_action(action: str) -> Dict[str, Any]:
     if not ok:
         raise HTTPException(status_code=500, detail="Failed to assign payment")
     try:
-        from notifications import notify_payment_claimed
+        from notifications import notify_petition_lost, notify_petition_reassigned_to_you
         from tts_scheduler import trigger_payment_claimed_tts
 
         pname = petitioner.get("name", "Unknown")
-        await notify_payment_claimed(
-            payee_name=pname,
-            amount=amount,
-            payment_date=payment_date,
+
+        await notify_petition_lost(
+            assignee,
+            pname,
+            amount,
+            payment_date,
         )
+
+        await notify_petition_reassigned_to_you(
+            petitioner,
+            amount,
+            payment_date,
+        )
+
         await trigger_payment_claimed_tts(
             payee_name=pname,
             amount=amount,
@@ -2086,10 +2095,32 @@ async def create_payment_petition(payment_id: int, body: PetitionModel):
                 status_code=400,
                 detail="Assigned payee has no notify service — cannot send petition question",
             )
+
+        existing_petition = await db.get_active_petition_for_payee(body.payee_id)
+        if existing_petition:
+            old_payment_id = existing_petition.get("payment_id")
+            old_amount = existing_petition.get("amount", "N/A")
+            old_payment_date = existing_petition.get("payment_date", "N/A")
+            old_assignee_id = existing_petition.get("assignee_id")
+
+            await db.cancel_petition(old_payment_id, body.payee_id)
+
+            old_assignee = None
+            if old_assignee_id:
+                old_assignee = await db.get_payee_user_by_id(old_assignee_id)
+
+            from notifications import notify_petition_cancelled
+            await notify_petition_cancelled(old_assignee, petitioner, old_amount, old_payment_date)
+            await db.add_log(
+                "info",
+                f"Cancelled existing petition on payment {old_payment_id} before creating new one",
+            )
+
         ok = await db.create_payment_petition(payment_id, body.payee_id)
         if not ok:
             raise HTTPException(status_code=500, detail="Failed to create petition")
-        from notifications import send_petition_assignee_question
+
+        from notifications import send_petition_assignee_question, notify_petition_submitted
 
         sent = await send_petition_assignee_question(
             assignee,
@@ -2102,6 +2133,14 @@ async def create_payment_petition(payment_id: int, body: PetitionModel):
                 "warning",
                 f"Petition created for payment {payment_id} but assignee notification was not sent",
             )
+
+        await notify_petition_submitted(
+            petitioner,
+            assignee.get("name") or "the assigned payee",
+            payment.get("amount", "N/A"),
+            payment.get("payment_date", "N/A"),
+        )
+
         return {"success": True}
     except HTTPException:
         raise
