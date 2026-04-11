@@ -266,7 +266,7 @@
         <div class="ha-card-content">
           <template v-if="(ledgerData.bills?.length ?? 0) > 0">
             <div 
-              v-for="(bill, index) in ledgerData.bills" 
+              v-for="(bill, index) in (ledgerData.bills ?? [])" 
               :key="bill.id" 
               class="ha-bill-card"
               :class="{ 'ha-bill-card-latest': index === 0 }"
@@ -399,7 +399,7 @@
                 ⚠️ Unlinked Payments - Assign in Settings → Payments
               </div>
               <div
-                v-for="payment in ledgerData.orphan_payments"
+                v-for="payment in (ledgerData.orphan_payments ?? [])"
                 :key="payment.id"
                 class="ha-payment-entry ha-payment-clickable"
                 role="button"
