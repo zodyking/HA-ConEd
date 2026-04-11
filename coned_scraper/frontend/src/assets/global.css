@@ -519,6 +519,30 @@ body {
   color: #2e7d32;
 }
 
+/* Late Fee Styles */
+.ha-late-fee-entry {
+  padding: 0.6rem 0.85rem 0.6rem 1.5rem;
+  background: linear-gradient(135deg, #ffebee 0%, #ffcdd2 100%);
+  border-top: 1px solid #e0e0e0;
+}
+
+.ha-late-fee-badge {
+  padding: 0.15rem 0.5rem;
+  border-radius: 3px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  background: #f44336;
+  color: white;
+  text-transform: uppercase;
+  letter-spacing: 0.2px;
+}
+
+.ha-late-fee-amount {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #c62828;
+}
+
 /* Settings Styles */
 .ha-form-group {
   margin-bottom: 1rem;

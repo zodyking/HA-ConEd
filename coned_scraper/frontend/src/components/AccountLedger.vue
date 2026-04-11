@@ -382,6 +382,19 @@
                         </div>
                       </div>
                     </div>
+                    
+                    <!-- Late Fee Row (if exists) -->
+                    <div v-if="bill.late_fee" class="ha-late-fee-entry">
+                      <div class="ha-payment-row">
+                        <div class="ha-payment-meta">
+                          <span class="ha-late-fee-badge">Late Fee</span>
+                          <div>
+                            <div class="ha-payment-desc">Late payment charge</div>
+                          </div>
+                        </div>
+                        <div class="ha-late-fee-amount">{{ bill.late_fee.amount }}</div>
+                      </div>
+                    </div>
                   </div>
                 </div>
                 
@@ -509,6 +522,7 @@ interface Bill {
   last_scraped_at: string
   scrape_count: number
   payments: Payment[]
+  late_fee?: { amount: string; amount_numeric: number } | null
 }
 
 interface PendingNewBill {

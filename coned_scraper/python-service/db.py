@@ -2871,6 +2871,13 @@ async def get_ledger_data() -> Dict[str, Any]:
                 for p in bill.payments
             ]
         }
+        # Include late fee if one was recorded for this bill
+        late_fee_amount = await get_stored_late_fee_amount(bill.id)
+        bill_dict["late_fee"] = (
+            {"amount": f"${late_fee_amount:.2f}", "amount_numeric": late_fee_amount}
+            if late_fee_amount
+            else None
+        )
         bills_data.append(bill_dict)
     
     # Get orphan payments (no bill) - merge into correct bills for display
