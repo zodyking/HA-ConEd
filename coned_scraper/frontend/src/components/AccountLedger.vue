@@ -264,7 +264,7 @@
           <span>Bill History Ledger</span>
         </div>
         <div class="ha-card-content">
-          <template v-if="ledgerData.bills.length > 0">
+          <template v-if="(ledgerData.bills?.length ?? 0) > 0">
             <div 
               v-for="(bill, index) in ledgerData.bills" 
               :key="bill.id" 
