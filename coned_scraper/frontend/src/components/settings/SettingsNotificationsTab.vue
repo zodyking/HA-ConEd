@@ -183,6 +183,61 @@
           </div>
         </div>
 
+        <!-- Payee balance reminder (per payee, underpaid only) -->
+        <div class="notify-section">
+          <div class="notify-section-header" @click="toggleSection('payee_balance_reminder')">
+            <div class="notify-section-title">
+              <span class="notify-section-icon">📬</span>
+              <span>Payee balance reminder</span>
+            </div>
+            <span class="notify-section-sub">Daily reminder to underpaid payees: remaining share and days left in cycle</span>
+            <span class="notify-section-chevron" :class="{ expanded: expandedSections.payee_balance_reminder }">▼</span>
+          </div>
+
+          <div v-if="expandedSections.payee_balance_reminder" class="notify-section-content">
+            <div class="notify-toggle-row">
+              <label class="notify-toggle">
+                <input v-model="configs.payee_balance_reminder.enabled" type="checkbox" />
+                <span class="notify-toggle-slider"></span>
+              </label>
+              <span class="notify-toggle-label">Enable Notification</span>
+            </div>
+
+            <template v-if="configs.payee_balance_reminder.enabled">
+              <div class="notify-form-group">
+                <label class="notify-label">Send at time (daily)</label>
+                <input v-model="configs.payee_balance_reminder.reminder_send_time" type="time" class="notify-input notify-input-small" />
+                <p class="notify-hint">Only payees who still owe on the latest bill are notified</p>
+              </div>
+
+              <div class="notify-form-group">
+                <label class="notify-label">Title</label>
+                <input v-model="configs.payee_balance_reminder.title" type="text" class="notify-input" />
+              </div>
+
+              <div class="notify-form-group">
+                <label class="notify-label">Message Template</label>
+                <div class="notify-var-chips">
+                  <span class="notify-var-chip" @click="insertVar('payee_balance_reminder', '{payee_name}')">{payee_name}</span>
+                  <span class="notify-var-chip" @click="insertVar('payee_balance_reminder', '{remaining_balance}')">{remaining_balance}</span>
+                  <span class="notify-var-chip" @click="insertVar('payee_balance_reminder', '{days_remaining_cycle}')">{days_remaining_cycle}</span>
+                  <span class="notify-var-chip" @click="insertVar('payee_balance_reminder', '{billing_period_end}')">{billing_period_end}</span>
+                </div>
+                <textarea
+                  ref="payeeBalanceReminderInput"
+                  v-model="configs.payee_balance_reminder.template"
+                  class="notify-textarea"
+                  rows="3"
+                ></textarea>
+              </div>
+
+              <button class="notify-btn notify-btn-test" :disabled="testing === 'payee_balance_reminder'" @click="testNotification('payee_balance_reminder')">
+                {{ testing === 'payee_balance_reminder' ? 'Sending...' : '📱 Test Notification' }}
+              </button>
+            </template>
+          </div>
+        </div>
+
         <!-- Balance Change -->
         <div class="notify-section">
           <div class="notify-section-header" @click="toggleSection('balance_change')">
@@ -663,6 +718,7 @@ const expandedSections = reactive({
   new_bill: true,
   payment_received: false,
   due_reminder: false,
+  payee_balance_reminder: false,
   balance_change: false,
   late_fee: false,
   payment_claimed: false,
@@ -680,6 +736,14 @@ const configs = reactive<Record<string, NotificationConfig>>({
   new_bill: { event_type: 'new_bill', enabled: true, title: 'Con Edison Billing', template: 'A new bill for {amount} has posted, due {due_date}' },
   payment_received: { event_type: 'payment_received', enabled: true, title: 'Con Edison Payment', template: 'Payment of {amount} received. Remaining balance: {balance}' },
   due_reminder: { event_type: 'due_reminder', enabled: true, title: 'Con Edison Reminder', template: 'Your bill of {amount} is due {days_until_text} on {due_date}', days_before_due: 3, reminder_send_time: '09:00' },
+  payee_balance_reminder: {
+    event_type: 'payee_balance_reminder',
+    enabled: true,
+    title: 'Con Edison Balance',
+    template:
+      '{payee_name}, you have a remaining balance of {remaining_balance} and {days_remaining_cycle} days to make a payment before the billing cycle ends.',
+    reminder_send_time: '09:00',
+  },
   balance_change: { event_type: 'balance_change', enabled: true, title: 'Con Edison Balance', template: 'Your account balance changed from {old_balance} to {new_balance}' },
   late_fee: { event_type: 'late_fee', enabled: true, title: 'Con Edison Late Fee', template: '{late_fee_amount} has been added to your account balance as a late fee charge. To avoid late fees pay bill by the due date.' },
   payment_claimed: { event_type: 'payment_claimed', enabled: true, title: 'Con Edison Payment Claimed', template: '{payee_name} has claimed a payment of {amount} made on {payment_date}. If this was in error you can unclaim the payment via the account ledger.' },
@@ -735,6 +799,7 @@ const configs = reactive<Record<string, NotificationConfig>>({
 const newBillInput = ref<HTMLTextAreaElement | null>(null)
 const paymentReceivedInput = ref<HTMLTextAreaElement | null>(null)
 const dueReminderInput = ref<HTMLTextAreaElement | null>(null)
+const payeeBalanceReminderInput = ref<HTMLTextAreaElement | null>(null)
 const balanceChangeInput = ref<HTMLTextAreaElement | null>(null)
 const lateFeeInput = ref<HTMLTextAreaElement | null>(null)
 const paymentClaimedInput = ref<HTMLTextAreaElement | null>(null)
@@ -757,6 +822,7 @@ function insertVar(eventType: string, variable: string) {
     new_bill: newBillInput,
     payment_received: paymentReceivedInput,
     due_reminder: dueReminderInput,
+    payee_balance_reminder: payeeBalanceReminderInput,
     balance_change: balanceChangeInput,
     late_fee: lateFeeInput,
     payment_claimed: paymentClaimedInput,
@@ -836,6 +902,7 @@ async function saveAll() {
       'new_bill',
       'payment_received',
       'due_reminder',
+      'payee_balance_reminder',
       'balance_change',
       'late_fee',
       'payment_claimed',

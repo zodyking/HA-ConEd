@@ -666,3 +666,101 @@ async def check_and_send_due_reminders() -> int:
         logger.error(f"Error checking due reminders: {e}")
     
     return 0
+
+
+async def check_and_send_payee_balance_reminders() -> int:
+    """
+    Daily per-payee notification when underpaid on the latest bill.
+    One send per payee per bill per calendar day (dedup).
+    """
+    import aiohttp
+    import db
+
+    await db.ensure_notification_configs_exist()
+    config = await db.get_notification_config("payee_balance_reminder")
+    if not config or not config.get("enabled"):
+        return 0
+
+    token = os.environ.get("SUPERVISOR_TOKEN")
+    if not token:
+        logger.debug("Not running as HA addon, skipping payee balance reminders")
+        return 0
+
+    summaries = await db.calculate_all_payee_balances()
+    if not summaries:
+        return 0
+    latest = summaries[0]
+    bill_id = latest.get("bill_id")
+    if bill_id is None:
+        return 0
+
+    days_rem, end_display = await db.compute_days_remaining_in_billing_cycle(latest)
+    days_str = str(days_rem) if days_rem is not None else "N/A"
+
+    payees = await db.get_payees_with_notifications()
+    if not payees:
+        return 0
+
+    title = ensure_con_edison_title(config.get("title") or "")
+    template = config.get("template") or ""
+
+    sent_count = 0
+    try:
+        async with aiohttp.ClientSession() as session:
+            for payee in payees:
+                pid = payee.get("id")
+                ns = payee.get("notify_service")
+                if not pid or not ns:
+                    continue
+                pr = next(
+                    (p for p in (latest.get("payees") or []) if p.get("user_id") == pid),
+                    None,
+                )
+                if not pr or pr.get("status") != "underpaid":
+                    continue
+                if await db.payee_balance_reminder_already_sent_today(pid, bill_id):
+                    continue
+                remaining = max(
+                    0.0, (pr.get("amount_due") or 0) - (pr.get("amount_paid") or 0)
+                )
+                remaining_s = f"${remaining:.2f}"
+                data = {
+                    "payee_name": pr.get("name") or payee.get("name") or "",
+                    "remaining_balance": remaining_s,
+                    "days_remaining_cycle": days_str,
+                    "billing_period_end": end_display,
+                }
+                message = format_template(template, data)
+                try:
+                    async with session.post(
+                        f"http://supervisor/core/api/services/notify/{ns}",
+                        headers={
+                            "Authorization": f"Bearer {token}",
+                            "Content-Type": "application/json",
+                        },
+                        json={"title": title, "message": message},
+                    ) as resp:
+                        if resp.status == 200:
+                            sent_count += 1
+                            await db.record_payee_balance_reminder_sent(pid, bill_id)
+                            logger.info(
+                                "Sent payee_balance_reminder to %s",
+                                payee.get("name"),
+                            )
+                        else:
+                            logger.warning(
+                                "payee_balance_reminder failed for %s: %s",
+                                ns,
+                                resp.status,
+                            )
+                except Exception as e:
+                    logger.error("payee_balance_reminder error for %s: %s", ns, e)
+    except Exception as e:
+        logger.error(f"check_and_send_payee_balance_reminders: {e}")
+
+    if sent_count > 0:
+        await db.add_log(
+            "info",
+            f"Sent payee_balance_reminder to {sent_count} device(s)",
+        )
+    return sent_count

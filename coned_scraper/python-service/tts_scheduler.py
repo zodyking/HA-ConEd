@@ -769,3 +769,137 @@ async def trigger_late_fee_tts(late_fee_amount: str):
     except Exception as e:
         logger.error(f"Error sending late fee TTS: {e}")
         await db.add_log("error", f"Late fee TTS error: {e}")
+
+
+DEFAULT_UNDERPAYMENT_STREAK_MSG = (
+    "{prefix} {payee_name}, you were underpaid for billing periods {month_range_1} and {month_range_2}. "
+    "Amounts short: {amount_owed_1} and {amount_owed_2}."
+)
+
+
+async def check_and_trigger_underpayment_streak_tts() -> int:
+    """
+    For each payee underpaid on the last two completed billing cycles, speak TTS once per day.
+    Returns number of successful announcements.
+    """
+    import db
+    from ha_tts import send_tts
+
+    scheduler = get_scheduler()
+    tts_config = await scheduler.load_tts_config()
+    if not tts_config.get("enabled") or not tts_config.get("underpayment_streak_enabled"):
+        return 0
+
+    media_player = (tts_config.get("media_player") or "").strip()
+    if not media_player:
+        await db.add_log("debug", "Underpayment streak TTS skipped: no media player")
+        return 0
+
+    summaries = await db.calculate_all_payee_balances()
+    recent, prior = db.get_last_two_completed_bill_summaries(summaries)
+    if not recent or not prior:
+        return 0
+
+    streak_rows = db.payees_underpaid_on_both_completed_cycles(recent, prior)
+    if not streak_rows:
+        return 0
+
+    messages = tts_config.get("messages") or {}
+    template = messages.get("underpayment_streak") or DEFAULT_UNDERPAYMENT_STREAK_MSG
+    prefix = tts_config.get("prefix", "Message from Con Edison.")
+
+    sent = 0
+    for row in streak_rows:
+        uid = row["user_id"]
+        if await db.underpayment_streak_tts_already_sent_today(uid):
+            continue
+        try:
+            message = template.format(
+                prefix=prefix,
+                payee_name=row.get("name") or "",
+                month_range_1=row.get("month_range_1") or "",
+                month_range_2=row.get("month_range_2") or "",
+                amount_owed_1=f"${row.get('amount_owed_1', 0):.2f}",
+                amount_owed_2=f"${row.get('amount_owed_2', 0):.2f}",
+            )
+        except KeyError:
+            message = template
+
+        success, err = await send_tts(
+            message=message,
+            media_player=media_player,
+            volume=tts_config.get("volume", 0.7),
+            wait_for_idle=tts_config.get("wait_for_idle", True),
+            tts_service=tts_config.get("tts_service", "tts.google_translate_say"),
+        )
+        if success:
+            await db.record_underpayment_streak_tts_sent(uid)
+            sent += 1
+            logger.info("Underpayment streak TTS sent for payee id %s", uid)
+        else:
+            logger.error("Underpayment streak TTS failed: %s", err)
+        await asyncio.sleep(3)
+
+    return sent
+
+
+async def trigger_underpayment_streak_tts_sample() -> None:
+    """Speak one test underpayment-streak message (real data if available)."""
+    import db
+    from ha_tts import send_tts
+
+    scheduler = get_scheduler()
+    tts_config = await scheduler.load_tts_config()
+    if not tts_config.get("enabled"):
+        await db.add_log("debug", "Underpayment streak sample TTS skipped: TTS not enabled")
+        return
+
+    media_player = (tts_config.get("media_player") or "").strip()
+    if not media_player:
+        await db.add_log("debug", "Underpayment streak sample TTS skipped: no media player")
+        return
+
+    summaries = await db.calculate_all_payee_balances()
+    recent, prior = db.get_last_two_completed_bill_summaries(summaries)
+    rows = (
+        db.payees_underpaid_on_both_completed_cycles(recent, prior)
+        if recent and prior
+        else []
+    )
+    if rows:
+        sample = rows[0]
+    else:
+        sample = {
+            "name": "Sample Payee",
+            "month_range_1": "JAN - FEB",
+            "month_range_2": "MAR - APR",
+            "amount_owed_1": 25.0,
+            "amount_owed_2": 40.0,
+        }
+
+    messages = tts_config.get("messages") or {}
+    template = messages.get("underpayment_streak") or DEFAULT_UNDERPAYMENT_STREAK_MSG
+    prefix = tts_config.get("prefix", "Message from Con Edison.")
+    try:
+        message = template.format(
+            prefix=prefix,
+            payee_name=sample.get("name") or "",
+            month_range_1=sample.get("month_range_1") or "",
+            month_range_2=sample.get("month_range_2") or "",
+            amount_owed_1=f"${float(sample.get('amount_owed_1', 0)):.2f}",
+            amount_owed_2=f"${float(sample.get('amount_owed_2', 0)):.2f}",
+        )
+    except KeyError:
+        message = template
+
+    success, err = await send_tts(
+        message=message,
+        media_player=media_player,
+        volume=tts_config.get("volume", 0.7),
+        wait_for_idle=tts_config.get("wait_for_idle", True),
+        tts_service=tts_config.get("tts_service", "tts.google_translate_say"),
+    )
+    if success:
+        await db.add_log("info", "Test underpayment streak TTS sent")
+    else:
+        await db.add_log("error", f"Test underpayment streak TTS failed: {err}")

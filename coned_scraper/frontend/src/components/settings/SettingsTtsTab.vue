@@ -224,6 +224,47 @@
                   {{ testing === 'payment_unclaimed' ? 'Sending...' : '↩️ Test Payment Unclaimed TTS' }}
                 </button>
               </div>
+
+              <div class="tts-form-group">
+                <div class="tts-toggle-row">
+                  <label class="tts-toggle">
+                    <input v-model="config.underpayment_streak_enabled" type="checkbox" />
+                    <span class="tts-toggle-slider"></span>
+                  </label>
+                  <span class="tts-toggle-label">Underpayment streak (last 2 completed cycles)</span>
+                </div>
+                <p class="tts-hint">Speaks when a payee was underpaid on both of the two most recently completed billing periods (requires statement period dates).</p>
+                <label class="tts-label">Daily send time</label>
+                <input
+                  v-model="config.underpayment_streak_send_time"
+                  type="time"
+                  class="tts-input"
+                  style="max-width: 120px"
+                />
+                <label class="tts-label" style="margin-top: 0.75rem">Underpayment streak message</label>
+                <div class="tts-var-chips">
+                  <span class="tts-var-chip tts-var-chip-prefix" @click="insertVar('underpayment_streak', '{prefix}')">{prefix}</span>
+                  <span class="tts-var-chip" @click="insertVar('underpayment_streak', '{payee_name}')">{payee_name}</span>
+                  <span class="tts-var-chip" @click="insertVar('underpayment_streak', '{month_range_1}')">{month_range_1}</span>
+                  <span class="tts-var-chip" @click="insertVar('underpayment_streak', '{month_range_2}')">{month_range_2}</span>
+                  <span class="tts-var-chip" @click="insertVar('underpayment_streak', '{amount_owed_1}')">{amount_owed_1}</span>
+                  <span class="tts-var-chip" @click="insertVar('underpayment_streak', '{amount_owed_2}')">{amount_owed_2}</span>
+                </div>
+                <textarea
+                  ref="underpaymentStreakInput"
+                  v-model="config.messages.underpayment_streak"
+                  class="tts-textarea"
+                  rows="3"
+                ></textarea>
+                <button
+                  type="button"
+                  class="tts-btn tts-btn-test-inline"
+                  :disabled="!config.enabled || !config.media_player || testing === 'underpayment_streak'"
+                  @click="testUnderpaymentStreakTts"
+                >
+                  {{ testing === 'underpayment_streak' ? 'Sending...' : '📉 Test underpayment streak TTS' }}
+                </button>
+              </div>
             </div>
           </template>
 
@@ -447,6 +488,7 @@ const paymentInput = ref<HTMLTextAreaElement | null>(null)
 const lateFeeInput = ref<HTMLTextAreaElement | null>(null)
 const paymentClaimedInput = ref<HTMLTextAreaElement | null>(null)
 const paymentUnclaimedInput = ref<HTMLTextAreaElement | null>(null)
+const underpaymentStreakInput = ref<HTMLTextAreaElement | null>(null)
 const scheduleMessageInput = ref<HTMLTextAreaElement | null>(null)
 
 const config = reactive({
@@ -456,12 +498,16 @@ const config = reactive({
   tts_service: '',
   wait_for_idle: true,
   prefix: 'Message from Con Edison.',
+  underpayment_streak_enabled: false,
+  underpayment_streak_send_time: '09:15',
   messages: {
     new_bill: '{prefix} Your new bill for {month_range} is now available. The total is {amount}, due {due_date}.',
     payment_received: '{prefix} Your payment of {amount} has been received. Your account balance is now {balance}.',
     late_fee: '{prefix} {late_fee_amount} has been added to your account balance as a late fee charge. To avoid late fees pay bill by the due date.',
     payment_claimed: '{prefix} {payee_name} has claimed a payment of {amount} made on {payment_date}. If this was in error you can unclaim the payment via the account ledger.',
     payment_unclaimed: '{prefix} {payee_name} has unclaimed a payment of {amount} made on {payment_date}. If this was in error you can claim the payment via the account ledger.',
+    underpayment_streak:
+      '{prefix} {payee_name}, you were underpaid for billing periods {month_range_1} and {month_range_2}. Amounts short: {amount_owed_1} and {amount_owed_2}.',
   }
 })
 
@@ -513,8 +559,8 @@ function toggleDay(day: string) {
   }
 }
 
-function insertVar(templateKey: 'new_bill' | 'payment_received' | 'late_fee' | 'payment_claimed' | 'payment_unclaimed', varName: string) {
-  const inputMap = { new_bill: newBillInput, payment_received: paymentInput, late_fee: lateFeeInput, payment_claimed: paymentClaimedInput, payment_unclaimed: paymentUnclaimedInput } as const
+function insertVar(templateKey: 'new_bill' | 'payment_received' | 'late_fee' | 'payment_claimed' | 'payment_unclaimed' | 'underpayment_streak', varName: string) {
+  const inputMap = { new_bill: newBillInput, payment_received: paymentInput, late_fee: lateFeeInput, payment_claimed: paymentClaimedInput, payment_unclaimed: paymentUnclaimedInput, underpayment_streak: underpaymentStreakInput } as const
   const inputRef = inputMap[templateKey]?.value
   if (!inputRef) {
     config.messages[templateKey] += varName
@@ -619,6 +665,8 @@ async function loadConfig() {
       config.tts_service = data.tts_service ?? ''
       config.wait_for_idle = data.wait_for_idle ?? true
       config.prefix = data.prefix ?? 'Message from Con Edison.'
+      config.underpayment_streak_enabled = data.underpayment_streak_enabled ?? false
+      config.underpayment_streak_send_time = data.underpayment_streak_send_time ?? '09:15'
       if (data.messages && typeof data.messages === 'object') {
         config.messages = { ...config.messages, ...data.messages }
       }
@@ -662,6 +710,8 @@ async function saveConfig() {
         tts_service: config.tts_service || '',
         wait_for_idle: config.wait_for_idle,
         prefix: config.prefix || 'Message from Con Edison.',
+        underpayment_streak_enabled: config.underpayment_streak_enabled,
+        underpayment_streak_send_time: config.underpayment_streak_send_time || '09:15',
         messages: config.messages
       })
     })
@@ -808,6 +858,24 @@ async function testPaymentUnclaimedTts() {
     const data = await res.json().catch(() => ({}))
     if (res.ok) {
       alertMessage.value = { type: 'success', text: data.message || 'Payment unclaimed TTS sent' }
+    } else {
+      alertMessage.value = { type: 'error', text: data.detail || 'Failed' }
+    }
+  } catch {
+    alertMessage.value = { type: 'error', text: 'Failed to connect' }
+  } finally {
+    testing.value = false
+  }
+}
+
+async function testUnderpaymentStreakTts() {
+  testing.value = 'underpayment_streak'
+  alertMessage.value = null
+  try {
+    const res = await fetch(`${getApiBase()}/tts/test-underpayment-streak`, { method: 'POST' })
+    const data = await res.json().catch(() => ({}))
+    if (res.ok) {
+      alertMessage.value = { type: 'success', text: data.message || 'Underpayment streak TTS sent' }
     } else {
       alertMessage.value = { type: 'error', text: data.detail || 'Failed' }
     }

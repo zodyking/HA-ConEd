@@ -1555,6 +1555,12 @@ DEFAULT_NOTIFICATION_CONFIGS = [
         "title": "Petition Closed",
         "template": "The petition for the {amount} payment on {payment_date} has been closed.",
     },
+    {
+        "event_type": "payee_balance_reminder",
+        "title": "Con Edison Balance",
+        "template": "{payee_name}, you have a remaining balance of {remaining_balance} and {days_remaining_cycle} days to make a payment before the billing cycle ends.",
+        "reminder_send_time": "09:00",
+    },
 ]
 
 async def get_notification_config(event_type: str) -> Optional[Dict[str, Any]]:
@@ -2897,10 +2903,10 @@ async def calculate_all_payee_balances() -> List[Dict[str, Any]]:
     users = await db.payeeuser.find_many()
     user_map = {u.id: u for u in users}
     
-    # Get all bills
+    # Get all bills (include statement period for reminders / streak logic)
     bills = await db.bill.find_many(
         order={"billCycleDate": "desc"},
-        include={"payments": True}
+        include={"payments": True, "details": True},
     )
     
     results = []
@@ -2909,14 +2915,21 @@ async def calculate_all_payee_balances() -> List[Dict[str, Any]]:
     for bill in reversed(bills):  # Process oldest first for rollover
         bill_total = decimal_to_float(bill.billTotal) or 0
         
+        det = bill.details
         bill_result = {
             "bill_id": bill.id,
             "month_range": bill.monthRange,
             "bill_cycle_date": bill.billCycleDate.strftime("%m/%d/%Y") if bill.billCycleDate else None,
+            "billing_period_start": (
+                det.billingPeriodStart.strftime("%Y-%m-%d") if det and det.billingPeriodStart else None
+            ),
+            "billing_period_end": (
+                det.billingPeriodEnd.strftime("%Y-%m-%d") if det and det.billingPeriodEnd else None
+            ),
             "bill_total": bill_total,
             "total_paid": 0,
             "bill_balance": bill_total,
-            "payees": []
+            "payees": [],
         }
         
         # Calculate payments by user
@@ -3020,6 +3033,164 @@ async def get_bill_payee_summary(bill_id: int) -> Optional[Dict[str, Any]]:
 async def get_all_bill_summaries() -> List[Dict[str, Any]]:
     """Get summaries for all bills"""
     return await calculate_all_payee_balances()
+
+
+def _parse_iso_date_only(s: Optional[str]) -> Optional[date]:
+    if not s or not str(s).strip():
+        return None
+    try:
+        return date.fromisoformat(str(s).strip()[:10])
+    except (ValueError, TypeError):
+        return None
+
+
+PAYEE_BALANCE_REMINDER_DEDUP_KEY = "payee_balance_reminder_dedup"
+UNDERPAYMENT_STREAK_TTS_DEDUP_KEY = "underpayment_streak_tts_dedup"
+
+
+def _dedup_payee_bill_key(payee_id: int, bill_id: int) -> str:
+    return f"{payee_id}_{bill_id}"
+
+
+async def _read_string_map_setting(key: str) -> Dict[str, str]:
+    raw = await get_app_setting(key)
+    if isinstance(raw, dict):
+        return {str(k): str(v) for k, v in raw.items()}
+    return {}
+
+
+async def _write_string_map_setting(key: str, m: Dict[str, str]) -> None:
+    await set_app_setting(key, m)
+
+
+async def payee_balance_reminder_already_sent_today(payee_id: int, bill_id: int) -> bool:
+    """At most one balance reminder per payee per bill per local calendar day."""
+    today_s = date.today().isoformat()
+    m = await _read_string_map_setting(PAYEE_BALANCE_REMINDER_DEDUP_KEY)
+    return m.get(_dedup_payee_bill_key(payee_id, bill_id)) == today_s
+
+
+async def record_payee_balance_reminder_sent(payee_id: int, bill_id: int) -> None:
+    today_s = date.today().isoformat()
+    m = await _read_string_map_setting(PAYEE_BALANCE_REMINDER_DEDUP_KEY)
+    m[_dedup_payee_bill_key(payee_id, bill_id)] = today_s
+    # Drop entries older than 45 days (values are YYYY-MM-DD)
+    cutoff = (date.today() - timedelta(days=45)).isoformat()
+    m = {k: v for k, v in m.items() if v >= cutoff}
+    await _write_string_map_setting(PAYEE_BALANCE_REMINDER_DEDUP_KEY, m)
+
+
+async def underpayment_streak_tts_already_sent_today(payee_id: int) -> bool:
+    today_s = date.today().isoformat()
+    m = await _read_string_map_setting(UNDERPAYMENT_STREAK_TTS_DEDUP_KEY)
+    return m.get(str(payee_id)) == today_s
+
+
+async def record_underpayment_streak_tts_sent(payee_id: int) -> None:
+    today_s = date.today().isoformat()
+    m = await _read_string_map_setting(UNDERPAYMENT_STREAK_TTS_DEDUP_KEY)
+    m[str(payee_id)] = today_s
+    cutoff = (date.today() - timedelta(days=45)).isoformat()
+    m = {k: v for k, v in m.items() if v >= cutoff}
+    await _write_string_map_setting(UNDERPAYMENT_STREAK_TTS_DEDUP_KEY, m)
+
+
+async def compute_days_remaining_in_billing_cycle(latest_bill_summary: Dict[str, Any]) -> Tuple[Optional[int], str]:
+    """
+    Days until the active billing period ends (local date), and a display string for period end.
+    Uses statement billing period when today falls within it; otherwise meter forecast end_date.
+    """
+    today = date.today()
+    ps = _parse_iso_date_only(latest_bill_summary.get("billing_period_start"))
+    pe = _parse_iso_date_only(latest_bill_summary.get("billing_period_end"))
+    end_display = ""
+    if pe:
+        try:
+            end_display = datetime(pe.year, pe.month, pe.day).strftime("%B %d, %Y").replace(" 0", " ")
+        except Exception:
+            end_display = pe.isoformat()
+
+    if ps and pe and ps <= today <= pe:
+        return max(0, (pe - today).days), end_display or pe.isoformat()
+
+    forecast = await get_meter_forecast_db()
+    if forecast:
+        fe = _parse_iso_forecast_date(forecast.get("end_date"))
+        if fe and today <= fe:
+            disp = fe.strftime("%B %d, %Y").replace(" 0", " ")
+            return max(0, (fe - today).days), disp
+        if fe and today > fe:
+            return 0, fe.strftime("%B %d, %Y").replace(" 0", " ")
+
+    if pe:
+        if today > pe:
+            return 0, end_display
+        if today < pe and (not ps or today >= ps):
+            return max(0, (pe - today).days), end_display
+
+    return None, end_display or "N/A"
+
+
+def get_last_two_completed_bill_summaries(
+    summaries: List[Dict[str, Any]],
+) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    """
+    Bills whose billing period has fully ended (end date strictly before today).
+    Missing period end: skip for streak logic. Sorted by billing_period_end desc, take two.
+    """
+    today = date.today()
+    completed: List[Dict[str, Any]] = []
+    for s in summaries:
+        pe = _parse_iso_date_only(s.get("billing_period_end"))
+        if pe is None:
+            continue
+        if pe < today:
+            completed.append(s)
+    if not completed:
+        return None, None
+
+    def sort_key(x: Dict[str, Any]) -> date:
+        d = _parse_iso_date_only(x.get("billing_period_end"))
+        return d or date.min
+
+    completed.sort(key=sort_key, reverse=True)
+    if len(completed) < 2:
+        return None, None
+    return completed[0], completed[1]
+
+
+def payees_underpaid_on_both_completed_cycles(
+    recent_completed: Dict[str, Any], prior_completed: Dict[str, Any]
+) -> List[Dict[str, Any]]:
+    """
+    recent_completed = completed bill with the latest billing_period_end (most recently ended cycle).
+    prior_completed = the next older completed bill.
+    Payee underpaid on both per calculate_all_payee_balances status.
+    """
+    by_recent = {p["user_id"]: p for p in recent_completed.get("payees") or []}
+    by_prior = {p["user_id"]: p for p in prior_completed.get("payees") or []}
+    out: List[Dict[str, Any]] = []
+    for uid, pr in by_recent.items():
+        if uid not in by_prior:
+            continue
+        pp = by_prior[uid]
+        if pr.get("status") == "underpaid" and pp.get("status") == "underpaid":
+            out.append(
+                {
+                    "user_id": uid,
+                    "name": pr.get("name") or pp.get("name") or "",
+                    "month_range_1": prior_completed.get("month_range") or "",
+                    "month_range_2": recent_completed.get("month_range") or "",
+                    "amount_owed_1": max(
+                        0.0, (pp.get("amount_due") or 0) - (pp.get("amount_paid") or 0)
+                    ),
+                    "amount_owed_2": max(
+                        0.0, (pr.get("amount_due") or 0) - (pr.get("amount_paid") or 0)
+                    ),
+                }
+            )
+    return out
+
 
 # =============================================================================
 # Cleanup Functions
