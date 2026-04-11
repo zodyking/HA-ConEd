@@ -2105,6 +2105,41 @@ async def save_app_settings_db(settings: Dict[str, Any]):
     """Save app settings to database"""
     await set_app_setting("app_settings", settings)
 
+
+async def get_breakdown_show_rollover() -> bool:
+    """Ledger breakdown toggle: True = cumulative rollover math; False = current bill share only."""
+    row = await get_app_settings_db()
+    if not row:
+        return False
+    return bool(row.get("breakdown_show_rollover", False))
+
+
+def payee_remaining_for_balance_reminder(
+    pr: Dict[str, Any], breakdown_show_rollover: bool
+) -> float:
+    """
+    Dollars still owed for the payee row on the latest bill, aligned with Payees → Rollover toggle.
+    Cumulative when breakdown_show_rollover; else current-bill share only (matches BillPayeeSummary).
+    """
+    ap = float(pr.get("amount_paid") or 0)
+    if breakdown_show_rollover:
+        ad = float(pr.get("amount_due") or 0)
+        return max(0.0, ad - ap)
+    share = float(pr.get("share_of_bill") or 0)
+    return max(0.0, share - ap)
+
+
+def payee_is_underpaid_for_balance_reminder(
+    pr: Dict[str, Any], breakdown_show_rollover: bool
+) -> bool:
+    """Whether this payee should get a balance reminder: underpaid per the same mode as the ledger."""
+    if breakdown_show_rollover:
+        return pr.get("status") == "underpaid"
+    ap = float(pr.get("amount_paid") or 0)
+    share = float(pr.get("share_of_bill") or 0)
+    return (ap - share) < -0.01
+
+
 # =============================================================================
 # Schedule Config (migrated from file to database)
 # =============================================================================

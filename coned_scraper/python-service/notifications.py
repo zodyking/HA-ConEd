@@ -697,6 +697,8 @@ async def check_and_send_payee_balance_reminders() -> int:
     days_rem, end_display = await db.compute_days_remaining_in_billing_cycle(latest)
     days_str = str(days_rem) if days_rem is not None else "N/A"
 
+    breakdown_show_rollover = await db.get_breakdown_show_rollover()
+
     payees = await db.get_payees_with_notifications()
     if not payees:
         return 0
@@ -716,12 +718,14 @@ async def check_and_send_payee_balance_reminders() -> int:
                     (p for p in (latest.get("payees") or []) if p.get("user_id") == pid),
                     None,
                 )
-                if not pr or pr.get("status") != "underpaid":
+                if not pr or not db.payee_is_underpaid_for_balance_reminder(
+                    pr, breakdown_show_rollover
+                ):
                     continue
                 if await db.payee_balance_reminder_already_sent_today(pid, bill_id):
                     continue
-                remaining = max(
-                    0.0, (pr.get("amount_due") or 0) - (pr.get("amount_paid") or 0)
+                remaining = db.payee_remaining_for_balance_reminder(
+                    pr, breakdown_show_rollover
                 )
                 remaining_s = f"${remaining:.2f}"
                 data = {

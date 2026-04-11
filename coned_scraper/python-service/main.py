@@ -29,7 +29,7 @@ import db
 app = FastAPI(title="Con Edison API")
 
 # Code version for deployment verification
-CODE_VERSION = "1.3.79"
+CODE_VERSION = "1.3.80"
 
 @app.on_event("startup")
 async def startup():
@@ -3723,6 +3723,7 @@ async def _get_real_test_data_for_notification(
         latest = summaries[0]
         days_rem, end_display = await db.compute_days_remaining_in_billing_cycle(latest)
         days_str = str(days_rem) if days_rem is not None else "N/A"
+        breakdown_show_rollover = await db.get_breakdown_show_rollover()
         pr = None
         if payee_id is not None:
             pr = next(
@@ -3731,12 +3732,18 @@ async def _get_real_test_data_for_notification(
             )
         if not pr:
             pr = next(
-                (p for p in (latest.get("payees") or []) if p.get("status") == "underpaid"),
+                (
+                    p
+                    for p in (latest.get("payees") or [])
+                    if db.payee_is_underpaid_for_balance_reminder(
+                        p, breakdown_show_rollover
+                    )
+                ),
                 None,
             )
         if pr:
-            remaining = max(
-                0.0, (pr.get("amount_due") or 0) - (pr.get("amount_paid") or 0)
+            remaining = db.payee_remaining_for_balance_reminder(
+                pr, breakdown_show_rollover
             )
             return {
                 "payee_name": pr.get("name") or "Payee",
