@@ -29,7 +29,7 @@ import db
 app = FastAPI(title="Con Edison API")
 
 # Code version for deployment verification
-CODE_VERSION = "1.3.73"
+CODE_VERSION = "1.3.74"
 
 @app.on_event("startup")
 async def startup():
@@ -163,12 +163,15 @@ DEFAULT_TTS_CONFIG = {
     "prefix": DEFAULT_TTS_PREFIX,
     "wait_for_idle": True,
     "tts_service": "tts.google_translate_say",
+    "underpayment_streak_enabled": False,
+    "underpayment_streak_send_time": "09:15",
     "messages": {
         "new_bill": "{prefix} Your new bill for {month_range} is now available. The total is {amount}, due {due_date}.",
         "payment_received": "{prefix} Your payment of {amount} has been received. Your account balance is now {balance}.",
         "late_fee": "{prefix} {late_fee_amount} has been added to your account balance as a late fee charge. To avoid late fees pay bill by the due date.",
         "payment_claimed": "{prefix} {payee_name} has claimed a payment of {amount} made on {payment_date}. If this was in error you can unclaim the payment via the account ledger.",
         "payment_unclaimed": "{prefix} {payee_name} has unclaimed a payment of {amount} made on {payment_date}. If this was in error you can claim the payment via the account ledger.",
+        "underpayment_streak": "{prefix} {payee_name}, you were underpaid for billing periods {month_range_1} and {month_range_2}. Amounts short: {amount_owed_1} and {amount_owed_2}.",
     },
 }
 
@@ -191,6 +194,10 @@ _scheduler_task = None
 _scrape_running = False  # Track if a scrape is currently in progress
 _due_reminder_task = None
 _last_due_reminder_run_date = None
+_payee_balance_reminder_task = None
+_last_payee_balance_reminder_run_date = None
+_underpayment_streak_tts_task = None
+_last_underpayment_streak_tts_run_date = None
 
 class ScheduleModel(BaseModel):
     enabled: bool
@@ -403,6 +410,78 @@ async def scheduler_loop():
             logging.error(error_msg)
             await asyncio.sleep(60)  # Wait before retrying
 
+async def payee_balance_reminder_scheduler_loop():
+    """Daily per-payee balance reminder at payee_balance_reminder.reminder_send_time."""
+    global _last_payee_balance_reminder_run_date
+    while True:
+        try:
+            await asyncio.sleep(60)
+            config = await db.get_notification_config("payee_balance_reminder")
+            if not config or not config.get("enabled"):
+                continue
+            send_time = config.get("reminder_send_time", "09:00")
+            try:
+                h, m = map(int, send_time.split(":")[:2])
+            except (ValueError, IndexError):
+                h, m = 9, 0
+            now = datetime.now()
+            if now.hour != h or now.minute != m:
+                continue
+            today = now.date()
+            if _last_payee_balance_reminder_run_date == today:
+                continue
+            _last_payee_balance_reminder_run_date = today
+            try:
+                from notifications import check_and_send_payee_balance_reminders
+
+                sent = await check_and_send_payee_balance_reminders()
+                if sent > 0:
+                    await db.add_log("info", f"Payee balance reminder sent to {sent} device(s)")
+            except Exception as e:
+                await db.add_log("warning", f"Payee balance reminder check failed: {e}")
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logging.error(f"Payee balance reminder scheduler error: {e}")
+            await asyncio.sleep(60)
+
+
+async def underpayment_streak_tts_scheduler_loop():
+    """Daily underpayment streak TTS at tts_config.underpayment_streak_send_time."""
+    global _last_underpayment_streak_tts_run_date
+    while True:
+        try:
+            await asyncio.sleep(60)
+            cfg = await load_tts_config()
+            if not cfg.get("enabled") or not cfg.get("underpayment_streak_enabled"):
+                continue
+            send_time = cfg.get("underpayment_streak_send_time", "09:15")
+            try:
+                h, m = map(int, send_time.split(":")[:2])
+            except (ValueError, IndexError):
+                h, m = 9, 15
+            now = datetime.now()
+            if now.hour != h or now.minute != m:
+                continue
+            today = now.date()
+            if _last_underpayment_streak_tts_run_date == today:
+                continue
+            _last_underpayment_streak_tts_run_date = today
+            try:
+                from tts_scheduler import check_and_trigger_underpayment_streak_tts
+
+                n = await check_and_trigger_underpayment_streak_tts()
+                if n and n > 0:
+                    await db.add_log("info", f"Underpayment streak TTS sent ({n} announcement(s))")
+            except Exception as e:
+                await db.add_log("warning", f"Underpayment streak TTS failed: {e}")
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logging.error(f"Underpayment streak TTS scheduler error: {e}")
+            await asyncio.sleep(60)
+
+
 async def due_reminder_scheduler_loop():
     """Run due date reminders at the configured time each day."""
     global _last_due_reminder_run_date
@@ -495,6 +574,7 @@ _claim_resend_task = None
 @app.on_event("startup")
 async def startup_event():
     global _scheduler_task, _due_reminder_task, _claim_resend_task
+    global _payee_balance_reminder_task, _underpayment_streak_tts_task
 
     schedule = await load_schedule()
     if schedule["enabled"]:
@@ -503,6 +583,12 @@ async def startup_event():
 
     _due_reminder_task = asyncio.create_task(due_reminder_scheduler_loop())
     await db.add_log("info", "Due reminder scheduler started")
+
+    _payee_balance_reminder_task = asyncio.create_task(payee_balance_reminder_scheduler_loop())
+    await db.add_log("info", "Payee balance reminder scheduler started")
+
+    _underpayment_streak_tts_task = asyncio.create_task(underpayment_streak_tts_scheduler_loop())
+    await db.add_log("info", "Underpayment streak TTS scheduler started")
 
     _claim_resend_task = asyncio.create_task(claim_resend_scheduler_loop())
     await db.add_log("info", "Claim resend scheduler started")
@@ -527,6 +613,7 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     global _scheduler_task, _due_reminder_task, _claim_resend_task
+    global _payee_balance_reminder_task, _underpayment_streak_tts_task
     if _claim_resend_task and not _claim_resend_task.done():
         _claim_resend_task.cancel()
     if _scheduler_task and not _scheduler_task.done():
@@ -539,6 +626,18 @@ async def shutdown_event():
         _due_reminder_task.cancel()
         try:
             await _due_reminder_task
+        except asyncio.CancelledError:
+            pass
+    if _payee_balance_reminder_task and not _payee_balance_reminder_task.done():
+        _payee_balance_reminder_task.cancel()
+        try:
+            await _payee_balance_reminder_task
+        except asyncio.CancelledError:
+            pass
+    if _underpayment_streak_tts_task and not _underpayment_streak_tts_task.done():
+        _underpayment_streak_tts_task.cancel()
+        try:
+            await _underpayment_streak_tts_task
         except asyncio.CancelledError:
             pass
 
@@ -2838,6 +2937,8 @@ async def load_tts_config() -> dict:
         merged = DEFAULT_TTS_CONFIG.copy()
         merged.update(data)
         merged.setdefault("tts_service", "tts.google_translate_say")
+        merged.setdefault("underpayment_streak_enabled", DEFAULT_TTS_CONFIG["underpayment_streak_enabled"])
+        merged.setdefault("underpayment_streak_send_time", DEFAULT_TTS_CONFIG["underpayment_streak_send_time"])
         if "messages" not in data or not data["messages"]:
             merged["messages"] = DEFAULT_TTS_CONFIG["messages"].copy()
         else:
@@ -2865,6 +2966,8 @@ class TTSConfigModel(BaseModel):
     wait_for_idle: Optional[bool] = None
     tts_service: Optional[str] = None
     messages: Optional[dict] = None
+    underpayment_streak_enabled: Optional[bool] = None
+    underpayment_streak_send_time: Optional[str] = None
 
 
 @app.get("/api/tts-config")
@@ -3158,6 +3261,21 @@ async def test_payment_unclaimed_tts():
     from tts_scheduler import trigger_payment_unclaimed_tts
     await trigger_payment_unclaimed_tts(payee_name="Sample Payee", amount="$50.00", payment_date="03/15/2026")
     return {"success": True, "message": "Payment unclaimed TTS sent"}
+
+
+@app.post("/api/tts/test-underpayment-streak")
+async def test_underpayment_streak_tts():
+    """Test underpayment streak TTS (sample or real streak data)."""
+    config = await load_tts_config()
+    if not config.get("enabled"):
+        raise HTTPException(status_code=400, detail="TTS is not enabled")
+    media_player = (config.get("media_player") or "").strip()
+    if not media_player:
+        raise HTTPException(status_code=400, detail="Media player not configured")
+    from tts_scheduler import trigger_underpayment_streak_tts_sample
+
+    await trigger_underpayment_streak_tts_sample()
+    return {"success": True, "message": "Underpayment streak TTS sent"}
 
 
 @app.post("/api/notifications/test-new-bill")
@@ -3554,7 +3672,9 @@ async def update_notification_config_endpoint(event_type: str, data: Notificatio
     return {"success": True}
 
 
-async def _get_real_test_data_for_notification(event_type: str) -> dict:
+async def _get_real_test_data_for_notification(
+    event_type: str, payee_id: Optional[int] = None
+) -> dict:
     """Fetch real account data for notification test."""
     ledger = await db.get_ledger_data()
     bills = ledger.get("bills", [])
@@ -3589,6 +3709,46 @@ async def _get_real_test_data_for_notification(event_type: str) -> dict:
             "amount": latest_payment.get("amount", "N/A"),
             "balance": balance,
             "payee_name": latest_payment.get("payee_name", "") or "Unknown",
+        }
+
+    if event_type == "payee_balance_reminder":
+        summaries = await db.calculate_all_payee_balances()
+        if not summaries:
+            return {
+                "payee_name": "Payee",
+                "remaining_balance": "$50.00",
+                "days_remaining_cycle": "5",
+                "billing_period_end": "N/A",
+            }
+        latest = summaries[0]
+        days_rem, end_display = await db.compute_days_remaining_in_billing_cycle(latest)
+        days_str = str(days_rem) if days_rem is not None else "N/A"
+        pr = None
+        if payee_id is not None:
+            pr = next(
+                (p for p in (latest.get("payees") or []) if p.get("user_id") == payee_id),
+                None,
+            )
+        if not pr:
+            pr = next(
+                (p for p in (latest.get("payees") or []) if p.get("status") == "underpaid"),
+                None,
+            )
+        if pr:
+            remaining = max(
+                0.0, (pr.get("amount_due") or 0) - (pr.get("amount_paid") or 0)
+            )
+            return {
+                "payee_name": pr.get("name") or "Payee",
+                "remaining_balance": f"${remaining:.2f}",
+                "days_remaining_cycle": days_str,
+                "billing_period_end": end_display or "N/A",
+            }
+        return {
+            "payee_name": "Payee",
+            "remaining_balance": "$50.00",
+            "days_remaining_cycle": days_str,
+            "billing_period_end": end_display or "N/A",
         }
 
     if event_type == "due_reminder":
@@ -3686,7 +3846,9 @@ async def test_notification(event_type: str, payee_id: Optional[int] = None):
     token = os.environ.get("SUPERVISOR_TOKEN")
     if not token:
         raise HTTPException(status_code=400, detail="Not running as Home Assistant addon")
-    
+
+    await db.ensure_notification_configs_exist()
+
     # Get config
     config = await db.get_notification_config(event_type)
     if not config:
@@ -3704,11 +3866,7 @@ async def test_notification(event_type: str, payee_id: Optional[int] = None):
         if not target_payees:
             raise HTTPException(status_code=400, detail="No payees with notifications enabled")
     
-    # Build test message with REAL account data (same as real triggers)
-    test_data = await _get_real_test_data_for_notification(event_type)
-    message = format_template(config["template"], test_data)
-    
-    # Send notifications
+    # Send notifications (per-payee template data for payee_balance_reminder)
     sent_count = 0
     try:
         async with aiohttp.ClientSession() as session:
@@ -3716,7 +3874,15 @@ async def test_notification(event_type: str, payee_id: Optional[int] = None):
                 notify_service = payee.get("notify_service")
                 if not notify_service:
                     continue
-                
+                pid = payee.get("id")
+                if event_type == "payee_balance_reminder":
+                    test_data = await _get_real_test_data_for_notification(
+                        event_type, payee_id=pid
+                    )
+                else:
+                    test_data = await _get_real_test_data_for_notification(event_type)
+                message = format_template(config["template"], test_data)
+
                 async with session.post(
                     f"http://supervisor/core/api/services/notify/{notify_service}",
                     headers={
