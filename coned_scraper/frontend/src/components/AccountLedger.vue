@@ -135,7 +135,10 @@
 
     <!-- No Data -->
     <div
-      v-else-if="!ledgerData || (!ledgerData.account_balance && ledgerData.bills.length === 0)"
+      v-else-if="
+        !ledgerData ||
+        (!ledgerData.account_balance && (ledgerData.bills?.length ?? 0) === 0)
+      "
       class="ha-empty-data"
     >
       <img :src="ajaxLoader" alt="Setup Required" class="ha-empty-img" />
@@ -1032,8 +1035,9 @@ function togglePaymentsExpanded(billId: number) {
 
 function initializeExpandedState() {
   // Expand the first (latest) bill and its payments by default
-  if (ledgerData.value && ledgerData.value.bills.length > 0) {
-    const latestBillId = ledgerData.value.bills[0].id
+  const bills = ledgerData.value?.bills
+  if (bills && bills.length > 0) {
+    const latestBillId = bills[0].id
     expandedBills.value.add(latestBillId)
     expandedPayments.value.add(latestBillId)
     expandedBills.value = new Set(expandedBills.value)
@@ -1046,8 +1050,9 @@ function formatDateShort(date: string) {
 }
 
 const latestBillDueDate = computed(() => {
-  if (ledgerData.value && ledgerData.value.bills.length > 0) {
-    return ledgerData.value.bills[0].due_date || null
+  const bills = ledgerData.value?.bills
+  if (bills && bills.length > 0) {
+    return bills[0].due_date || null
   }
   return null
 })
@@ -1064,7 +1069,15 @@ async function loadLedgerData() {
     const response = await fetch(`${api}/ledger`)
     if (response.ok) {
       const data = await response.json()
-      ledgerData.value = data
+      ledgerData.value = {
+        ...data,
+        bills: Array.isArray(data.bills) ? data.bills : [],
+        orphan_payments: Array.isArray(data.orphan_payments) ? data.orphan_payments : [],
+        payee_summaries:
+          data.payee_summaries && typeof data.payee_summaries === 'object'
+            ? data.payee_summaries
+            : {},
+      }
       petitionsEnabled.value = data.petitions_enabled !== false
       apiError.value = null
     } else {

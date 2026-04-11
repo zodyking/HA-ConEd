@@ -2868,8 +2868,12 @@ async def get_ledger_data() -> Dict[str, Any]:
             )
 
     # Include payee summaries in ledger response for fast frontend loading
-    raw_summaries = await calculate_all_payee_balances()
-    payee_summaries = _format_payee_summaries_for_frontend(raw_summaries)
+    try:
+        raw_summaries = await calculate_all_payee_balances()
+        payee_summaries = _format_payee_summaries_for_frontend(raw_summaries)
+    except Exception as e:
+        logger.exception("calculate_all_payee_balances failed; returning ledger without payee summaries: %s", e)
+        payee_summaries = {}
 
     # Latest payment for current bill (for payment received tests/triggers)
     latest_payment = await get_last_payment_for_latest_bill()
