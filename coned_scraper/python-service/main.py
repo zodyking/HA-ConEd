@@ -29,7 +29,7 @@ import db
 app = FastAPI(title="Con Edison API")
 
 # Code version for deployment verification
-CODE_VERSION = "1.3.81"
+CODE_VERSION = "1.3.82"
 
 @app.on_event("startup")
 async def startup():
@@ -946,7 +946,7 @@ async def load_app_settings() -> dict:
             "time_offset_hours": float(data.get("time_offset_hours", 0.0)),
             "settings_password": decrypt_data(data.get("settings_password", encrypt_data("0000"))) if data.get("settings_password") else "0000",
             "auto_download_pdfs": data.get("auto_download_pdfs", True),
-            "breakdown_show_rollover": data.get("breakdown_show_rollover", False),
+            "breakdown_show_rollover": db._coerce_bool(data.get("breakdown_show_rollover"), False),
             "claim_resend_delay_hours": int(data.get("claim_resend_delay_hours", 24)),
         }
     except Exception as e:

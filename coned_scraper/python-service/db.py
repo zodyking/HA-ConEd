@@ -2106,12 +2106,28 @@ async def save_app_settings_db(settings: Dict[str, Any]):
     await set_app_setting("app_settings", settings)
 
 
+def _coerce_bool(value: Any, default: bool = False) -> bool:
+    """
+    Safely coerce various storage types (bool, str, int, None) to a Python bool.
+    Handles the case where JSON may store "false"/"true" strings.
+    """
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.lower() in ("true", "1", "yes")
+    if isinstance(value, (int, float)):
+        return value != 0
+    return default
+
+
 async def get_breakdown_show_rollover() -> bool:
     """Ledger breakdown toggle: True = cumulative rollover math; False = current bill share only."""
     row = await get_app_settings_db()
     if not row:
         return False
-    return bool(row.get("breakdown_show_rollover", False))
+    return _coerce_bool(row.get("breakdown_show_rollover"), False)
 
 
 def payee_remaining_for_balance_reminder(
