@@ -149,7 +149,11 @@
               <p v-if="realtimeDayOffset === 0 && realtimeDataRange?.isStale" class="ha-delay-notice">
                 <strong>Data is {{ realtimeDataRange.hoursAgo }} hours behind.</strong> Con Edison usage data is typically delayed 1-24 hours.
               </p>
-              Please note: As per Con Edison, your real-time usage may not match billing. Billed usage is validated (reconciled) and may have a multiplier applied (peak hour kWh rates), which will be shown on your bill statement.
+              <p>
+                <strong v-if="realtimeDayTotalDisplay">Day total: {{ realtimeDayTotalDisplay }} kWh.</strong>
+                <span v-if="realtimeDayTotalDisplay">&nbsp;</span>
+                Please note: As per Con Edison, your real-time usage may not match billing. Billed usage is validated (reconciled) and may have a multiplier applied (peak hour kWh rates), which will be shown on your bill statement.
+              </p>
             </div>
           </div>
           
@@ -508,6 +512,13 @@ const realtimeDataRange = computed(() => {
     hoursAgo,
     isStale: hoursAgo > 2
   }
+})
+
+/** Sum of interval kWh for the selected calendar day (same source as the chart). */
+const realtimeDayTotalDisplay = computed((): string | null => {
+  if (!realtimeData.value.length) return null
+  const sum = realtimeData.value.reduce((acc, r) => acc + (Number(r.consumption) || 0), 0)
+  return sum.toFixed(2)
 })
 
 function createRealtimeChart() {

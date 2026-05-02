@@ -894,7 +894,7 @@ const costDisplayValue = computed(() => {
 })
 
 const projectedUsageDisplayLabel = computed(() =>
-  usageDisplayMode.value === 'usage_to_date' ? 'Projected Usage' : 'Projected Daily Usage'
+  usageDisplayMode.value === 'usage_to_date' ? 'PROJECTED USAGE' : 'PROJECTED DAILY USAGE'
 )
 const projectedUsageDisplayValue = computed(() => {
   const forecast = meterData.value?.forecast
@@ -908,7 +908,7 @@ const projectedUsageDisplayValue = computed(() => {
 })
 
 const projectedBillDisplayLabel = computed(() =>
-  usageDisplayMode.value === 'usage_to_date' ? 'Projected Bill' : 'Projected Daily Cost'
+  usageDisplayMode.value === 'usage_to_date' ? 'PROJECTED BILL' : 'PROJECTED DAILY COST'
 )
 const projectedBillDisplayValue = computed(() => {
   const forecast = meterData.value?.forecast
