@@ -1,0 +1,66 @@
+name: Bug report
+description: Report incorrect behavior, crashes, or integration failures
+title: "Bug: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please redact email, account numbers, tokens, and passwords from logs or screenshots.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: Short description of what went wrong.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Numbered steps so we can reproduce the issue.
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: false
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: false
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Home Assistant version, add-on version, hardware/OS (e.g. HA OS, Docker).
+      value: |
+        - Home Assistant:
+        - Con Edison add-on version:
+        - Hardware / OS:
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Add-on log output or screenshots. Paste logs in fenced code blocks when possible.
+      render: shell
+    validations:
+      required: false
+  - type: textarea
+    id: extra
+    attributes:
+      label: Extra context
+      description: MQTT, meter tracking, payees, Ingress — anything that helps.
+    validations:
+      required: false

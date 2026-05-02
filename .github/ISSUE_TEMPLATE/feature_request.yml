@@ -1,0 +1,38 @@
+name: Feature request
+description: Suggest an improvement or new capability for the add-on
+title: "Feature: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Share your idea. Link to Home Assistant or Con Edison docs if helpful.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / use case
+      description: What limitation or workflow led to this idea?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: What should the add-on or UI do differently?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Optional — other approaches you thought about.
+    validations:
+      required: false
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Screenshots, mockups, links, Con Edison portal behavior, etc.
+    validations:
+      required: false
