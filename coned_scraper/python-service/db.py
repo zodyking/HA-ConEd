@@ -7,6 +7,9 @@ import logging
 import hashlib
 import re
 from datetime import datetime, timezone, timedelta, date
+from zoneinfo import ZoneInfo
+
+EASTERN = ZoneInfo("America/New_York")
 from typing import Optional, List, Dict, Any, Tuple
 from decimal import Decimal
 
@@ -2008,29 +2011,40 @@ async def get_realtime_readings_for_day(day_offset: int = 0) -> tuple[List[Dict[
     Get readings for a specific day. Day 0 = most recent complete day we have, 1 = day before, etc.
     Returns (readings for that day, total_available_days).
     Uses Prisma only (no asyncpg) for addon compatibility.
+    
+    Dates are grouped by Eastern Time (America/New_York) so that chart days
+    align with Con Edison billing days and user expectations.
     """
     await ensure_connected()
-    # Fetch all readings and compute distinct dates in Python (Prisma-only, no raw SQL)
     rows = await db.realtimereading.find_many(order={"endTime": "desc"})
     if not rows:
         return [], 0
-    # Get distinct dates (UTC) from endTime, most recent first
+    
     seen: set = set()
-    dates: List[datetime] = []
+    dates: List[date] = []
     for r in rows:
-        d = r.endTime.date() if hasattr(r.endTime, "date") else r.endTime.replace(tzinfo=timezone.utc).date()
+        et = r.endTime
+        if et.tzinfo is None:
+            et = et.replace(tzinfo=timezone.utc)
+        et_local = et.astimezone(EASTERN)
+        d = et_local.date()
         if d not in seen:
             seen.add(d)
-            dates.append(datetime(d.year, d.month, d.day, tzinfo=timezone.utc))
+            dates.append(d)
     dates.sort(reverse=True)
     total_days = len(dates)
     if day_offset >= total_days:
         return [], total_days
-    day_start = dates[day_offset]
-    day_end = day_start + timedelta(days=1)
+    
+    target_date = dates[day_offset]
+    day_start_et = datetime(target_date.year, target_date.month, target_date.day, 0, 0, 0, tzinfo=EASTERN)
+    day_end_et = day_start_et + timedelta(days=1)
+    day_start_utc = day_start_et.astimezone(timezone.utc)
+    day_end_utc = day_end_et.astimezone(timezone.utc)
+    
     readings = await db.realtimereading.find_many(
         where={
-            "endTime": {"gte": day_start, "lte": day_end}
+            "endTime": {"gte": day_start_utc, "lt": day_end_utc}
         },
         order={"startTime": "asc"}
     )
