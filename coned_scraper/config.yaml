@@ -1,6 +1,6 @@
 ---
 name: Con Edison
-version: "1.3.85"
+version: "1.3.86"
 slug: coned_scraper
 description: Con Edison account integration for Home Assistant — bills, payments, balance tracking
 url: https://github.com/zodyking/HA-ConEd
