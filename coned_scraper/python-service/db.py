@@ -167,26 +167,70 @@ def generate_payment_hash(payment_date: str, amount: str, description: str, bill
     data = f"{payment_date}|{amount}|{description}|{bill_cycle_date}"
     return hashlib.md5(data.encode()).hexdigest()
 
+def normalize_due_date_str(date_str: Optional[str]) -> Optional[str]:
+    """Normalize due-date strings from PDFs and scrapes before parsing."""
+    if not date_str or not str(date_str).strip():
+        return None
+    s = str(date_str).strip()
+    if s.lower() in ("upon receipt", "due upon receipt"):
+        return None
+    # "Mar. 12, 2026" -> "Mar 12, 2026"
+    s = re.sub(r"([A-Za-z]+)\.\s+", r"\1 ", s)
+    return s
+
+
 def parse_date(date_str: str) -> Optional[datetime]:
     """Parse various date formats to datetime"""
-    if not date_str:
+    normalized = normalize_due_date_str(date_str)
+    if not normalized:
         return None
-    
+
     formats = [
         "%m/%d/%Y",
         "%Y-%m-%d",
         "%m/%d/%y",
         "%B %d, %Y",
         "%b %d, %Y",
+        "%B %d %Y",
+        "%b %d %Y",
     ]
-    
+
     for fmt in formats:
         try:
-            return datetime.strptime(date_str, fmt).replace(tzinfo=timezone.utc)
+            return datetime.strptime(normalized, fmt).replace(tzinfo=timezone.utc)
         except ValueError:
             continue
-    
+
     return None
+
+
+def normalize_month_range(month_range: Optional[str]) -> str:
+    """Normalize ConEd month_range labels for consistent matching."""
+    if not month_range or not str(month_range).strip():
+        return ""
+    normalized = re.sub(r"\s+", " ", str(month_range).strip().replace("/", "-"))
+    parts = re.split(r"\s*[-–—]\s*", normalized)
+    if len(parts) >= 2:
+        return f"{parts[0].strip().upper()} - {parts[-1].strip().upper()}"
+    return normalized.strip().upper()
+
+
+def filter_bill_detail_kwargs(parsed_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract and sanitize kwargs for upsert_bill_details from parser output."""
+    detail_keys = (
+        "due_date", "kwh_used", "kwh_cost", "electricity_total",
+        "total_from_billing_period", "balance_from_previous_bill", "total_amount_due",
+        "billing_days", "supply_charges", "delivery_charges",
+        "billing_period_start", "billing_period_end",
+    )
+    kwargs = {k: v for k, v in parsed_data.items() if k in detail_keys}
+    if kwargs.get("supply_charges") == {}:
+        kwargs.pop("supply_charges", None)
+    if kwargs.get("delivery_charges") == {}:
+        kwargs.pop("delivery_charges", None)
+    if kwargs.get("balance_from_previous_bill") in (0, 0.0):
+        kwargs.pop("balance_from_previous_bill", None)
+    return kwargs
 
 def model_to_dict(model) -> Dict[str, Any]:
     """Convert Prisma model to dictionary"""
@@ -319,8 +363,13 @@ async def get_latest_bill_with_details() -> Optional[Dict[str, Any]]:
     }
     
     if bill.details:
+        due_date_str = None
+        if bill.details.dueDate:
+            due_date_str = bill.details.dueDate.strftime("%b %d, %Y")
+        elif bill.billDate:
+            due_date_str = (bill.billDate + timedelta(days=DEFAULT_DUE_DAYS_AFTER_BILL)).strftime("%b %d, %Y")
         result.update({
-            "due_date": bill.details.dueDate.strftime("%b %d, %Y") if bill.details.dueDate else None,
+            "due_date": due_date_str,
             "kwh_used": decimal_to_float(bill.details.kwhUsed),
             "kwh_cost": decimal_to_float(bill.details.kwhCost),
             "electricity_total": decimal_to_float(bill.details.electricityTotal),
@@ -331,8 +380,11 @@ async def get_latest_bill_with_details() -> Optional[Dict[str, Any]]:
             "delivery_charges": bill.details.deliveryCharges,
         })
     else:
+        due_date_str = None
+        if bill.billDate:
+            due_date_str = (bill.billDate + timedelta(days=DEFAULT_DUE_DAYS_AFTER_BILL)).strftime("%b %d, %Y")
         result.update({
-            "due_date": None,
+            "due_date": due_date_str,
             "kwh_used": None,
             "kwh_cost": None,
             "electricity_total": None,
@@ -415,31 +467,40 @@ async def upsert_bill_details(
     billing_period_start: Optional[str] = None,
     billing_period_end: Optional[str] = None,
 ) -> BillDetails:
-    """Insert or update bill details"""
+    """Insert or update bill details. Only overwrites fields explicitly provided."""
     await ensure_connected()
-    
-    due_dt = parse_date(due_date) if due_date else None
-    start_dt = parse_date(billing_period_start) if billing_period_start else None
-    end_dt = parse_date(billing_period_end) if billing_period_end else None
-    
+
     existing = await db.billdetails.find_unique(where={"billId": bill_id})
-    
-    data = {
-        "dueDate": due_dt,
-        "kwhUsed": Decimal(str(kwh_used)) if kwh_used is not None else None,
-        "kwhCost": Decimal(str(kwh_cost)) if kwh_cost is not None else None,
-        "electricityTotal": Decimal(str(electricity_total)) if electricity_total is not None else None,
-        "totalFromBillingPeriod": Decimal(str(total_from_billing_period)) if total_from_billing_period is not None else None,
-        "balanceFromPreviousBill": Decimal(str(balance_from_previous_bill)) if balance_from_previous_bill is not None else None,
-        "totalAmountDue": Decimal(str(total_amount_due)) if total_amount_due is not None else None,
-        "billingDays": billing_days,
-        "supplyCharges": Json(supply_charges) if supply_charges is not None else None,
-        "deliveryCharges": Json(delivery_charges) if delivery_charges is not None else None,
-        "billingPeriodStart": start_dt,
-        "billingPeriodEnd": end_dt,
-    }
-    
+    data: Dict[str, Any] = {}
+
+    if due_date is not None:
+        data["dueDate"] = parse_date(due_date)
+    if kwh_used is not None:
+        data["kwhUsed"] = Decimal(str(kwh_used))
+    if kwh_cost is not None:
+        data["kwhCost"] = Decimal(str(kwh_cost))
+    if electricity_total is not None:
+        data["electricityTotal"] = Decimal(str(electricity_total))
+    if total_from_billing_period is not None:
+        data["totalFromBillingPeriod"] = Decimal(str(total_from_billing_period))
+    if balance_from_previous_bill is not None:
+        data["balanceFromPreviousBill"] = Decimal(str(balance_from_previous_bill))
+    if total_amount_due is not None:
+        data["totalAmountDue"] = Decimal(str(total_amount_due))
+    if billing_days is not None:
+        data["billingDays"] = billing_days
+    if supply_charges is not None and supply_charges != {}:
+        data["supplyCharges"] = Json(supply_charges)
+    if delivery_charges is not None and delivery_charges != {}:
+        data["deliveryCharges"] = Json(delivery_charges)
+    if billing_period_start is not None:
+        data["billingPeriodStart"] = parse_date(billing_period_start)
+    if billing_period_end is not None:
+        data["billingPeriodEnd"] = parse_date(billing_period_end)
+
     if existing:
+        if not data:
+            return existing
         return await db.billdetails.update(
             where={"id": existing.id},
             data=data
@@ -617,11 +678,18 @@ async def get_bill_id_by_month_range(month_range: str) -> Optional[int]:
     await ensure_connected()
     if not month_range or not month_range.strip():
         return None
+    target = normalize_month_range(month_range)
     bill = await db.bill.find_first(
         where={"monthRange": month_range.strip()},
         order={"billCycleDate": "desc"}
     )
-    return bill.id if bill else None
+    if bill:
+        return bill.id
+    bills = await db.bill.find_many(order={"billCycleDate": "desc"})
+    for b in bills:
+        if normalize_month_range(b.monthRange) == target:
+            return b.id
+    return None
 
 # =============================================================================
 # Payments
@@ -3075,6 +3143,9 @@ async def get_ledger_data() -> Dict[str, Any]:
         due_date_str = None
         if bill.details and bill.details.dueDate:
             due_date_str = bill.details.dueDate.strftime("%b %d, %Y")
+        elif bill.billDate:
+            estimated_due = bill.billDate + timedelta(days=DEFAULT_DUE_DAYS_AFTER_BILL)
+            due_date_str = estimated_due.strftime("%b %d, %Y")
         bill_dict = {
             "id": bill.id,
             "bill_cycle_date": bill.billCycleDate.strftime("%m/%d/%Y") if bill.billCycleDate else None,

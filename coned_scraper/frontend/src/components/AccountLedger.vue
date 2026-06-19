@@ -885,11 +885,13 @@ const costDisplayLabel = computed(() =>
 )
 const costDisplayValue = computed(() => {
   const cost = meterData.value?.usage_to_date_cost
+    ?? meterData.value?.forecast?.cost_to_date
   if (cost == null) return '—'
-  if (usageDisplayMode.value === 'usage_to_date') return cost.toFixed(2)
+  const costNum = Number(cost)
+  if (usageDisplayMode.value === 'usage_to_date') return costNum.toFixed(2)
   const daysPast = billingCycleDaysPast.value
   if (daysPast <= 0) return '—'
-  const avg = cost / daysPast
+  const avg = costNum / daysPast
   return avg.toFixed(2)
 })
 
@@ -913,7 +915,14 @@ const projectedBillDisplayLabel = computed(() =>
 const projectedBillDisplayValue = computed(() => {
   const forecast = meterData.value?.forecast
   const kwhCost = meterData.value?.kwh_cost
-  if (!forecast?.forecasted_usage || !kwhCost) return '—'
+  const directCost = meterData.value?.projected_cost ?? forecast?.forecasted_cost
+  if (directCost != null) {
+    if (usageDisplayMode.value === 'usage_to_date') return Number(directCost).toFixed(2)
+    const totalDays = billingCycleTotalDays.value
+    if (totalDays <= 0) return '—'
+    return (Number(directCost) / totalDays).toFixed(2)
+  }
+  if (!forecast?.forecasted_usage || kwhCost == null) return '—'
   const totalCost = forecast.forecasted_usage * kwhCost
   if (usageDisplayMode.value === 'usage_to_date') return totalCost.toFixed(2)
   const totalDays = billingCycleTotalDays.value
@@ -1189,6 +1198,7 @@ onMounted(() => {
   checkPdfExists()
   interval = setInterval(() => {
     loadLedgerData()
+    loadMeterData()
   }, 30000)
 
   syncViewerHaIdentity()

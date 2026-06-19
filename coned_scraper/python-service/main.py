@@ -1693,8 +1693,9 @@ async def parse_bill_pdf_endpoint(bill_id: int):
     parsed_data = parse_coned_bill_pdf(str(pdf_path))
     if "error" in parsed_data:
         raise HTTPException(status_code=500, detail=parsed_data["error"])
-    
-    await db.upsert_bill_details(bill_id, **parsed_data)
+
+    kwargs = db.filter_bill_detail_kwargs(parsed_data)
+    await db.upsert_bill_details(bill_id, **kwargs)
     await db.add_log("info", f"Re-parsed bill {bill_id}: kWh={parsed_data.get('kwh_used')}")
     return {"success": True, "details": parsed_data}
 
@@ -1750,14 +1751,7 @@ async def reparse_all_bill_pdfs():
                 results["failed"] += 1
                 results["errors"].append(f"Bill {bill_id}: {parsed_data['error']}")
             else:
-                # Only pass keys that upsert_bill_details accepts (parser may include extras like parsed_at)
-                detail_keys = (
-                    "due_date", "kwh_used", "kwh_cost", "electricity_total",
-                    "total_from_billing_period", "balance_from_previous_bill", "total_amount_due",
-                    "billing_days", "supply_charges", "delivery_charges",
-                    "billing_period_start", "billing_period_end",
-                )
-                kwargs = {k: v for k, v in parsed_data.items() if k in detail_keys}
+                kwargs = db.filter_bill_detail_kwargs(parsed_data)
                 await db.upsert_bill_details(bill_id, **kwargs)
                 results["success"] += 1
                 await db.add_log("info", f"Re-parsed bill {bill_id}: kWh={parsed_data.get('kwh_used')}")
@@ -2811,26 +2805,40 @@ async def get_meter_reading():
     # Get cached forecast for immediate load (no network call)
     forecast = await service.get_cached_forecast() if service.is_enabled() else None
     
-    # Calculate cost using kwh_cost from latest bill
+    # Calculate cost using kwh_cost from latest bill, with Opower fallbacks
     cost = None
     usage_to_date_cost = None
+    projected_cost = None
     latest_bill = await db.get_latest_bill_with_details()
     kwh_cost = latest_bill.get('kwh_cost') if latest_bill else None
-    
+
+    if not kwh_cost and forecast:
+        fc = forecast.get('forecasted_cost')
+        fu = forecast.get('forecasted_usage')
+        if fc is not None and fu and float(fu) > 0:
+            kwh_cost = float(fc) / float(fu)
+
     if kwh_cost and reading and reading.get('value'):
         cost = reading['value'] * float(kwh_cost)
-    
-    # Calculate usage_to_date cost from forecast
-    if kwh_cost and forecast and forecast.get('usage_to_date'):
+
+    if kwh_cost and forecast and forecast.get('usage_to_date') is not None:
         usage_to_date_cost = forecast['usage_to_date'] * float(kwh_cost)
-    
+    elif forecast and forecast.get('cost_to_date') is not None:
+        usage_to_date_cost = float(forecast['cost_to_date'])
+
+    if kwh_cost and forecast and forecast.get('forecasted_usage') is not None:
+        projected_cost = forecast['forecasted_usage'] * float(kwh_cost)
+    elif forecast and forecast.get('forecasted_cost') is not None:
+        projected_cost = float(forecast['forecasted_cost'])
+
     return {
         "enabled": service.is_enabled(),
         "reading": reading,
         "cost": cost,
         "kwh_cost": kwh_cost,
         "forecast": forecast,
-        "usage_to_date_cost": usage_to_date_cost
+        "usage_to_date_cost": usage_to_date_cost,
+        "projected_cost": projected_cost,
     }
 
 
