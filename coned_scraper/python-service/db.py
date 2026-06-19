@@ -2278,6 +2278,140 @@ async def relink_payments_to_bills() -> int:
 # Data Sync
 # =============================================================================
 
+# Late fee constants (NY utility regulation: max 1.5% per month on unpaid balance)
+LATE_FEE_MONTHLY_RATE = 0.015
+PAYMENT_REFLECTION_GRACE_DAYS = 7
+BALANCE_TOLERANCE = 1.0
+DEFAULT_DUE_DAYS_AFTER_BILL = 21
+
+
+def calculate_max_late_fee(bill_total: float, days_past_due: int) -> float:
+    """Legal cap: 1.5% of bill total per month, pro-rated by days past due."""
+    if days_past_due <= 0 or bill_total <= 0:
+        return 0.0
+    months = days_past_due / 30.0
+    return round(bill_total * LATE_FEE_MONTHLY_RATE * months, 2)
+
+
+def _as_utc_date(dt: Optional[datetime]) -> Optional[date]:
+    if dt is None:
+        return None
+    if isinstance(dt, datetime):
+        return dt.date() if dt.tzinfo is None else dt.astimezone(timezone.utc).date()
+    return dt
+
+
+async def _get_bill_context(bill_id: int) -> Optional[Dict[str, Any]]:
+    """Fetch bill total, due date, payments, and month_range for balance analysis."""
+    await ensure_connected()
+    bill = await db.bill.find_unique(
+        where={"id": bill_id},
+        include={"payments": True, "details": True},
+    )
+    if not bill:
+        return None
+    due_dt = bill.details.dueDate if bill.details else None
+    if not due_dt and bill.billDate:
+        due_dt = bill.billDate + timedelta(days=DEFAULT_DUE_DAYS_AFTER_BILL)
+    return {
+        "id": bill.id,
+        "bill_total": decimal_to_float(bill.billTotal) or 0.0,
+        "due_date": _as_utc_date(due_dt),
+        "bill_date": _as_utc_date(bill.billDate),
+        "month_range": bill.monthRange,
+        "payments": [
+            {
+                "amount_numeric": decimal_to_float(p.amount) or 0.0,
+                "payment_date": p.paymentDate,
+            }
+            for p in (bill.payments or [])
+        ],
+    }
+
+
+def _days_past_due(due_date: Optional[date], as_of: Optional[date] = None) -> int:
+    if not due_date:
+        return 0
+    today = as_of or datetime.now(EASTERN).date()
+    return max(0, (today - due_date).days)
+
+
+def _recent_payments_total(
+    payments: List[Dict[str, Any]],
+    within_days: int = PAYMENT_REFLECTION_GRACE_DAYS,
+) -> float:
+    """Sum payments made within the grace window (ConEd balance may lag)."""
+    cutoff = utc_now() - timedelta(days=within_days)
+    total = 0.0
+    for p in payments:
+        pdt = p.get("payment_date")
+        if pdt is None:
+            continue
+        if pdt.tzinfo is None:
+            pdt = pdt.replace(tzinfo=timezone.utc)
+        if pdt >= cutoff:
+            total += float(p.get("amount_numeric") or 0.0)
+    return total
+
+
+async def explain_balance_increase(
+    bill_id: int,
+    expected: float,
+    scraped: float,
+    account_balance_str: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Determine whether scraped > expected is explained by something other than a late fee.
+    Returns {"explained": bool, "reason": str}.
+    """
+    diff = scraped - expected
+    if diff <= BALANCE_TOLERANCE:
+        return {"explained": True, "reason": "within_tolerance"}
+
+    ctx = await _get_bill_context(bill_id)
+    if not ctx:
+        return {"explained": False, "reason": "no_bill_context"}
+
+    bill_total = ctx["bill_total"]
+    due_date = ctx["due_date"]
+    days_late = _days_past_due(due_date)
+
+    # Payments are not late before the due date
+    if days_late <= 0:
+        return {"explained": True, "reason": "before_due_date"}
+
+    recent_payments = _recent_payments_total(ctx["payments"])
+    if recent_payments > BALANCE_TOLERANCE:
+        # Payment recorded in ledger but not yet reflected in ConEd balance
+        if abs(diff - recent_payments) <= BALANCE_TOLERANCE:
+            return {"explained": True, "reason": "recent_payment_not_reflected"}
+        unpaid = bill_total - sum(p["amount_numeric"] for p in ctx["payments"])
+        if abs(scraped - unpaid) <= BALANCE_TOLERANCE and unpaid > BALANCE_TOLERANCE:
+            return {"explained": True, "reason": "partial_payment_not_reflected"}
+
+    # Pending new-bill charges inflate balance without being a late fee
+    if account_balance_str:
+        ref_bill = {
+            "id": bill_id,
+            "bill_total": f"${bill_total:.2f}",
+            "amount_numeric": bill_total,
+            "payments": [
+                {"amount_numeric": p["amount_numeric"]} for p in ctx["payments"]
+            ],
+        }
+        implied = await _calculate_implied_new_charges(ref_bill, account_balance_str)
+        if implied is not None and abs(diff - implied) <= BALANCE_TOLERANCE:
+            return {"explained": True, "reason": "pending_new_bill_charges"}
+
+    return {"explained": False, "reason": "likely_late_fee"}
+
+
+def _compute_capped_late_fee(bill_total: float, days_past_due: int, raw_diff: float) -> float:
+    """Return late fee amount capped at 1.5% per month of bill total."""
+    max_fee = calculate_max_late_fee(bill_total, days_past_due)
+    return round(min(max(raw_diff, 0.0), max_fee), 2)
+
+
 async def calculate_expected_balance() -> Optional[float]:
     """
     Calculate expected account balance based on latest bill minus payments.
@@ -2327,7 +2461,7 @@ async def validate_and_record_balance(scraped_balance: str) -> Dict[str, Any]:
         return {"recorded": True}
 
     expected, bill_id = result
-    tolerance = 1.0
+    tolerance = BALANCE_TOLERANCE
     diff = scraped_numeric - expected
     diff_abs = abs(diff)
 
@@ -2335,6 +2469,24 @@ async def validate_and_record_balance(scraped_balance: str) -> Dict[str, Any]:
         await record_account_balance(scraped_balance)
         logger.info(f"Recorded balance ${scraped_numeric:.2f} (matches expected ${expected:.2f})")
         return {"recorded": True}
+
+    # Check if the increase is explained by payment lag, pending bill, or pre-due-date
+    if diff > 0:
+        explanation = await explain_balance_increase(
+            bill_id, expected, scraped_numeric, scraped_balance
+        )
+        if explanation.get("explained"):
+            await record_account_balance(scraped_balance)
+            reason = explanation.get("reason", "unknown")
+            logger.info(
+                f"Recorded balance ${scraped_numeric:.2f} (discrepancy explained: {reason})"
+            )
+            await add_log(
+                "info",
+                f"Balance ${scraped_numeric:.2f} differs from expected ${expected:.2f} "
+                f"but is explained ({reason}). No late fee.",
+            )
+            return {"recorded": True}
 
     # Rejected - log and maybe signal recheck (only when scraped > expected = possible late fee)
     logger.warning(
@@ -2373,16 +2525,35 @@ async def late_fee_already_reported(bill_id: int) -> bool:
 
 
 async def get_stored_late_fee_amount(bill_id: int) -> Optional[float]:
-    """Return stored late fee amount if we reported for this bill; else None."""
+    """Return stored late fee amount if we reported for this bill; else None.
+    Invalidates stored fees that exceed the legal 1.5%/month cap or pre-date due date."""
     stored = await get_app_setting("late_fee_reported")
     if not stored or not isinstance(stored, dict):
         return None
     if stored.get("bill_id") != bill_id:
         return None
     try:
-        return float(stored.get("amount", 0))
+        amount = float(stored.get("amount", 0))
     except (TypeError, ValueError):
         return None
+
+    ctx = await _get_bill_context(bill_id)
+    if ctx:
+        days_late = _days_past_due(ctx["due_date"])
+        if days_late <= 0:
+            await set_app_setting("late_fee_reported", None)
+            logger.info(f"Cleared late fee ${amount:.2f} for bill {bill_id}: before due date")
+            return None
+        max_fee = calculate_max_late_fee(ctx["bill_total"], days_late)
+        if amount > max_fee + BALANCE_TOLERANCE:
+            await set_app_setting("late_fee_reported", None)
+            logger.info(
+                f"Cleared invalid late fee ${amount:.2f} for bill {bill_id} "
+                f"(exceeds legal cap ${max_fee:.2f})"
+            )
+            return None
+
+    return amount
 
 
 async def record_late_fee_reported(bill_id: int, late_fee_amount: float) -> None:
@@ -2417,18 +2588,75 @@ async def process_balance_recheck(
         )
         return
 
-    # Same balance - treat as late fee
+    # Same balance - evaluate as possible late fee (with due-date and legal cap checks)
     if await late_fee_already_reported(bill_id):
         await record_account_balance(rescraped_balance)
         logger.info("Late fee already added for this bill cycle. Will reset at next bill cycle.")
         await add_log("info", "Late fee already added. Will reset at next bill cycle.")
         return
 
+    raw_diff = original_scraped - expected
+    explanation = await explain_balance_increase(
+        bill_id, expected, original_scraped, rescraped_balance
+    )
+    if explanation.get("explained"):
+        await record_account_balance(rescraped_balance)
+        reason = explanation.get("reason", "unknown")
+        logger.info(
+            f"Recheck confirmed balance ${rescraped_numeric:.2f}; "
+            f"increase explained ({reason}), not a late fee."
+        )
+        await add_log(
+            "info",
+            f"Balance recheck: ${rescraped_numeric:.2f} confirmed. "
+            f"Increase explained ({reason}). No late fee applied.",
+        )
+        return
+
+    ctx = await _get_bill_context(bill_id)
+    bill_total = ctx["bill_total"] if ctx else 0.0
+    days_late = _days_past_due(ctx["due_date"]) if ctx else 0
+
+    if days_late <= 0:
+        await record_account_balance(rescraped_balance)
+        logger.info("Balance increase before due date; recording without late fee.")
+        await add_log("info", "Balance increase detected before due date. No late fee applied.")
+        return
+
+    late_fee_amount = _compute_capped_late_fee(bill_total, days_late, raw_diff)
+    max_fee = calculate_max_late_fee(bill_total, days_late)
+
+    # Discrepancy far above legal cap is not a late fee (payment lag, pending charges, etc.)
+    if raw_diff > max_fee + BALANCE_TOLERANCE:
+        await record_account_balance(rescraped_balance)
+        logger.info(
+            f"Balance increase ${raw_diff:.2f} exceeds legal late fee cap ${max_fee:.2f}; "
+            "recording without late fee."
+        )
+        await add_log(
+            "warning",
+            f"Balance increase ${raw_diff:.2f} exceeds max legal late fee ${max_fee:.2f} "
+            f"(1.5%/month). No late fee applied.",
+        )
+        return
+
+    if late_fee_amount < 0.01:
+        await record_account_balance(rescraped_balance)
+        logger.info("Balance increase below reportable late fee threshold.")
+        await add_log("info", "Balance increase below late fee threshold. No late fee applied.")
+        return
+
     await record_account_balance(rescraped_balance)
-    late_fee_amount = original_scraped - expected
     late_fee_str = f"${late_fee_amount:.2f}"
 
     await record_late_fee_reported(bill_id, late_fee_amount)
+
+    if raw_diff > late_fee_amount + BALANCE_TOLERANCE:
+        await add_log(
+            "warning",
+            f"Balance increase ${raw_diff:.2f} capped to legal late fee ${late_fee_amount:.2f} "
+            f"(1.5%/month max on ${bill_total:.2f}, {days_late} days past due).",
+        )
 
     try:
         from tts_scheduler import trigger_late_fee_tts
