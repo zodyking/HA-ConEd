@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.92
+
+### Changed
+- Documented Home Assistant add-on version source (`config.yaml`) and store refresh steps
+
 ## 1.3.91
 
 ### Fixed

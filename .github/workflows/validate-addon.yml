@@ -1,0 +1,45 @@
+name: Validate Home Assistant add-on
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate add-on config.yaml
+        run: |
+          python3 - <<'PY'
+          import re
+          import sys
+          from pathlib import Path
+
+          import yaml
+
+          config_path = Path("coned_scraper/config.yaml")
+          data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+          version = str(data.get("version", "")).strip()
+          slug = data.get("slug")
+
+          if not version:
+              sys.exit("config.yaml is missing version")
+          if not re.match(r"^\d+\.\d+\.\d+$", version):
+              sys.exit(f"version must be semver x.y.z, got: {version!r}")
+          if slug != "coned_scraper":
+              sys.exit(f"unexpected slug: {slug!r}")
+
+          main_py = Path("coned_scraper/python-service/main.py").read_text(encoding="utf-8")
+          run_sh = Path("coned_scraper/rootfs/etc/s6-overlay/s6-rc.d/api/run").read_text(encoding="utf-8")
+
+          if f'CODE_VERSION = "{version}"' not in main_py:
+              sys.exit(f"main.py CODE_VERSION does not match config.yaml ({version})")
+          if f"v{version}" not in run_sh:
+              sys.exit(f"api/run startup log does not match config.yaml ({version})")
+
+          print(f"Add-on version OK: {version}")
+          PY

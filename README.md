@@ -4,6 +4,23 @@ Home Assistant add-on that connects your **Con Edison** account to Home Assistan
 
 The add-on release version is the `version` key in [`coned_scraper/config.yaml`](coned_scraper/config.yaml).
 
+**There is no `manifest.json` for the add-on.** Home Assistant Supervisor reads only `coned_scraper/config.yaml` for update detection. The file [`coned_scraper/integration/coned_connect/manifest.json`](coned_scraper/integration/coned_connect/manifest.json) is for the optional HACS custom integration and does not control add-on updates.
+
+### If updates are not detected
+
+1. In **Settings → Add-ons → Add-on Store**, open the **⋮** menu and choose **Reload** (not only “Check for updates”).
+2. Confirm the repository URL is exactly `https://github.com/zodyking/HA-ConEd` with **no `#tag` or branch suffix** (for example, not `#1.3.89`).
+3. If it still shows the old version, remove the repository and add it again, then **Reload**.
+4. The update dialog may show the full `CHANGELOG.md` even when the store is stale — that does not mean the new version was detected. Check **Latest version** in the dialog; it must be higher than **Installed version** before **Update** is enabled.
+
+To bump the add-on version when releasing:
+
+```bash
+python3 scripts/sync_addon_version.py 1.3.92
+```
+
+This updates `config.yaml`, `main.py` `CODE_VERSION`, and the startup log in `rootfs`.
+
 ## Features
 
 | Area | What you get |
