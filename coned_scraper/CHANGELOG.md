@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.94
+
+### Fixed
+- Year-aware PDF auto-download for duplicate month ranges (e.g. MAY - JUN 2025 vs 2026)
+- Bill history scrape deduplicates duplicate DOM rows
+
+### Changed
+- Version bump for Home Assistant add-on store update detection
+
 ## 1.3.93
 
 ### Fixed
