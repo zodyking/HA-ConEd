@@ -663,8 +663,30 @@ async def delete_bill_document(bill_id: int) -> bool:
     except Exception:
         return False
 
+def bill_identity_key(
+    month_range: Optional[str],
+    bill_cycle_date: Optional[str] = None,
+    bill_cycle_dt: Optional[datetime] = None,
+) -> Optional[str]:
+    """Unique bill key across years that share the same month_range label."""
+    norm_range = normalize_month_range(month_range)
+    if not norm_range:
+        return None
+    cycle_dt = bill_cycle_dt
+    if cycle_dt is None and bill_cycle_date:
+        cycle_dt = parse_date(bill_cycle_date)
+    if cycle_dt:
+        if cycle_dt.tzinfo is None:
+            cycle_dt = cycle_dt.replace(tzinfo=timezone.utc)
+        return f"{norm_range}|{cycle_dt.strftime('%Y-%m-%d')}"
+    cleaned = (bill_cycle_date or "").strip()
+    if cleaned:
+        return f"{norm_range}|{cleaned}"
+    return None
+
+
 async def get_month_ranges_with_pdf() -> set:
-    """Get month_range values for bills that already have a PDF document"""
+    """Deprecated alias: returns month_range only. Prefer get_bill_pdf_identity_keys_with_pdf."""
     await ensure_connected()
     docs = await db.billdocument.find_many(include={"bill": True})
     result = set()
@@ -673,15 +695,58 @@ async def get_month_ranges_with_pdf() -> set:
             result.add(d.bill.monthRange.strip())
     return result
 
-async def get_bill_id_by_month_range(month_range: str) -> Optional[int]:
-    """Get bill id by month_range (e.g. 'JAN - FEB'). Returns most recent if multiple."""
+
+async def get_bill_pdf_identity_keys_with_pdf() -> set[str]:
+    """Bill identity keys (month_range + cycle date) that already have a PDF."""
+    await ensure_connected()
+    docs = await db.billdocument.find_many(include={"bill": True})
+    result: set[str] = set()
+    for d in docs:
+        if not d.bill:
+            continue
+        cycle_str = (
+            d.bill.billCycleDate.strftime("%m/%d/%Y")
+            if d.bill.billCycleDate
+            else None
+        )
+        key = bill_identity_key(d.bill.monthRange, cycle_str)
+        if key:
+            result.add(key)
+    return result
+
+
+async def get_bill_id_by_month_range(
+    month_range: str,
+    bill_cycle_date: Optional[str] = None,
+) -> Optional[int]:
+    """Get bill id by month_range and optional bill cycle date for year disambiguation."""
     await ensure_connected()
     if not month_range or not month_range.strip():
         return None
     target = normalize_month_range(month_range)
+
+    if bill_cycle_date:
+        cycle_dt = parse_date(bill_cycle_date)
+        if cycle_dt:
+            exact = await db.bill.find_first(
+                where={
+                    "billCycleDate": cycle_dt,
+                    "monthRange": month_range.strip(),
+                }
+            )
+            if exact:
+                return exact.id
+            candidates = await db.bill.find_many(
+                where={"billCycleDate": cycle_dt},
+                order={"billCycleDate": "desc"},
+            )
+            for b in candidates:
+                if normalize_month_range(b.monthRange) == target:
+                    return b.id
+
     bill = await db.bill.find_first(
         where={"monthRange": month_range.strip()},
-        order={"billCycleDate": "desc"}
+        order={"billCycleDate": "desc"},
     )
     if bill:
         return bill.id

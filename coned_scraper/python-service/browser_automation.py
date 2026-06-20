@@ -454,16 +454,29 @@ async def perform_login(username: str, password: str, totp_code: str, test_only:
                         pdf_results = await scrape_bill_pdfs(page, context)
                         if pdf_results:
                             from pdf_utils import download_and_store_pdf
-                            for month_range, pdf_url in pdf_results:
+                            for month_range, bill_cycle_date, pdf_url in pdf_results:
+                                label = (
+                                    f"{month_range} ({bill_cycle_date})"
+                                    if bill_cycle_date
+                                    else month_range
+                                )
                                 try:
-                                    bill_id = await db.get_bill_id_by_month_range(month_range)
+                                    bill_id = await db.get_bill_id_by_month_range(
+                                        month_range, bill_cycle_date
+                                    )
                                     if bill_id:
                                         await download_and_store_pdf(pdf_url, bill_id)
-                                        await db.add_log("success", f"Auto-downloaded PDF for {month_range}")
+                                        await db.add_log("success", f"Auto-downloaded PDF for {label}")
                                     else:
-                                        await db.add_log("warning", f"No bill found for {month_range}, skipped PDF")
+                                        await db.add_log(
+                                            "warning",
+                                            f"No bill found for {label}, skipped PDF",
+                                        )
                                 except Exception as dl_e:
-                                    await db.add_log("warning", f"PDF download failed for {month_range}: {dl_e}")
+                                    await db.add_log(
+                                        "warning",
+                                        f"PDF download failed for {label}: {dl_e}",
+                                    )
                         elif pdf_results is not None:
                             await db.add_log("info", "PDF scrape: No new PDF URLs to download")
                     except Exception as pdf_e:
@@ -824,11 +837,57 @@ async def scrape_pdf_bill_url(page, context):
     return pdf_url
 
 
+async def _parse_bill_row_fields(item) -> dict | None:
+    """Extract month_range and bill_cycle_date from a ConEd bill history row."""
+    try:
+        months_el = item.locator(".billing-payment-item__months").first
+        if await months_el.count() == 0:
+            return None
+        month_range = (await months_el.inner_text()).strip()
+        if not month_range:
+            return None
+
+        bill_cycle_date = None
+        date_element = item.locator(
+            ".billing-payment-item__date .billing-payment-item__focus"
+        ).first
+        if await date_element.count() > 0:
+            date_text = await date_element.inner_text()
+            date_text = (
+                date_text.replace("Bill Cycle:", "")
+                .replace("visually-hidden", "")
+                .strip()
+            )
+            bill_cycle_date = " ".join(date_text.split()).strip() or None
+
+        return {"month_range": month_range, "bill_cycle_date": bill_cycle_date}
+    except Exception:
+        return None
+
+
+async def _find_bill_row_by_identity(page, month_range: str, bill_cycle_date: str | None):
+    """Find a bill row matching both month_range and bill cycle date (year-safe)."""
+    target_key = db.bill_identity_key(month_range, bill_cycle_date)
+    if not target_key:
+        return None
+    bill_rows = await page.locator(".js-bill-item, .billing-payment-item--bill").all()
+    for row in bill_rows:
+        fields = await _parse_bill_row_fields(row)
+        if not fields:
+            continue
+        row_key = db.bill_identity_key(
+            fields["month_range"], fields.get("bill_cycle_date")
+        )
+        if row_key == target_key:
+            return row
+    return None
+
+
 async def scrape_bill_pdfs(page, context) -> list:
     """
     Independent secondary scrape: capture PDF URLs for bills that don't have a PDF.
     Runs after main scrape, uses same browser session. Does not modify scrape_bill_history.
-    Returns [(month_range, pdf_url), ...]
+    Returns [(month_range, bill_cycle_date, pdf_url), ...]
     """
     BILL_HISTORY_URL = "https://www.coned.com/en/accounts-billing/my-account/bill-history-assistance"
     MAX_PDF_CAPTURES = 10  # Cap to avoid timeout
@@ -843,9 +902,11 @@ async def scrape_bill_pdfs(page, context) -> list:
             await db.add_log("info", "Auto-download PDFs is disabled, skipping PDF scrape")
             return result
 
-        # Get bills that already have PDFs
-        existing_months = await db.get_month_ranges_with_pdf()
-        await db.add_log("info", f"PDF scrape: {len(existing_months)} bills already have PDFs")
+        # Bills already stored with a PDF (keyed by month_range + cycle date)
+        existing_keys = await db.get_bill_pdf_identity_keys_with_pdf()
+        await db.add_log(
+            "info", f"PDF scrape: {len(existing_keys)} bills already have PDFs"
+        )
 
         # Navigate to bill history
         await db.add_log("info", f"PDF scrape: Navigating to {BILL_HISTORY_URL}")
@@ -855,25 +916,37 @@ async def scrape_bill_pdfs(page, context) -> list:
         bill_items = await page.locator(".js-bill-item, .billing-payment-item--bill").all()
         await db.add_log("info", f"PDF scrape: Found {len(bill_items)} bill rows")
 
-        # First pass: collect month_ranges that need PDF (avoid stale locators after nav)
-        to_capture = []
+        # First pass: collect bills that need PDFs (dedupe DOM duplicates, year-aware)
+        to_capture: list[tuple[str, str | None, str]] = []
+        seen_keys: set[str] = set()
         for item in bill_items:
             try:
-                months_el = item.locator(".billing-payment-item__months").first
-                if await months_el.count() == 0:
+                fields = await _parse_bill_row_fields(item)
+                if not fields:
                     continue
-                month_range = (await months_el.inner_text()).strip()
-                if month_range and month_range not in existing_months:
-                    to_capture.append(month_range)
-                    existing_months.add(month_range)
+                month_range = fields["month_range"]
+                bill_cycle_date = fields.get("bill_cycle_date")
+                identity_key = db.bill_identity_key(month_range, bill_cycle_date)
+                if not identity_key or identity_key in seen_keys:
+                    continue
+                seen_keys.add(identity_key)
+                if identity_key not in existing_keys:
+                    to_capture.append((month_range, bill_cycle_date, identity_key))
+                    existing_keys.add(identity_key)
             except Exception:
                 continue
 
+        await db.add_log("info", f"PDF scrape: {len(to_capture)} bills need PDF capture")
+
         capture_count = 0
-        for month_range in to_capture:
+        for month_range, bill_cycle_date, identity_key in to_capture:
             if capture_count >= MAX_PDF_CAPTURES:
                 await db.add_log("info", f"PDF scrape: Reached cap of {MAX_PDF_CAPTURES}, stopping")
                 break
+
+            label = (
+                f"{month_range} ({bill_cycle_date})" if bill_cycle_date else month_range
+            )
 
             try:
                 # Ensure we're on bill history (may have navigated away)
@@ -881,18 +954,13 @@ async def scrape_bill_pdfs(page, context) -> list:
                     await page.goto(BILL_HISTORY_URL, wait_until="domcontentloaded", timeout=15000)
                     await asyncio.sleep(2)
 
-                # Find row with this month_range (re-query for fresh locators)
-                bill_rows = await page.locator(".js-bill-item, .billing-payment-item--bill").all()
-                item = None
-                for row in bill_rows:
-                    try:
-                        mr = (await row.locator(".billing-payment-item__months").first.inner_text()).strip()
-                        if mr == month_range:
-                            item = row
-                            break
-                    except Exception:
-                        continue
+                item = await _find_bill_row_by_identity(
+                    page, month_range, bill_cycle_date
+                )
                 if item is None:
+                    await db.add_log(
+                        "warning", f"PDF scrape: Could not find row for {label}"
+                    )
                     continue
 
                 view_bill_selectors = [
@@ -915,7 +983,7 @@ async def scrape_bill_pdfs(page, context) -> list:
                                 href = f"https://www.coned.com{href}"
                             if href.startswith("http"):
                                 try:
-                                    await db.add_log("info", f"PDF scrape: Same-tab for {month_range}")
+                                    await db.add_log("info", f"PDF scrape: Same-tab for {label}")
                                     await page.goto(href, wait_until="domcontentloaded", timeout=20000)
                                     for _ in range(15):
                                         await asyncio.sleep(1)
@@ -927,12 +995,12 @@ async def scrape_bill_pdfs(page, context) -> list:
                                             or len(page.url) > 100
                                         ):
                                             pdf_url = page.url
-                                            await db.add_log("success", f"PDF scrape: Captured URL for {month_range}")
+                                            await db.add_log("success", f"PDF scrape: Captured URL for {label}")
                                             break
                                     await page.goto(BILL_HISTORY_URL, wait_until="domcontentloaded", timeout=15000)
                                     await asyncio.sleep(2)
                                 except Exception as e:
-                                    await db.add_log("warning", f"PDF scrape same-tab failed for {month_range}: {e}")
+                                    await db.add_log("warning", f"PDF scrape same-tab failed for {label}: {e}")
                                     try:
                                         await page.goto(BILL_HISTORY_URL, wait_until="domcontentloaded", timeout=15000)
                                     except Exception:
@@ -983,14 +1051,14 @@ async def scrape_bill_pdfs(page, context) -> list:
                             except Exception:
                                 pass
                     except Exception as e:
-                        await db.add_log("warning", f"PDF scrape new-tab failed for {month_range}: {e}")
+                        await db.add_log("warning", f"PDF scrape new-tab failed for {label}: {e}")
 
                 if pdf_url:
-                    result.append((month_range, pdf_url))
+                    result.append((month_range, bill_cycle_date, pdf_url))
                     capture_count += 1
 
             except Exception as e:
-                await db.add_log("warning", f"PDF scrape error for {month_range}: {e}")
+                await db.add_log("warning", f"PDF scrape error for {label}: {e}")
                 continue
 
         await db.add_log("info", f"PDF scrape: Captured {len(result)} PDF URLs")
@@ -1070,6 +1138,9 @@ async def scrape_bill_history(page):
             
             await db.add_log("info", f"Found {len(payment_items)} payment items and {len(bill_items)} bill items")
             
+            seen_payment_keys: set[str] = set()
+            seen_bill_keys: set[str] = set()
+
             # Process payment items
             for item in payment_items:
                 try:
@@ -1126,6 +1197,17 @@ async def scrape_bill_history(page):
                         item_data["amount"] = amount_text.strip()
                     
                     if item_data.get("bill_cycle_date") or item_data.get("amount"):
+                        payment_key = "|".join(
+                            [
+                                item_data.get("bill_cycle_date") or "",
+                                item_data.get("payment_date") or "",
+                                item_data.get("amount") or "",
+                                item_data.get("description") or "",
+                            ]
+                        )
+                        if payment_key in seen_payment_keys:
+                            continue
+                        seen_payment_keys.add(payment_key)
                         bill_history["ledger"].append(item_data)
                         payment_info = f"Added payment: {item_data.get('amount')}"
                         if item_data.get("payment_date"):
@@ -1171,8 +1253,22 @@ async def scrape_bill_history(page):
                             item_data["bill_date"] = bill_date
                     
                     if item_data.get("bill_cycle_date") or item_data.get("bill_total"):
+                        bill_key = db.bill_identity_key(
+                            item_data.get("month_range"),
+                            item_data.get("bill_cycle_date"),
+                        )
+                        if bill_key and bill_key in seen_bill_keys:
+                            continue
+                        if bill_key:
+                            seen_bill_keys.add(bill_key)
                         bill_history["ledger"].append(item_data)
-                        await db.add_log("info", f"Added bill: {item_data.get('bill_total')} for {item_data.get('month_range')}")
+                        cycle = item_data.get("bill_cycle_date")
+                        period = item_data.get("month_range")
+                        label = f"{period} ({cycle})" if cycle and period else (period or cycle)
+                        await db.add_log(
+                            "info",
+                            f"Added bill: {item_data.get('bill_total')} for {label}",
+                        )
                         
                 except Exception as e:
                     await db.add_log("warning", f"Error parsing bill item: {str(e)}")

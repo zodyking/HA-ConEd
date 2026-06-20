@@ -19,7 +19,9 @@
         <div v-if="!bills.length" class="info-text">Run the scraper first to load billing periods</div>
         <div v-for="b in bills" :key="b.id" class="ha-pdf-cycle-block">
           <div class="ha-pdf-cycle-header">
-            <span class="ha-pdf-cycle-period">{{ b.month_range || b.bill_cycle_date }}{{ b.pdf_exists ? ' ✓' : '' }}</span>
+            <span class="ha-pdf-cycle-period">
+              {{ formatBillPeriod(b) }}{{ b.pdf_exists ? ' ✓' : '' }}
+            </span>
             <span v-if="b.pdf_exists" class="ha-pdf-cycle-actions">
               <a :href="`${getApiBase()}/bill-document/${b.id}`" target="_blank" rel="noopener" class="ha-btn ha-btn-blue">View</a>
               <button type="button" class="ha-btn ha-btn-red" :disabled="pdfLoading" @click="handleDeletePdf(b.id)">Delete</button>
@@ -82,6 +84,13 @@ const billsWithPdf = computed(() =>
     size_kb: billStatuses.value[b.id]?.size_kb ?? 0,
   }))
 )
+
+function formatBillPeriod(b: Bill): string {
+  if (b.month_range && b.bill_cycle_date) {
+    return `${b.month_range} · ${b.bill_cycle_date}`
+  }
+  return b.month_range || b.bill_cycle_date || 'Unknown period'
+}
 
 async function loadAppSettings() {
   try {

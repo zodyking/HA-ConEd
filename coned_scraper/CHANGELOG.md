@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.93
+
+### Fixed
+- PDF auto-download now distinguishes bills with the same month range across different years (e.g. MAY - JUN 2025 vs 2026)
+- Bill history scrape deduplicates duplicate DOM rows so ledger entries are not doubled
+
 ## 1.3.92
 
 ### Changed
