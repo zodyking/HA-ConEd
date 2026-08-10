@@ -2829,9 +2829,11 @@ async def test_meter_connection():
 
         # Get account info first (includes smart meter status)
         account_info = await service.get_account_info()
-        
         if not account_info:
-            raise HTTPException(status_code=400, detail="Login failed. Check your username, password, and TOTP secret.")
+            logger.warning(
+                "Optional Opower account metadata is unavailable; "
+                "continuing connection test with usage data"
+            )
         
         # Get forecast
         forecast = await service.fetch_forecast()
@@ -2844,7 +2846,7 @@ async def test_meter_connection():
                 "success": True,
                 "message": f"Connected! Latest reading: {reading['value']} {reading['unit']} (from {reading.get('end_time', 'unknown')})",
                 "reading": reading,
-                "account_info": account_info,
+                "account_info": account_info or {},
                 "accounts": accounts,
                 "forecast": forecast,
                 "smart_meter_info": {
