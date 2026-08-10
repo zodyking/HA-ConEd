@@ -113,6 +113,13 @@ class MeterService:
         """Login to Con Edison via opower."""
         if not self._opower:
             return False
+
+        # Opower stores the bearer token on the client after login. Reuse it for
+        # subsequent reads: Con Edison's MFA flow explicitly does not handle
+        # rapid double-logins reliably, and one API request commonly fans out
+        # into account, forecast, and usage calls.
+        if getattr(self._opower, "access_token", None):
+            return True
         
         try:
             await self._opower.async_login()

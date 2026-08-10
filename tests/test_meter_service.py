@@ -50,6 +50,18 @@ def test_select_account_preserves_legacy_first_account_default():
 
 
 @pytest.mark.asyncio
+async def test_login_reuses_authenticated_opower_session():
+    service = make_service()
+    service._opower = SimpleNamespace(
+        access_token="existing-token",
+        async_login=AsyncMock(),
+    )
+
+    assert await service._login() is True
+    service._opower.async_login.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_list_accounts_filters_gas_and_includes_customer_labels():
     service = make_service()
     electric = make_account("electric")
