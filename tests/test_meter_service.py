@@ -145,6 +145,28 @@ async def test_fetch_forecast_filters_to_selected_account(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_get_account_info_tolerates_missing_optional_customer_metadata():
+    service = make_service("first")
+    account = SimpleNamespace(
+        id="first",
+        uuid="uuid-first",
+        utility_account_id="utility-first",
+        meter_type="ELEC",
+        read_resolution="HOUR",
+    )
+    service._login = AsyncMock(return_value=True)
+    service._get_accounts = AsyncMock(return_value=[account])
+    service._opower = SimpleNamespace(
+        utility=SimpleNamespace(supports_realtime_usage=lambda: False)
+    )
+
+    info = await service.get_account_info()
+
+    assert info["account_id"] == "first"
+    assert info["customer_uuid"] is None
+
+
+@pytest.mark.asyncio
 async def test_cached_reading_from_another_account_is_ignored(monkeypatch):
     service = make_service()
     monkeypatch.setitem(

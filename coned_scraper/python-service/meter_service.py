@@ -519,15 +519,23 @@ class MeterService:
                     realtime_error = str(e)
             
             summary = self.get_account_summary(account)
+            account_uuid = str(getattr(account, 'uuid', '') or '')
+            customer = getattr(account, 'customer', None)
             return {
-                'account_id': str(getattr(account, 'id', '') or account.uuid),
-                'account_uuid': account.uuid,
-                'utility_account_id': account.utility_account_id,
-                'meter_type': str(account.meter_type) if account.meter_type else None,
-                'read_resolution': str(account.read_resolution) if account.read_resolution else None,
+                'account_id': str(getattr(account, 'id', '') or account_uuid),
+                'account_uuid': account_uuid,
+                'utility_account_id': str(
+                    getattr(account, 'utility_account_id', '') or ''
+                ),
+                'meter_type': str(getattr(account, 'meter_type', '') or '') or None,
+                'read_resolution': str(
+                    getattr(account, 'read_resolution', '') or ''
+                ) or None,
                 'has_realtime_access': has_realtime,
                 'realtime_error': realtime_error,
-                'customer_uuid': account.customer.uuid if account.customer else None,
+                'customer_uuid': (
+                    str(getattr(customer, 'uuid', '') or '') or None
+                ),
                 'account_name': summary.get('account_name', ''),
                 'account_type': summary.get('account_type', ''),
                 'account_number': summary.get('account_number', ''),
