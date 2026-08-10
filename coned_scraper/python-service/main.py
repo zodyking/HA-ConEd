@@ -2830,7 +2830,7 @@ async def test_meter_connection():
         # Get account info first (includes smart meter status)
         account_info = await service.get_account_info()
         if not account_info:
-            logger.warning(
+            logging.warning(
                 "Optional Opower account metadata is unavailable; "
                 "continuing connection test with usage data"
             )
