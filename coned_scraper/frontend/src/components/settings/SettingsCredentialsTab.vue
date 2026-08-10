@@ -98,7 +98,7 @@
         <div class="info-text" style="margin-bottom: 1rem">
           Enable real-time meter readings using the 
           <a href="https://github.com/tronikos/opower" target="_blank" rel="noopener">opower</a> library. 
-          Uses the same credentials as above. Creates MQTT sensors for current usage (kWh) and calculated cost.
+          Uses the same credentials as above. Each enabled service address receives its own Home Assistant meter device and sensors.
         </div>
         
         <div class="ha-form-group">
@@ -110,7 +110,7 @@
 
         <template v-if="meterConfig.enabled">
           <div class="ha-form-group">
-            <label for="meter-account" class="ha-form-label">Electric Account</label>
+            <label for="meter-account" class="ha-form-label">Primary Service Address</label>
             <div class="ha-account-picker-row">
               <select
                 id="meter-account"
@@ -129,7 +129,25 @@
               </button>
             </div>
             <div class="info-text">
-              Choose the service address used for both Opower meter readings and browser-scraped bills and balance.
+              Used for the legacy sensors, history chart, browser-scraped bills, and balance.
+            </div>
+          </div>
+
+          <div v-if="meterAccounts.length" class="ha-form-group">
+            <label class="ha-form-label">Addresses Exposed to Home Assistant</label>
+            <div class="ha-meter-account-list">
+              <label v-for="account in meterAccounts" :key="account.id" class="ha-meter-account-option">
+                <input
+                  v-model="meterConfig.enabled_account_ids"
+                  type="checkbox"
+                  :value="account.id"
+                  :disabled="account.id === meterConfig.selected_account_id"
+                />
+                <span>{{ formatAccountLabel(account) }}</span>
+              </label>
+            </div>
+            <div class="info-text">
+              Selected addresses are polled through this one Con Edison login and receive separate Home Assistant devices and sensors. The primary address is always included.
             </div>
           </div>
 
@@ -295,7 +313,8 @@ const meterConfig = reactive({
   enabled: false,
   polling_interval: 15,
   selected_account_id: '',
-  selected_account_address: ''
+  selected_account_address: '',
+  enabled_account_ids: [] as string[]
 })
 const meterAccounts = ref<MeterAccount[]>([])
 const meterLoading = ref(false)
@@ -328,6 +347,9 @@ function formatAccountLabel(account: MeterAccount): string {
 function onMeterAccountChange() {
   const selected = meterAccounts.value.find(account => account.id === meterConfig.selected_account_id)
   meterConfig.selected_account_address = selected?.address || ''
+  if (selected && !meterConfig.enabled_account_ids.includes(selected.id)) {
+    meterConfig.enabled_account_ids.unshift(selected.id)
+  }
 }
 
 // Load credentials
@@ -417,6 +439,7 @@ async function loadMeterConfig() {
       meterConfig.polling_interval = Math.max(15, d.polling_interval ?? 15)
       meterConfig.selected_account_id = d.selected_account_id || ''
       meterConfig.selected_account_address = d.selected_account_address || ''
+      meterConfig.enabled_account_ids = Array.isArray(d.enabled_account_ids) ? d.enabled_account_ids : []
       if (meterConfig.enabled) {
         await discoverMeterAccounts(false)
       }
@@ -458,7 +481,8 @@ async function syncMeterCredentials() {
         totp_secret: totpSecret.value,
         polling_interval: meterConfig.polling_interval,
         selected_account_id: meterConfig.selected_account_id,
-        selected_account_address: meterConfig.selected_account_address
+        selected_account_address: meterConfig.selected_account_address,
+        enabled_account_ids: meterConfig.enabled_account_ids
       })
     })
   } catch (e) {
@@ -478,9 +502,12 @@ async function discoverMeterAccounts(showMessage = true) {
     }
 
     meterAccounts.value = d.accounts || []
-    const onlyAccount = meterAccounts.value.length === 1 ? meterAccounts.value[0] : undefined
-    if (!meterConfig.selected_account_id && onlyAccount) {
-      meterConfig.selected_account_id = onlyAccount.id
+    const firstAccount = meterAccounts.value[0]
+    if (!meterConfig.selected_account_id && firstAccount) {
+      meterConfig.selected_account_id = firstAccount.id
+    }
+    if (!meterConfig.enabled_account_ids.length && Array.isArray(d.enabled_account_ids)) {
+      meterConfig.enabled_account_ids = d.enabled_account_ids
     }
     onMeterAccountChange()
     if (showMessage) {
@@ -520,7 +547,8 @@ async function saveMeterConfig() {
         totp_secret: totpSecret.value,
         polling_interval: meterConfig.polling_interval,
         selected_account_id: meterConfig.selected_account_id,
-        selected_account_address: meterConfig.selected_account_address
+        selected_account_address: meterConfig.selected_account_address,
+        enabled_account_ids: meterConfig.enabled_account_ids
       })
     })
     if (res.ok) {
@@ -684,6 +712,23 @@ defineExpose({ loadSettings })
 .ha-account-picker-row select {
   flex: 1;
   min-width: 0;
+}
+.ha-meter-account-list {
+  display: grid;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+.ha-meter-account-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.ha-meter-account-option input {
+  margin-top: 0.15rem;
 }
 .ha-reading-info {
   margin-top: 1.5rem;

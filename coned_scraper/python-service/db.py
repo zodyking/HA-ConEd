@@ -2,6 +2,7 @@
 Database module using Prisma ORM with PostgreSQL.
 Provides async database operations for the ConEd Scraper addon.
 """
+import asyncio
 import json
 import logging
 import hashlib
@@ -24,6 +25,9 @@ logger = logging.getLogger(__name__)
 
 # Global Prisma client instance
 db = Prisma()
+
+_meter_readings_cache_lock = asyncio.Lock()
+_meter_forecasts_cache_lock = asyncio.Lock()
 
 def utc_now() -> datetime:
     """Get current UTC time"""
@@ -2124,8 +2128,42 @@ async def save_meter_forecast_db(forecast: Dict[str, Any]):
     await set_app_setting("meter_forecast_cache", forecast)
 
 
+async def get_meter_readings_by_account_db() -> Dict[str, Dict[str, Any]]:
+    """Get cached meter readings keyed by stable Opower account ID."""
+    value = await get_app_setting("meter_readings_by_account_cache")
+    return value if isinstance(value, dict) else {}
+
+
+async def save_meter_reading_for_account_db(reading: Dict[str, Any]):
+    """Upsert one account's cached meter reading."""
+    account_id = str(reading.get("account_id", "") or "").strip()
+    if not account_id:
+        return
+    async with _meter_readings_cache_lock:
+        readings = await get_meter_readings_by_account_db()
+        readings[account_id] = reading
+        await set_app_setting("meter_readings_by_account_cache", readings)
+
+
+async def get_meter_forecasts_by_account_db() -> Dict[str, Dict[str, Any]]:
+    """Get cached meter forecasts keyed by stable Opower account ID."""
+    value = await get_app_setting("meter_forecasts_by_account_cache")
+    return value if isinstance(value, dict) else {}
+
+
+async def save_meter_forecast_for_account_db(forecast: Dict[str, Any]):
+    """Upsert one account's cached meter forecast."""
+    account_id = str(forecast.get("account_id", "") or "").strip()
+    if not account_id:
+        return
+    async with _meter_forecasts_cache_lock:
+        forecasts = await get_meter_forecasts_by_account_db()
+        forecasts[account_id] = forecast
+        await set_app_setting("meter_forecasts_by_account_cache", forecasts)
+
+
 async def clear_meter_data_db():
-    """Clear cached readings when the configured Opower account changes."""
+    """Clear selected-account caches and chart data after selection changes."""
     await set_app_setting("meter_reading_cache", None)
     await set_app_setting("meter_forecast_cache", None)
     await ensure_connected()

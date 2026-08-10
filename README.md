@@ -28,7 +28,7 @@ This updates `config.yaml`, `main.py` `CODE_VERSION`, and the startup log in `ro
 | **Ledger** | Bills, payments, balance, due dates; consistent ordering with the web UI |
 | **Bill PDFs** | Store and host PDFs; optional auto-download; MQTT exposes a link in attributes |
 | **Payees** | Split responsibility, cards, payments — Bill-only or rollover breakdown |
-| **Meter** | Forecast, usage-to-date, projected usage/bill via Opower (typical **1–24 h delay**); **Daily Usage** chart uses **15‑minute** intervals with calendar days in **US Eastern** |
+| **Meter** | Per-service-address forecast, usage, and projected bill via one Opower login (typical **1–24 h delay**); choose which addresses become Home Assistant devices and keep one primary address for the **Daily Usage** chart |
 | **MQTT** | Auto-discovered sensors for balance, bills, usage, PDF URL, payee summary, dates |
 | **TTS / IMAP** | Optional alerts and payment detection from email |
 

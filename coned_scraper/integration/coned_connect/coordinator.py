@@ -147,6 +147,19 @@ class ConEdisonDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         data["current_cycle_usage"] = forecast.get("usage_to_date")
                         data["forecasted_usage"] = forecast.get("forecasted_usage")
 
+            # Fetch independently cached data for every electric account. Older
+            # add-on versions return 404, leaving the legacy sensors untouched.
+            async with session.get(
+                f"{self.addon_url}/api/meter-readings",
+                timeout=aiohttp.ClientTimeout(total=30),
+            ) as response:
+                if response.status == 200:
+                    meter_accounts = await response.json()
+                    accounts = meter_accounts.get("accounts", [])
+                    data["meter_accounts"] = (
+                        accounts if isinstance(accounts, list) else []
+                    )
+
             # Fetch bill PDF URL - check if PDF exists first
             async with session.get(
                 f"{self.addon_url}/api/bill-document",

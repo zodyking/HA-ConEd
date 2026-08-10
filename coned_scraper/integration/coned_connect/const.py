@@ -103,3 +103,67 @@ SENSORS = {
         "icon": "mdi:chart-line",
     },
 }
+
+
+# Sensors created once per electric Opower account. Their unique IDs include a
+# privacy-preserving hash of the stable account ID, while the local device name
+# uses the account label/address returned by the add-on.
+ACCOUNT_SENSORS = {
+    "latest_hourly_usage": {
+        "name": "Latest Hourly Usage",
+        "unit": "kWh",
+        "device_class": "energy",
+        "state_class": "measurement",
+        "icon": "mdi:flash",
+    },
+    "current_usage_cost": {
+        "name": "Latest Hourly Cost",
+        "unit": "USD",
+        "device_class": "monetary",
+        "icon": "mdi:currency-usd",
+        "source": "cost",
+    },
+    "current_cycle_usage": {
+        "name": "Current Cycle Usage",
+        "unit": "kWh",
+        "device_class": "energy",
+        "state_class": "total",
+        "icon": "mdi:flash-outline",
+    },
+    "forecasted_usage": {
+        "name": "Forecasted Usage",
+        "unit": "kWh",
+        "device_class": "energy",
+        "icon": "mdi:chart-line",
+    },
+    "usage_to_date_cost": {
+        "name": "Current Cycle Cost",
+        "unit": "USD",
+        "device_class": "monetary",
+        "icon": "mdi:cash-clock",
+    },
+    "projected_cost": {
+        "name": "Projected Cost",
+        "unit": "USD",
+        "device_class": "monetary",
+        "icon": "mdi:cash-fast",
+    },
+    "billing_start_date": {
+        "name": "Billing Start Date",
+        "unit": None,
+        "device_class": None,
+        "icon": "mdi:calendar-start",
+    },
+    "billing_end_date": {
+        "name": "Billing End Date",
+        "unit": None,
+        "device_class": None,
+        "icon": "mdi:calendar-end",
+    },
+    "kwh_cost": {
+        "name": "kWh Cost",
+        "unit": "$/kWh",
+        "device_class": None,
+        "icon": "mdi:lightning-bolt",
+    },
+}

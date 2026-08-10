@@ -14,7 +14,7 @@ Con Edison account integration for Home Assistant. Syncs bills, payments, and ba
 - **Payee tracking** — Assign payments to roommates/households; audit and reconcile shared bills
 - **MQTT sensors** — Balance, latest bill, last payment, payee summaries; auto-discovery so no YAML config needed
 - **Automated scraping** — Configurable schedule or manual runs
-- **Multiple accounts** — Choose the electric service address used for bills, balance, and Opower readings
+- **Multiple service addresses** — From one login, choose any addresses to expose as separate Home Assistant meter devices and select a primary address for bills and history
 - **Encrypted credential storage**
 
 ## Documentation

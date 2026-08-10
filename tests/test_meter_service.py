@@ -24,13 +24,17 @@ def make_account(account_id: str, meter_type: str = "ELEC") -> SimpleNamespace:
     )
 
 
-def make_service(selected_account_id: str = "second") -> MeterService:
+def make_service(
+    selected_account_id: str = "second",
+    enabled_account_ids: list[str] | None = None,
+) -> MeterService:
     service = MeterService()
     service.config = {
         "email": "user@example.com",
         "password": "plain:secret",
         "totp_secret": "totp",
         "selected_account_id": selected_account_id,
+        "enabled_account_ids": enabled_account_ids or [],
     }
     return service
 
@@ -47,6 +51,20 @@ def test_select_account_preserves_legacy_first_account_default():
     accounts = [make_account("first"), make_account("second")]
 
     assert service._select_account(accounts) is accounts[0]
+
+
+def test_enabled_accounts_filters_service_addresses_from_one_login():
+    service = make_service("first", ["first", "third"])
+    accounts = [
+        make_account("first"),
+        make_account("second"),
+        make_account("third"),
+    ]
+
+    assert [account.id for account in service._enabled_accounts(accounts)] == [
+        "first",
+        "third",
+    ]
 
 
 @pytest.mark.asyncio
@@ -113,7 +131,10 @@ async def test_fetch_reading_uses_selected_account(monkeypatch):
     monkeypatch.setitem(
         sys.modules,
         "db",
-        SimpleNamespace(save_meter_reading_db=save_reading),
+        SimpleNamespace(
+            save_meter_reading_db=save_reading,
+            save_meter_reading_for_account_db=AsyncMock(),
+        ),
     )
 
     reading = await service.fetch_reading()
@@ -153,7 +174,10 @@ async def test_fetch_forecast_filters_to_selected_account(monkeypatch):
     monkeypatch.setitem(
         sys.modules,
         "db",
-        SimpleNamespace(save_meter_forecast_db=save_forecast),
+        SimpleNamespace(
+            save_meter_forecast_db=save_forecast,
+            save_meter_forecast_for_account_db=AsyncMock(),
+        ),
     )
 
     result = await service.fetch_forecast()
@@ -161,6 +185,74 @@ async def test_fetch_forecast_filters_to_selected_account(monkeypatch):
     assert result["account_id"] == "second"
     assert result["usage_to_date"] == 20
     save_forecast.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_fetch_all_account_data_polls_only_enabled_addresses():
+    service = make_service("first", ["first", "third"])
+    first, second, third = (
+        make_account("first"),
+        make_account("second"),
+        make_account("third"),
+    )
+    service._login = AsyncMock(return_value=True)
+    service._get_accounts = AsyncMock(return_value=[first, second, third])
+    service.list_accounts = AsyncMock(
+        return_value=[
+            {"id": "first", "address": "TEST_SERVICE_LOCATION_ALPHA"},
+            {"id": "second", "address": "TEST_SERVICE_LOCATION_BETA"},
+            {"id": "third", "address": "TEST_SERVICE_LOCATION_GAMMA"},
+        ]
+    )
+    service._opower = SimpleNamespace(async_get_forecast=AsyncMock(return_value=[]))
+    service.fetch_reading = AsyncMock(
+        side_effect=lambda account: {"account_id": account.id, "value": 1}
+    )
+    service.fetch_forecast = AsyncMock(return_value=None)
+
+    result = await service.fetch_all_account_data()
+
+    assert [item["id"] for item in result] == ["first", "third"]
+    assert [call.args[0].id for call in service.fetch_reading.await_args_list] == [
+        "first",
+        "third",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_cached_account_data_returns_only_enabled_addresses(monkeypatch):
+    service = make_service("first", ["first", "third"])
+    first, second, third = (
+        make_account("first"),
+        make_account("second"),
+        make_account("third"),
+    )
+    service._opower = SimpleNamespace()
+    service._accounts = [first, second, third]
+    service._account_summaries = {
+        account.id: {
+            "id": account.id,
+            "address": f"TEST_SERVICE_LOCATION_{account.id.upper()}",
+        }
+        for account in service._accounts
+    }
+    monkeypatch.setitem(
+        sys.modules,
+        "db",
+        SimpleNamespace(
+            get_meter_readings_by_account_db=AsyncMock(
+                return_value={
+                    account.id: {"account_id": account.id, "value": 1}
+                    for account in service._accounts
+                }
+            ),
+            get_meter_forecasts_by_account_db=AsyncMock(return_value={}),
+        ),
+    )
+
+    result = await service.get_cached_account_data()
+
+    assert [item["id"] for item in result] == ["first", "third"]
 
 
 @pytest.mark.asyncio

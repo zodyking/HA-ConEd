@@ -24,14 +24,16 @@ Controls the verbosity of addon logs. Default: `info`
 
 ### Multiple Con Edison accounts
 
-After saving credentials, enable Meter Tracking and select **Find Accounts**. The
-addon lists each electric Opower account with its Con Edison service address,
-account type, and masked account number. Select the address you want and save
-the meter settings.
+After saving one set of credentials, enable Meter Tracking and select **Find
+Accounts**. The addon lists every electric service address tied to that login,
+with its account type and masked account number. Check each address you want to
+poll and expose to Home Assistant.
 
-The selected address is used consistently for Opower readings and for the
-browser-based bill and balance scrape. Changing the account clears cached meter
-readings so data from two addresses is not combined.
+Each enabled address receives a separate Home Assistant meter device with its
+own usage, forecast, billing-period, and cost sensors. Choose one enabled address
+as the **Primary Service Address** for the legacy sensors, history chart, and
+browser-based bill and balance scrape. Unchecked addresses are not polled or
+returned by the all-address meter API.
 
 ## First-Time Setup
 

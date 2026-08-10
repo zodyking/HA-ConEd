@@ -265,8 +265,50 @@ class MeterService:
             getattr(account, "id", "") or getattr(account, "uuid", "")
         )
         return self._account_summaries.get(account_id, {})
+
+    @staticmethod
+    def _account_id(account: Any) -> str:
+        """Return the stable identifier used for caches and Home Assistant entities."""
+        return str(getattr(account, "id", "") or getattr(account, "uuid", ""))
+
+    def _is_legacy_selected_account(
+        self, account: Any, accounts: List[Any]
+    ) -> bool:
+        """Return whether an account should also populate legacy single-account caches."""
+        selected_account_id = str(
+            (self.config or {}).get("selected_account_id", "") or ""
+        ).strip()
+        if selected_account_id:
+            return self._account_matches(account, selected_account_id)
+        return bool(accounts) and account is accounts[0]
+
+    def _enabled_accounts(self, accounts: List[Any]) -> List[Any]:
+        """Filter service addresses selected for simultaneous polling."""
+        configured_ids = (self.config or {}).get("enabled_account_ids", [])
+        enabled_ids = {
+            str(account_id or "").strip()
+            for account_id in configured_ids
+            if str(account_id or "").strip()
+        }
+        if enabled_ids:
+            return [
+                account
+                for account in accounts
+                if any(self._account_matches(account, item) for item in enabled_ids)
+            ]
+
+        selected_account_id = str(
+            (self.config or {}).get("selected_account_id", "") or ""
+        ).strip()
+        if selected_account_id:
+            return [
+                account
+                for account in accounts
+                if self._account_matches(account, selected_account_id)
+            ]
+        return accounts[:1]
     
-    async def fetch_reading(self) -> Optional[Dict[str, Any]]:
+    async def fetch_reading(self, account: Any = None) -> Optional[Dict[str, Any]]:
         """Fetch the latest meter reading from Con Edison using hourly historical data.
         
         Uses opower's hourly usage API which provides data typically delayed 1-24 hours.
@@ -289,7 +331,7 @@ class MeterService:
                 logger.error("No opower accounts found")
                 return None
             
-            account = self._select_account(accounts)
+            account = account or self._select_account(accounts)
             
             # Fetch Opower's six-day window so delayed or sparse accounts still
             # resolve to their newest valid reading.
@@ -323,9 +365,11 @@ class MeterService:
                 return None
             
             reading = {
-                'account_id': str(getattr(account, 'id', '') or account.uuid),
-                'account_uuid': account.uuid,
-                'utility_account_id': account.utility_account_id,
+                'account_id': self._account_id(account),
+                'account_uuid': str(getattr(account, 'uuid', '') or ''),
+                'utility_account_id': str(
+                    getattr(account, 'utility_account_id', '') or ''
+                ),
                 'start_time': latest.start_time.isoformat() if latest.start_time else None,
                 'end_time': latest.end_time.isoformat() if latest.end_time else None,
                 'value': self._finite_float(latest.consumption),
@@ -334,12 +378,12 @@ class MeterService:
                 'fetched_at': datetime.now(timezone.utc).isoformat()
             }
             
-            self.last_reading = reading
-            self.last_reading_time = datetime.now(timezone.utc)
-            
-            # Cache to database
             import db
-            await db.save_meter_reading_db(reading)
+            await db.save_meter_reading_for_account_db(reading)
+            if self._is_legacy_selected_account(account, accounts):
+                self.last_reading = reading
+                self.last_reading_time = datetime.now(timezone.utc)
+                await db.save_meter_reading_db(reading)
             
             logger.info(f"Meter reading fetched: {reading['value']} {reading['unit']} (hourly data from {latest.end_time})")
             return reading
@@ -350,7 +394,9 @@ class MeterService:
             traceback.print_exc()
             return None
     
-    async def fetch_forecast(self) -> Optional[Dict[str, Any]]:
+    async def fetch_forecast(
+        self, account: Any = None, forecasts: Optional[List[Any]] = None
+    ) -> Optional[Dict[str, Any]]:
         """Fetch the current billing period forecast from Con Edison."""
         if not self.is_configured():
             return None
@@ -359,21 +405,24 @@ class MeterService:
             if not await self._login():
                 return None
             
-            forecasts = await self._opower.async_get_forecast()
+            if forecasts is None:
+                forecasts = await self._opower.async_get_forecast()
             if not forecasts:
                 return None
             
             accounts = await self._get_accounts()
-            account = self._select_account(accounts)
+            account = account or self._select_account(accounts)
             forecast = next(
                 (
                     candidate
                     for candidate in forecasts
                     if self._account_matches(
                         candidate.account,
-                        getattr(account, "id", "") or account.uuid,
+                        self._account_id(account),
                     )
-                    or self._account_matches(candidate.account, account.uuid)
+                    or self._account_matches(
+                        candidate.account, getattr(account, "uuid", "")
+                    )
                 ),
                 None,
             )
@@ -381,9 +430,11 @@ class MeterService:
                 logger.warning("No forecast available for the selected account")
                 return None
             forecast_data = {
-                'account_id': str(getattr(account, 'id', '') or account.uuid),
-                'account_uuid': account.uuid,
-                'utility_account_id': account.utility_account_id,
+                'account_id': self._account_id(account),
+                'account_uuid': str(getattr(account, 'uuid', '') or ''),
+                'utility_account_id': str(
+                    getattr(account, 'utility_account_id', '') or ''
+                ),
                 'start_date': forecast.start_date.isoformat() if forecast.start_date else None,
                 'end_date': forecast.end_date.isoformat() if forecast.end_date else None,
                 'usage_to_date': self._finite_float(forecast.usage_to_date),
@@ -394,14 +445,76 @@ class MeterService:
                 'fetched_at': datetime.now(timezone.utc).isoformat()
             }
             
-            # Cache to database
             import db
-            await db.save_meter_forecast_db(forecast_data)
+            await db.save_meter_forecast_for_account_db(forecast_data)
+            if self._is_legacy_selected_account(account, accounts):
+                await db.save_meter_forecast_db(forecast_data)
             
             return forecast_data
         except Exception as e:
             logger.error(f"Failed to fetch forecast: {e}")
             return None
+
+    async def fetch_all_account_data(self) -> List[Dict[str, Any]]:
+        """Fetch and cache readings and forecasts for every electric account."""
+        if not self.is_configured() or not await self._login():
+            return []
+
+        summaries = await self.list_accounts(electric_only=True)
+        summary_by_id = {item["id"]: item for item in summaries if item.get("id")}
+        electric_accounts = [
+            account
+            for account in await self._get_accounts()
+            if self._account_id(account) in summary_by_id
+        ]
+        accounts = self._enabled_accounts(electric_accounts)
+        try:
+            forecasts = await self._opower.async_get_forecast()
+        except Exception as exc:
+            logger.warning("Failed to fetch all-account forecasts: %s", exc)
+            forecasts = []
+
+        async def fetch_account(account: Any) -> Dict[str, Any]:
+            account_id = self._account_id(account)
+            reading, forecast = await asyncio.gather(
+                self.fetch_reading(account),
+                self.fetch_forecast(account, forecasts),
+            )
+            return {
+                **summary_by_id[account_id],
+                "reading": reading,
+                "forecast": forecast,
+            }
+
+        return list(
+            await asyncio.gather(
+                *(fetch_account(account) for account in accounts)
+            )
+        )
+
+    async def get_cached_account_data(self) -> List[Dict[str, Any]]:
+        """Return summaries and cached meter data for every electric account."""
+        import db
+
+        if not self._account_summaries:
+            await self.list_accounts(electric_only=True)
+        accounts = [
+            account
+            for account in await self._get_accounts()
+            if str(getattr(account, "meter_type", "") or "") == "ELEC"
+        ]
+        enabled_accounts = self._enabled_accounts(accounts)
+        readings = await db.get_meter_readings_by_account_db()
+        forecasts = await db.get_meter_forecasts_by_account_db()
+        return [
+            {
+                **self.get_account_summary(account),
+                "reading": readings.get(self._account_id(account)),
+                "forecast": forecasts.get(self._account_id(account)),
+            }
+            for account in enabled_accounts
+            if self.get_account_summary(account)
+        ]
     
     async def get_cached_forecast(self) -> Optional[Dict[str, Any]]:
         """Get the most recent cached forecast."""
@@ -617,12 +730,10 @@ class MeterService:
             while self._running:
                 try:
                     if self.is_enabled():
-                        # Latest hourly reading (data saved to DB for integration to poll)
-                        await self.fetch_reading()
+                        # Poll every electric account and cache each independently.
+                        await self.fetch_all_account_data()
                         # 6-day data for History chart (API max); chart shows last 24h
                         await self.fetch_quarter_hour_reads(144)
-                        # Also fetch forecast data
-                        await self.fetch_forecast()
                 except Exception as e:
                     logger.error(f"Meter polling error: {e}")
                 

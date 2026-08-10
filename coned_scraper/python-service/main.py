@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any
 import pyotp
 import json
@@ -2647,6 +2647,7 @@ class MeterConfigModel(BaseModel):
     polling_interval: int = 15
     selected_account_id: str = ""
     selected_account_address: str = ""
+    enabled_account_ids: list[str] = Field(default_factory=list)
 
 
 @app.get("/api/meter-config")
@@ -2666,6 +2667,7 @@ async def get_meter_config():
             "polling_interval": 15,
             "selected_account_id": "",
             "selected_account_address": "",
+            "enabled_account_ids": [],
             "uses_main_credentials": True
         }
     else:
@@ -2705,13 +2707,25 @@ async def save_meter_config_endpoint(config: MeterConfigModel):
     if not totp_secret and main_creds:
         totp_secret = main_creds.get('totp_secret', '')
     
+    enabled_account_ids = list(
+        dict.fromkeys(
+            account_id.strip()
+            for account_id in config.enabled_account_ids
+            if account_id.strip()
+        )
+    )
+    selected_account_id = config.selected_account_id.strip()
+    if selected_account_id and selected_account_id not in enabled_account_ids:
+        enabled_account_ids.insert(0, selected_account_id)
+
     new_config = {
         "enabled": config.enabled,
         "email": email,
         "totp_secret": totp_secret,
         "polling_interval": config.polling_interval,
-        "selected_account_id": config.selected_account_id.strip(),
+        "selected_account_id": selected_account_id,
         "selected_account_address": config.selected_account_address.strip(),
+        "enabled_account_ids": enabled_account_ids,
         "updated_at": utc_now_iso()
     }
     
@@ -2772,6 +2786,7 @@ async def load_meter_runtime_config() -> Dict[str, Any]:
             'polling_interval': 15,
             'selected_account_id': '',
             'selected_account_address': '',
+            'enabled_account_ids': [],
         }
 
     config = config.copy()
@@ -2807,6 +2822,7 @@ async def get_meter_accounts():
     return {
         "accounts": accounts,
         "selected_account_id": config.get("selected_account_id", ""),
+        "enabled_account_ids": config.get("enabled_account_ids", []),
     }
 
 
@@ -2914,6 +2930,76 @@ async def get_meter_reading():
     }
 
 
+def build_account_meter_payload(
+    account: Dict[str, Any], bill_kwh_cost: Optional[float]
+) -> Dict[str, Any]:
+    """Build JSON-safe Home Assistant data for one Opower account."""
+    reading = account.get("reading")
+    forecast = account.get("forecast")
+    kwh_cost = None
+
+    if forecast:
+        forecasted_cost = forecast.get("forecasted_cost")
+        forecasted_usage = forecast.get("forecasted_usage")
+        if (
+            forecasted_cost is not None
+            and forecasted_usage is not None
+            and float(forecasted_usage) > 0
+        ):
+            kwh_cost = float(forecasted_cost) / float(forecasted_usage)
+    if kwh_cost is None:
+        kwh_cost = bill_kwh_cost
+
+    current_cost = None
+    if kwh_cost and reading and reading.get("value") is not None:
+        current_cost = float(reading["value"]) * float(kwh_cost)
+
+    usage_to_date_cost = forecast.get("cost_to_date") if forecast else None
+    projected_cost = forecast.get("forecasted_cost") if forecast else None
+    if kwh_cost and forecast and forecast.get("usage_to_date") is not None:
+        usage_to_date_cost = float(forecast["usage_to_date"]) * float(kwh_cost)
+    if kwh_cost and forecast and forecast.get("forecasted_usage") is not None:
+        projected_cost = float(forecast["forecasted_usage"]) * float(kwh_cost)
+
+    return {
+        **account,
+        "latest_hourly_usage": reading.get("value") if reading else None,
+        "cost": current_cost,
+        "kwh_cost": kwh_cost,
+        "billing_start_date": forecast.get("start_date") if forecast else None,
+        "billing_end_date": forecast.get("end_date") if forecast else None,
+        "current_cycle_usage": (
+            forecast.get("usage_to_date") if forecast else None
+        ),
+        "forecasted_usage": (
+            forecast.get("forecasted_usage") if forecast else None
+        ),
+        "usage_to_date_cost": usage_to_date_cost,
+        "projected_cost": projected_cost,
+    }
+
+
+@app.get("/api/meter-readings")
+async def get_all_meter_readings():
+    """Return independently cached readings and forecasts for all accounts."""
+    from meter_service import get_meter_service
+
+    service = get_meter_service()
+    if not service.is_enabled():
+        return {"enabled": False, "accounts": []}
+
+    accounts = await service.get_cached_account_data()
+    latest_bill = await db.get_latest_bill_with_details()
+    bill_kwh_cost = latest_bill.get("kwh_cost") if latest_bill else None
+    return {
+        "enabled": True,
+        "accounts": [
+            build_account_meter_payload(account, bill_kwh_cost)
+            for account in accounts
+        ],
+    }
+
+
 @app.post("/api/meter-reading/refresh")
 async def refresh_meter_reading():
     """Force refresh meter reading"""
@@ -2925,7 +3011,19 @@ async def refresh_meter_reading():
     if not service.is_enabled():
         raise HTTPException(status_code=400, detail="Meter tracking is not enabled")
     
-    reading = await service.fetch_reading()
+    account_data = await service.fetch_all_account_data()
+    selected_account_id = str(
+        (service.config or {}).get("selected_account_id", "") or ""
+    ).strip()
+    selected = next(
+        (
+            account
+            for account in account_data
+            if account.get("id") == selected_account_id
+        ),
+        account_data[0] if account_data else None,
+    )
+    reading = selected.get("reading") if selected else None
     
     if not reading:
         raise HTTPException(status_code=500, detail="Failed to fetch meter reading")
