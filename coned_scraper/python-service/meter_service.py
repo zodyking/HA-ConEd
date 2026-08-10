@@ -13,6 +13,7 @@ enrollment with Con Edison.
 """
 import asyncio
 import logging
+import math
 import re
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any, List
@@ -187,6 +188,17 @@ class MeterService:
         visible = value[-4:]
         return f"{'*' * max(0, len(value) - len(visible))}{visible}"
 
+    @staticmethod
+    def _finite_float(value: Any) -> Optional[float]:
+        """Convert an API number to a JSON-safe float, excluding NaN/infinity."""
+        if value is None:
+            return None
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return None
+        return number if math.isfinite(number) else None
+
     async def list_accounts(self, electric_only: bool = True) -> List[Dict[str, Any]]:
         """Return selectable Opower accounts with ConEd customer metadata."""
         if not self.is_configured() or not await self._login():
@@ -294,8 +306,20 @@ class MeterService:
                 logger.warning("No hourly readings available")
                 return None
             
-            # Get the most recent reading (last in list)
-            latest = reads[-1]
+            # Opower can append a NaN placeholder for an interval whose usage is
+            # not ready yet. Use the newest finite reading so JSON serialization
+            # and Home Assistant ingestion remain valid.
+            latest = next(
+                (
+                    candidate
+                    for candidate in reversed(reads)
+                    if self._finite_float(candidate.consumption) is not None
+                ),
+                None,
+            )
+            if latest is None:
+                logger.warning("No finite hourly readings available")
+                return None
             
             reading = {
                 'account_id': str(getattr(account, 'id', '') or account.uuid),
@@ -303,7 +327,7 @@ class MeterService:
                 'utility_account_id': account.utility_account_id,
                 'start_time': latest.start_time.isoformat() if latest.start_time else None,
                 'end_time': latest.end_time.isoformat() if latest.end_time else None,
-                'value': float(latest.consumption) if latest.consumption is not None else None,
+                'value': self._finite_float(latest.consumption),
                 'unit': 'kWh',
                 'data_type': 'hourly',
                 'fetched_at': datetime.now(timezone.utc).isoformat()
@@ -361,10 +385,10 @@ class MeterService:
                 'utility_account_id': account.utility_account_id,
                 'start_date': forecast.start_date.isoformat() if forecast.start_date else None,
                 'end_date': forecast.end_date.isoformat() if forecast.end_date else None,
-                'usage_to_date': forecast.usage_to_date,
-                'forecasted_usage': forecast.forecasted_usage,
-                'cost_to_date': forecast.cost_to_date,
-                'forecasted_cost': forecast.forecasted_cost,
+                'usage_to_date': self._finite_float(forecast.usage_to_date),
+                'forecasted_usage': self._finite_float(forecast.forecasted_usage),
+                'cost_to_date': self._finite_float(forecast.cost_to_date),
+                'forecasted_cost': self._finite_float(forecast.forecasted_cost),
                 'unit': str(forecast.unit_of_measure) if forecast.unit_of_measure else 'KWH',
                 'fetched_at': datetime.now(timezone.utc).isoformat()
             }

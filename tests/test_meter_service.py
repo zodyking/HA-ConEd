@@ -101,8 +101,13 @@ async def test_fetch_reading_uses_selected_account(monkeypatch):
         end_time=datetime(2026, 8, 9, 1, tzinfo=timezone.utc),
         consumption=1.25,
     )
+    pending = SimpleNamespace(
+        start_time=datetime(2026, 8, 9, 1, tzinfo=timezone.utc),
+        end_time=datetime(2026, 8, 9, 2, tzinfo=timezone.utc),
+        consumption=float("nan"),
+    )
     service._opower = SimpleNamespace(
-        async_get_cost_reads=AsyncMock(return_value=[latest])
+        async_get_cost_reads=AsyncMock(return_value=[latest, pending])
     )
     save_reading = AsyncMock()
     monkeypatch.setitem(
@@ -115,6 +120,8 @@ async def test_fetch_reading_uses_selected_account(monkeypatch):
 
     assert service._opower.async_get_cost_reads.await_args.args[0] is second
     assert reading["account_id"] == "second"
+    assert reading["value"] == 1.25
+    assert reading["end_time"] == latest.end_time.isoformat()
     save_reading.assert_awaited_once()
 
 
