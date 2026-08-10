@@ -291,9 +291,10 @@ class MeterService:
             
             account = self._select_account(accounts)
             
-            # Fetch last 48 hours of hourly data to ensure we get recent readings
+            # Fetch Opower's six-day window so delayed or sparse accounts still
+            # resolve to their newest valid reading.
             end_date = datetime.now(timezone.utc)
-            start_date = end_date - timedelta(hours=48)
+            start_date = end_date - timedelta(hours=144)
             
             reads = await self._opower.async_get_cost_reads(
                 account,
