@@ -22,6 +22,17 @@ Controls the verbosity of addon logs. Default: `info`
 - `error` - Errors only
 - `fatal` - Critical failures only
 
+### Multiple Con Edison accounts
+
+After saving credentials, enable Meter Tracking and select **Find Accounts**. The
+addon lists each electric Opower account with its Con Edison service address,
+account type, and masked account number. Select the address you want and save
+the meter settings.
+
+The selected address is used consistently for Opower readings and for the
+browser-based bill and balance scrape. Changing the account clears cached meter
+readings so data from two addresses is not combined.
+
 ## First-Time Setup
 
 1. Open the Con Edison panel from the sidebar.

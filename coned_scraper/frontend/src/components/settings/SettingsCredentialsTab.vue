@@ -110,6 +110,30 @@
 
         <template v-if="meterConfig.enabled">
           <div class="ha-form-group">
+            <label for="meter-account" class="ha-form-label">Electric Account</label>
+            <div class="ha-account-picker-row">
+              <select
+                id="meter-account"
+                v-model="meterConfig.selected_account_id"
+                class="ha-form-input"
+                :disabled="meterAccounts.length === 0 || meterLoading"
+                @change="onMeterAccountChange"
+              >
+                <option value="">Use the first electric account (legacy default)</option>
+                <option v-for="account in meterAccounts" :key="account.id" :value="account.id">
+                  {{ formatAccountLabel(account) }}
+                </option>
+              </select>
+              <button type="button" class="ha-button" :disabled="meterLoading" @click="discoverMeterAccounts()">
+                Find Accounts
+              </button>
+            </div>
+            <div class="info-text">
+              Choose the service address used for both Opower meter readings and browser-scraped bills and balance.
+            </div>
+          </div>
+
+          <div class="ha-form-group">
             <label class="ha-form-label">Polling Interval (minutes)</label>
             <input v-model.number="meterConfig.polling_interval" type="number" min="15" max="60" class="ha-form-input ha-input-small" />
             <div class="info-text">Cannot be less than data update interval (quarter-hour = 15 min minimum)</div>
@@ -156,6 +180,10 @@
             <div class="ha-reading-row">
               <span class="ha-reading-label">Account ID:</span>
               <span class="ha-reading-value">{{ accountInfo.utility_account_id }}</span>
+            </div>
+            <div v-if="accountInfo.address" class="ha-reading-row">
+              <span class="ha-reading-label">Service Address:</span>
+              <span class="ha-reading-value">{{ accountInfo.address }}</span>
             </div>
             <div class="ha-reading-row">
               <span class="ha-reading-label">Meter Type:</span>
@@ -237,6 +265,19 @@ interface MeterReading {
   fetched_at: string
 }
 
+interface MeterAccount {
+  id: string
+  uuid: string
+  utility_account_id: string
+  meter_type: string
+  read_resolution: string
+  customer_uuid: string
+  account_name: string
+  account_type: string
+  account_number: string
+  address: string
+}
+
 // Credentials state
 const username = ref('')
 const password = ref('')
@@ -252,8 +293,11 @@ const message = ref<Message | null>(null)
 // Meter tracking state
 const meterConfig = reactive({
   enabled: false,
-  polling_interval: 15
+  polling_interval: 15,
+  selected_account_id: '',
+  selected_account_address: ''
 })
+const meterAccounts = ref<MeterAccount[]>([])
 const meterLoading = ref(false)
 const meterMessage = ref<Message | null>(null)
 const lastReading = ref<MeterReading | null>(null)
@@ -273,6 +317,17 @@ function formatTime(isoString: string | null): string {
   } catch {
     return isoString
   }
+}
+
+function formatAccountLabel(account: MeterAccount): string {
+  const identity = account.address || account.account_name || 'Con Edison account'
+  const details = [account.account_type, account.account_number, account.meter_type].filter(Boolean)
+  return details.length ? `${identity} — ${details.join(' · ')}` : identity
+}
+
+function onMeterAccountChange() {
+  const selected = meterAccounts.value.find(account => account.id === meterConfig.selected_account_id)
+  meterConfig.selected_account_address = selected?.address || ''
 }
 
 // Load credentials
@@ -360,6 +415,11 @@ async function loadMeterConfig() {
       const d = await res.json()
       meterConfig.enabled = d.enabled || false
       meterConfig.polling_interval = Math.max(15, d.polling_interval ?? 15)
+      meterConfig.selected_account_id = d.selected_account_id || ''
+      meterConfig.selected_account_address = d.selected_account_address || ''
+      if (meterConfig.enabled) {
+        await discoverMeterAccounts(false)
+      }
     }
   } catch (e) {
     console.error('Failed to load meter config:', e)
@@ -396,11 +456,43 @@ async function syncMeterCredentials() {
         email: username.value,
         password: password.value || undefined,
         totp_secret: totpSecret.value,
-        polling_interval: meterConfig.polling_interval
+        polling_interval: meterConfig.polling_interval,
+        selected_account_id: meterConfig.selected_account_id,
+        selected_account_address: meterConfig.selected_account_address
       })
     })
   } catch (e) {
     console.error('Failed to sync meter credentials:', e)
+  }
+}
+
+async function discoverMeterAccounts(showMessage = true) {
+  meterLoading.value = true
+  if (showMessage) meterMessage.value = null
+  try {
+    const res = await fetch(`${getApiBase()}/meter-accounts`)
+    const d = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      if (showMessage) meterMessage.value = { type: 'error', text: d.detail || 'Failed to find accounts' }
+      return
+    }
+
+    meterAccounts.value = d.accounts || []
+    const onlyAccount = meterAccounts.value.length === 1 ? meterAccounts.value[0] : undefined
+    if (!meterConfig.selected_account_id && onlyAccount) {
+      meterConfig.selected_account_id = onlyAccount.id
+    }
+    onMeterAccountChange()
+    if (showMessage) {
+      meterMessage.value = {
+        type: 'success',
+        text: `Found ${meterAccounts.value.length} electric account${meterAccounts.value.length === 1 ? '' : 's'}.`
+      }
+    }
+  } catch {
+    if (showMessage) meterMessage.value = { type: 'error', text: 'Failed to connect' }
+  } finally {
+    meterLoading.value = false
   }
 }
 
@@ -426,7 +518,9 @@ async function saveMeterConfig() {
         email: username.value,
         password: password.value || undefined,
         totp_secret: totpSecret.value,
-        polling_interval: meterConfig.polling_interval
+        polling_interval: meterConfig.polling_interval,
+        selected_account_id: meterConfig.selected_account_id,
+        selected_account_address: meterConfig.selected_account_address
       })
     })
     if (res.ok) {
@@ -459,6 +553,10 @@ async function testMeterConnection() {
       }
       if (d.account_info) {
         accountInfo.value = d.account_info
+      }
+      if (d.accounts) {
+        meterAccounts.value = d.accounts
+        onMeterAccountChange()
       }
       if (d.forecast) {
         forecast.value = d.forecast
@@ -577,6 +675,15 @@ defineExpose({ loadSettings })
 }
 .ha-input-small {
   max-width: 120px;
+}
+.ha-account-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.ha-account-picker-row select {
+  flex: 1;
+  min-width: 0;
 }
 .ha-reading-info {
   margin-top: 1.5rem;

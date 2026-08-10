@@ -2123,6 +2123,14 @@ async def save_meter_forecast_db(forecast: Dict[str, Any]):
     """Save meter forecast to cache"""
     await set_app_setting("meter_forecast_cache", forecast)
 
+
+async def clear_meter_data_db():
+    """Clear cached readings when the configured Opower account changes."""
+    await set_app_setting("meter_reading_cache", None)
+    await set_app_setting("meter_forecast_cache", None)
+    await ensure_connected()
+    await db.realtimereading.delete_many()
+
 async def get_realtime_readings_db() -> Optional[List[Dict[str, Any]]]:
     """Get all cached realtime readings (no limit - append storage)"""
     await ensure_connected()

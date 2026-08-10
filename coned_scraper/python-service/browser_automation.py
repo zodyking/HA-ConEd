@@ -64,7 +64,83 @@ async def take_live_preview(page, step_name: str = ""):
         logger.debug(f"Failed to take live preview: {str(e)}")
         # Don't raise - preview failures shouldn't stop scraping
 
-async def perform_login(username: str, password: str, totp_code: str, test_only: bool = False):
+
+def _normalize_address(value: str) -> set[str]:
+    """Normalize address text into comparable tokens."""
+    return set(re.findall(r"[A-Z0-9]+", str(value or "").upper()))
+
+
+def _address_match_score(desired: str, candidate: str) -> float:
+    """Score two differently formatted renderings of the same service address."""
+    desired_tokens = _normalize_address(desired)
+    candidate_tokens = _normalize_address(candidate)
+    if not desired_tokens or not candidate_tokens:
+        return 0.0
+    return len(desired_tokens & candidate_tokens) / len(desired_tokens | candidate_tokens)
+
+
+async def select_service_address(page, account_address: str) -> bool:
+    """Select the configured ConEd service address from the account picker."""
+    account_address = str(account_address or "").strip()
+    if not account_address:
+        return True
+
+    buttons = page.get_by_role("button")
+    button_texts = await buttons.all_inner_texts()
+    header_index = next(
+        (index for index, text in enumerate(button_texts) if "hello " in text.lower()),
+        None,
+    )
+    if header_index is None:
+        await db.add_log("error", "Could not find the ConEd account picker")
+        return False
+
+    if _address_match_score(account_address, button_texts[header_index]) >= 0.55:
+        await db.add_log("info", "Configured service address is already selected")
+        return True
+
+    await buttons.nth(header_index).click()
+    dialog = page.get_by_role("dialog")
+    try:
+        await dialog.wait_for(state="visible", timeout=10000)
+    except Exception:
+        await db.add_log("error", "ConEd account picker did not open")
+        return False
+
+    choices = dialog.get_by_role("button")
+    choice_texts = await choices.all_inner_texts()
+    scored = sorted(
+        (
+            (_address_match_score(account_address, text), index)
+            for index, text in enumerate(choice_texts)
+            if text.strip().lower() != "close"
+        ),
+        reverse=True,
+    )
+    if not scored or scored[0][0] < 0.45:
+        await db.add_log("error", "Configured service address was not found")
+        return False
+    if len(scored) > 1 and scored[0][0] == scored[1][0]:
+        await db.add_log("error", "Configured service address was ambiguous")
+        return False
+
+    await choices.nth(scored[0][1]).click()
+    try:
+        await page.wait_for_load_state("networkidle", timeout=20000)
+    except Exception:
+        await asyncio.sleep(2)
+    await take_live_preview(page, "Selected configured service address")
+    await db.add_log("success", "Selected configured ConEd service address")
+    return True
+
+
+async def perform_login(
+    username: str,
+    password: str,
+    totp_code: str,
+    test_only: bool = False,
+    account_address: str = "",
+):
     """
     Perform ConEd login automation using headless browser.
     Types all values character by character, never pastes.
@@ -74,6 +150,7 @@ async def perform_login(username: str, password: str, totp_code: str, test_only:
         password: ConEd account password
         totp_code: Current TOTP code
         test_only: If True, return immediately after verifying login success (don't scrape data)
+        account_address: Optional ConEd service address to select after login
     """
     import time
     from pathlib import Path
@@ -396,7 +473,14 @@ async def perform_login(username: str, password: str, totp_code: str, test_only:
             
             logger.info(f"Login process completed. Final URL: {current_url}")
             await db.add_log("success", f"Login process completed. Final URL: {current_url}")
-            
+
+            if is_success and account_address:
+                if not await select_service_address(page, account_address):
+                    raise Exception(
+                        "The configured ConEd service address could not be selected"
+                    )
+                current_url = page.url
+
             # If test_only mode, return immediately after verifying login success
             if test_only:
                 await browser.close()

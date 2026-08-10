@@ -13,6 +13,7 @@ enrollment with Con Edison.
 """
 import asyncio
 import logging
+import re
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any, List
 
@@ -36,6 +37,7 @@ class MeterService:
         self._opower = None
         self._session = None
         self._accounts: List[Any] = []
+        self._account_summaries: Dict[str, Dict[str, Any]] = {}
     
     def is_configured(self) -> bool:
         """Check if meter service is properly configured.
@@ -58,6 +60,10 @@ class MeterService:
             from opower import Opower, create_cookie_jar
             
             self.config = config
+            self.last_reading = None
+            self.last_reading_time = None
+            self._accounts = []
+            self._account_summaries = {}
             
             if not self.is_configured():
                 logger.warning("Meter service not fully configured")
@@ -129,6 +135,117 @@ class MeterService:
                 logger.error(f"Failed to get opower accounts: {e}")
         
         return self._accounts
+
+    @staticmethod
+    def _account_matches(account: Any, selected_account_id: str) -> bool:
+        """Return whether an Opower account matches a persisted stable ID."""
+        selected_account_id = str(selected_account_id or "").strip()
+        if not selected_account_id:
+            return False
+        return selected_account_id in {
+            str(getattr(account, "id", "") or ""),
+            str(getattr(account, "uuid", "") or ""),
+            str(getattr(account, "utility_account_id", "") or ""),
+        }
+
+    def _select_account(self, accounts: List[Any]) -> Optional[Any]:
+        """Select the configured account, preserving the legacy first-account default."""
+        if not accounts:
+            return None
+
+        selected_account_id = str(
+            (self.config or {}).get("selected_account_id", "") or ""
+        ).strip()
+        if not selected_account_id:
+            return accounts[0]
+
+        for account in accounts:
+            if self._account_matches(account, selected_account_id):
+                return account
+
+        available_ids = ", ".join(
+            str(getattr(account, "id", "") or getattr(account, "uuid", ""))
+            for account in accounts
+        )
+        raise ValueError(
+            f"Configured Opower account was not found. Available account IDs: {available_ids}"
+        )
+
+    @staticmethod
+    def _mask_account_number(value: Any) -> str:
+        """Mask an account number while retaining enough digits to distinguish it."""
+        value = str(value or "").strip()
+        if not value:
+            return ""
+        visible = value[-4:]
+        return f"{'*' * max(0, len(value) - len(visible))}{visible}"
+
+    async def list_accounts(self, electric_only: bool = True) -> List[Dict[str, Any]]:
+        """Return selectable Opower accounts with ConEd customer metadata."""
+        if not self.is_configured() or not await self._login():
+            return []
+
+        accounts = await self._get_accounts()
+        customer_map: Dict[str, Dict[str, Any]] = {}
+        try:
+            customers = await self._opower._async_get_customers()
+            customer_map = {
+                str(customer.get("uuid", "")): customer
+                for customer in customers
+                if isinstance(customer, dict)
+            }
+        except Exception as exc:
+            logger.debug("Could not load optional Opower customer labels: %s", exc)
+
+        summaries: List[Dict[str, Any]] = []
+        for account in accounts:
+            meter_type = str(getattr(account, "meter_type", "") or "")
+            if electric_only and meter_type != "ELEC":
+                continue
+
+            customer_uuid = str(
+                getattr(getattr(account, "customer", None), "uuid", "") or ""
+            )
+            customer = customer_map.get(customer_uuid, {})
+            account_id = str(
+                getattr(account, "id", "") or getattr(account, "uuid", "")
+            )
+            address = customer.get("address", "")
+            if isinstance(address, dict):
+                address = ", ".join(
+                    str(value).strip() for value in address.values() if value
+                )
+            address = re.sub(r"\s+", " ", str(address or "")).strip()
+
+            summary = {
+                "id": account_id,
+                "uuid": str(getattr(account, "uuid", "") or ""),
+                "utility_account_id": str(
+                    getattr(account, "utility_account_id", "") or ""
+                ),
+                "meter_type": meter_type,
+                "read_resolution": str(
+                    getattr(account, "read_resolution", "") or ""
+                ),
+                "customer_uuid": customer_uuid,
+                "account_name": str(customer.get("accountName", "") or ""),
+                "account_type": str(customer.get("type", "") or ""),
+                "account_number": self._mask_account_number(
+                    customer.get("accountNumber", "")
+                ),
+                "address": address,
+            }
+            summaries.append(summary)
+            self._account_summaries[account_id] = summary
+
+        return summaries
+
+    def get_account_summary(self, account: Any) -> Dict[str, Any]:
+        """Return cached display metadata for an Opower account when available."""
+        account_id = str(
+            getattr(account, "id", "") or getattr(account, "uuid", "")
+        )
+        return self._account_summaries.get(account_id, {})
     
     async def fetch_reading(self) -> Optional[Dict[str, Any]]:
         """Fetch the latest meter reading from Con Edison using hourly historical data.
@@ -153,8 +270,7 @@ class MeterService:
                 logger.error("No opower accounts found")
                 return None
             
-            # Get first electric account
-            account = accounts[0]
+            account = self._select_account(accounts)
             
             # Fetch last 48 hours of hourly data to ensure we get recent readings
             end_date = datetime.now(timezone.utc)
@@ -175,6 +291,9 @@ class MeterService:
             latest = reads[-1]
             
             reading = {
+                'account_id': str(getattr(account, 'id', '') or account.uuid),
+                'account_uuid': account.uuid,
+                'utility_account_id': account.utility_account_id,
                 'start_time': latest.start_time.isoformat() if latest.start_time else None,
                 'end_time': latest.end_time.isoformat() if latest.end_time else None,
                 'value': float(latest.consumption) if latest.consumption is not None else None,
@@ -212,8 +331,27 @@ class MeterService:
             if not forecasts:
                 return None
             
-            forecast = forecasts[0]
+            accounts = await self._get_accounts()
+            account = self._select_account(accounts)
+            forecast = next(
+                (
+                    candidate
+                    for candidate in forecasts
+                    if self._account_matches(
+                        candidate.account,
+                        getattr(account, "id", "") or account.uuid,
+                    )
+                    or self._account_matches(candidate.account, account.uuid)
+                ),
+                None,
+            )
+            if forecast is None:
+                logger.warning("No forecast available for the selected account")
+                return None
             forecast_data = {
+                'account_id': str(getattr(account, 'id', '') or account.uuid),
+                'account_uuid': account.uuid,
+                'utility_account_id': account.utility_account_id,
                 'start_date': forecast.start_date.isoformat() if forecast.start_date else None,
                 'end_date': forecast.end_date.isoformat() if forecast.end_date else None,
                 'usage_to_date': forecast.usage_to_date,
@@ -236,7 +374,17 @@ class MeterService:
     async def get_cached_forecast(self) -> Optional[Dict[str, Any]]:
         """Get the most recent cached forecast."""
         import db
-        return await db.get_meter_forecast_db()
+        cached = await db.get_meter_forecast_db()
+        selected_account_id = str(
+            (self.config or {}).get('selected_account_id', '') or ''
+        ).strip()
+        if (
+            cached
+            and selected_account_id
+            and cached.get('account_id') != selected_account_id
+        ):
+            return None
+        return cached
     
     async def fetch_quarter_hour_reads(self, hours: int = 24) -> List[Dict[str, Any]]:
         """Fetch quarter-hour (15-minute) usage data for real-time chart.
@@ -267,7 +415,7 @@ class MeterService:
                 logger.error("No opower accounts found")
                 return []
             
-            account = accounts[0]
+            account = self._select_account(accounts)
             
             # API max ~6 days per request. Fetch in chunks and merge.
             CHUNK_HOURS = 144  # 6 days per API request
@@ -358,7 +506,7 @@ class MeterService:
             if not accounts:
                 return None
             
-            account = accounts[0]
+            account = self._select_account(accounts)
             
             # Check realtime support
             has_realtime = False
@@ -370,14 +518,20 @@ class MeterService:
                 except Exception as e:
                     realtime_error = str(e)
             
+            summary = self.get_account_summary(account)
             return {
+                'account_id': str(getattr(account, 'id', '') or account.uuid),
                 'account_uuid': account.uuid,
                 'utility_account_id': account.utility_account_id,
                 'meter_type': str(account.meter_type) if account.meter_type else None,
                 'read_resolution': str(account.read_resolution) if account.read_resolution else None,
                 'has_realtime_access': has_realtime,
                 'realtime_error': realtime_error,
-                'customer_uuid': account.customer.uuid if account.customer else None
+                'customer_uuid': account.customer.uuid if account.customer else None,
+                'account_name': summary.get('account_name', ''),
+                'account_type': summary.get('account_type', ''),
+                'account_number': summary.get('account_number', ''),
+                'address': summary.get('address', ''),
             }
         except Exception as e:
             logger.error(f"Failed to get account info: {e}")
@@ -391,6 +545,15 @@ class MeterService:
         # Try to load from database
         import db
         cached = await db.get_meter_reading_db()
+        selected_account_id = str(
+            (self.config or {}).get('selected_account_id', '') or ''
+        ).strip()
+        if (
+            cached
+            and selected_account_id
+            and cached.get('account_id') != selected_account_id
+        ):
+            return None
         if cached:
             self.last_reading = cached
             return cached

@@ -246,6 +246,12 @@ async def update_last_scrape_time():
     schedule["updated_at"] = utc_now_iso()
     await db.save_schedule_config_db(schedule)
 
+
+async def get_selected_service_address() -> str:
+    """Return the ConEd service address paired with the selected Opower account."""
+    meter_config = await db.get_meter_config_db() or {}
+    return str(meter_config.get("selected_account_address", "") or "").strip()
+
 async def run_scheduled_scrape():
     """Run a scheduled scrape"""
     global _scrape_running
@@ -268,7 +274,12 @@ async def run_scheduled_scrape():
         totp_code = totp.now()
         
         await db.add_log("info", "Starting scheduled scrape...")
-        result = await perform_login(username, password, totp_code)
+        result = await perform_login(
+            username,
+            password,
+            totp_code,
+            account_address=await get_selected_service_address(),
+        )
         success = result.get('success', False)
         scraped_data = result.get('data', {})
         
@@ -1098,7 +1109,13 @@ async def test_login():
     totp_code = totp.now()
     
     try:
-        result = await perform_login(username, password, totp_code, test_only=True)
+        result = await perform_login(
+            username,
+            password,
+            totp_code,
+            test_only=True,
+            account_address=await get_selected_service_address(),
+        )
         success = result.get('success', False)
         
         if success:
@@ -1144,7 +1161,12 @@ async def start_scraper():
     totp_code = totp.now()
     
     try:
-        result = await perform_login(username, password, totp_code)
+        result = await perform_login(
+            username,
+            password,
+            totp_code,
+            account_address=await get_selected_service_address(),
+        )
         success = result.get('success', False)
         scraped_data = result.get('data', {})
         
@@ -2623,6 +2645,8 @@ class MeterConfigModel(BaseModel):
     password: Optional[str] = None
     totp_secret: str = ""
     polling_interval: int = 15
+    selected_account_id: str = ""
+    selected_account_address: str = ""
 
 
 @app.get("/api/meter-config")
@@ -2640,6 +2664,8 @@ async def get_meter_config():
             "password": "••••••••" if main_creds and main_creds.get('password') else "",
             "totp_secret": main_creds.get('totp_secret', '') if main_creds else "",
             "polling_interval": 15,
+            "selected_account_id": "",
+            "selected_account_address": "",
             "uses_main_credentials": True
         }
     else:
@@ -2684,6 +2710,8 @@ async def save_meter_config_endpoint(config: MeterConfigModel):
         "email": email,
         "totp_secret": totp_secret,
         "polling_interval": config.polling_interval,
+        "selected_account_id": config.selected_account_id.strip(),
+        "selected_account_address": config.selected_account_address.strip(),
         "updated_at": utc_now_iso()
     }
     
@@ -2697,7 +2725,13 @@ async def save_meter_config_endpoint(config: MeterConfigModel):
     else:
         new_config['password'] = ''
     
+    account_changed = (
+        existing.get("selected_account_id", "")
+        != new_config["selected_account_id"]
+    )
     await db.save_meter_config_db(new_config)
+    if account_changed:
+        await db.clear_meter_data_db()
     
     # Reinitialize meter service with new config
     service = get_meter_service()
@@ -2720,35 +2754,68 @@ async def save_meter_config_endpoint(config: MeterConfigModel):
     return {"success": True, "message": "Meter configuration saved"}
 
 
+async def load_meter_runtime_config() -> Dict[str, Any]:
+    """Load and decrypt the effective Opower configuration."""
+    config = await db.get_meter_config_db()
+    if not config or not config.get('email'):
+        main_creds = await load_credentials()
+        if not main_creds:
+            raise HTTPException(
+                status_code=400,
+                detail="No credentials found. Please save credentials first.",
+            )
+        return {
+            'email': main_creds.get('username', ''),
+            'password': 'plain:' + main_creds.get('password', ''),
+            'totp_secret': main_creds.get('totp_secret', ''),
+            'enabled': True,
+            'polling_interval': 15,
+            'selected_account_id': '',
+            'selected_account_address': '',
+        }
+
+    config = config.copy()
+    if config.get('password'):
+        try:
+            config['password'] = 'plain:' + decrypt_data(config['password'])
+        except Exception as exc:
+            raise HTTPException(
+                status_code=400, detail="Failed to decrypt password"
+            ) from exc
+    return config
+
+
+@app.get("/api/meter-accounts")
+async def get_meter_accounts():
+    """Discover electric accounts available through Opower."""
+    from meter_service import get_meter_service
+
+    config = await load_meter_runtime_config()
+    service = get_meter_service()
+    if not await service.initialize(config):
+        raise HTTPException(
+            status_code=400,
+            detail="Failed to initialize meter connection. Check your credentials.",
+        )
+
+    accounts = await service.list_accounts(electric_only=True)
+    if not accounts:
+        raise HTTPException(
+            status_code=400,
+            detail="Connected, but no electric Opower accounts were found.",
+        )
+    return {
+        "accounts": accounts,
+        "selected_account_id": config.get("selected_account_id", ""),
+    }
+
+
 @app.post("/api/meter-config/test")
 async def test_meter_connection():
     """Test meter connection by fetching account info and a reading"""
     from meter_service import get_meter_service
 
-    config = await db.get_meter_config_db()
-    
-    # Fall back to main credentials if no meter config
-    if not config or not config.get('email'):
-        main_creds = await load_credentials()
-        if not main_creds:
-            raise HTTPException(status_code=400, detail="No credentials found. Please save credentials first.")
-        
-        # Password from load_credentials() is already decrypted, mark as plain
-        config = {
-            'email': main_creds.get('username', ''),
-            'password': 'plain:' + main_creds.get('password', ''),
-            'totp_secret': main_creds.get('totp_secret', ''),
-            'enabled': True,
-            'polling_interval': 15
-        }
-    else:
-        # Decrypt password from database and mark as plain
-        if config.get('password'):
-            try:
-                decrypted = decrypt_data(config['password'])
-                config['password'] = 'plain:' + decrypted
-            except:
-                raise HTTPException(status_code=400, detail="Failed to decrypt password")
+    config = await load_meter_runtime_config()
 
     service = get_meter_service()
     
@@ -2757,6 +2824,8 @@ async def test_meter_connection():
 
         if not success:
             raise HTTPException(status_code=400, detail="Failed to initialize meter connection. Check your credentials.")
+
+        accounts = await service.list_accounts(electric_only=True)
 
         # Get account info first (includes smart meter status)
         account_info = await service.get_account_info()
@@ -2776,6 +2845,7 @@ async def test_meter_connection():
                 "message": f"Connected! Latest reading: {reading['value']} {reading['unit']} (from {reading.get('end_time', 'unknown')})",
                 "reading": reading,
                 "account_info": account_info,
+                "accounts": accounts,
                 "forecast": forecast,
                 "smart_meter_info": {
                     "has_realtime": account_info.get('has_realtime_access', False) if account_info else False,

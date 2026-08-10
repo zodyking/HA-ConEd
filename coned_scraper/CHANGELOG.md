@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- Electric account discovery and selection for Con Edison logins with multiple service addresses
+
+### Fixed
+- Opower readings and forecasts now use the selected account instead of always using the first result
+- Browser scraping switches to the selected Con Edison service address
+- Meter caches are cleared when the selected account changes to avoid mixing usage data
+
 ## 1.3.94
 
 ### Fixed
