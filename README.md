@@ -16,7 +16,7 @@ The add-on release version is the `version` key in [`coned_scraper/config.yaml`]
 To bump the add-on version when releasing:
 
 ```bash
-python3 scripts/sync_addon_version.py 1.3.94
+python3 scripts/sync_addon_version.py 1.3.95
 ```
 
 This updates `config.yaml`, `main.py` `CODE_VERSION`, and the startup log in `rootfs`.
@@ -28,7 +28,7 @@ This updates `config.yaml`, `main.py` `CODE_VERSION`, and the startup log in `ro
 | **Ledger** | Bills, payments, balance, due dates; consistent ordering with the web UI |
 | **Bill PDFs** | Store and host PDFs; optional auto-download; MQTT exposes a link in attributes |
 | **Payees** | Split responsibility, cards, payments — Bill-only or rollover breakdown |
-| **Meter** | Forecast, usage-to-date, projected usage/bill via Opower (typical **1–24 h delay**); **Daily Usage** chart uses **15‑minute** intervals with calendar days in **US Eastern** |
+| **Meter** | Forecast, usage-to-date, projected usage/bill via Opower (typical **1–24 h delay**); **Daily Usage** opens a calendar of daily kWh and estimated cost, then a **15‑minute** chart for the selected US Eastern day |
 | **MQTT** | Auto-discovered sensors for balance, bills, usage, PDF URL, payee summary, dates |
 | **TTS / IMAP** | Optional alerts and payment detection from email |
 

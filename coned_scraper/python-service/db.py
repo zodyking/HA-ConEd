@@ -2191,6 +2191,35 @@ async def get_realtime_readings_for_day(day_offset: int = 0) -> tuple[List[Dict[
     ], total_days
 
 
+async def get_realtime_daily_summaries() -> List[Dict[str, Any]]:
+    """
+    Sum 15-minute readings by US Eastern calendar day.
+    day_offset matches get_realtime_readings_for_day (0 = most recent day).
+    """
+    await ensure_connected()
+    rows = await db.realtimereading.find_many(order={"endTime": "desc"})
+    if not rows:
+        return []
+
+    by_date: Dict[date, float] = {}
+    for r in rows:
+        et = r.endTime
+        if et.tzinfo is None:
+            et = et.replace(tzinfo=timezone.utc)
+        d = et.astimezone(EASTERN).date()
+        by_date[d] = by_date.get(d, 0.0) + float(r.consumption or 0)
+
+    dates = sorted(by_date.keys(), reverse=True)
+    return [
+        {
+            "date": d.isoformat(),
+            "kwh": round(by_date[d], 4),
+            "day_offset": i,
+        }
+        for i, d in enumerate(dates)
+    ]
+
+
 async def save_realtime_readings_db(readings: List[Dict[str, Any]]):
     """Append/merge realtime readings (upsert by start_time, end_time - no max days).
     Uses Prisma only (no asyncpg) for addon compatibility.

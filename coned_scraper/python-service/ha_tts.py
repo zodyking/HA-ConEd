@@ -1,11 +1,24 @@
 """
 Send TTS via Home Assistant REST API (addon with homeassistant_api).
+
+Always uses action tts.speak:
+
+    action: tts.speak
+    target:
+      device_id: <tts device>
+    data:
+      cache: true
+      media_player_entity_id: media_player.example
+      message: ...
+
+Falls back to targeting the TTS entity when a device_id cannot be resolved.
 Waits for media player idle when configured.
 """
 import asyncio
 import logging
 import os
-from typing import Optional
+import re
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -13,14 +26,16 @@ HA_BASE = "http://supervisor/core"
 IDLE_STATES = ("idle", "unknown", "unavailable")
 MAX_WAIT_SECONDS = 300
 POLL_INTERVAL = 2
+DEVICE_ID_RE = re.compile(r"^[0-9a-f]{32}$", re.IGNORECASE)
+LEGACY_SAY_RE = re.compile(r"(_say|_cloud_say)$", re.IGNORECASE)
 
 
 async def _ha_request(
     method: str,
     path: str,
     json_body: Optional[dict] = None,
-) -> tuple[int, Optional[dict]]:
-    """Call Home Assistant REST API. Returns (status_code, json_response)."""
+) -> tuple[int, Optional[dict | str]]:
+    """Call Home Assistant REST API. Returns (status_code, json_or_text)."""
     import aiohttp
     token = os.environ.get("SUPERVISOR_TOKEN")
     if not token:
@@ -33,16 +48,21 @@ async def _ha_request(
     }
     try:
         async with aiohttp.ClientSession() as session:
-            kwargs = {"headers": headers}
+            kwargs: dict[str, Any] = {"headers": headers}
             if json_body is not None:
                 kwargs["json"] = json_body
             async with session.request(method, url, **kwargs) as resp:
-                data = None
+                data: Optional[dict | str] = None
                 if resp.content_type and "json" in resp.content_type:
                     try:
                         data = await resp.json()
                     except Exception:
-                        pass
+                        data = await resp.text()
+                else:
+                    try:
+                        data = (await resp.text()).strip()
+                    except Exception:
+                        data = None
                 return resp.status, data
     except Exception as e:
         logger.error(f"HA request failed: {e}")
@@ -52,7 +72,7 @@ async def _ha_request(
 async def _get_media_player_state(media_player: str) -> Optional[str]:
     """Get current state of media player."""
     status, data = await _ha_request("GET", f"/api/states/{media_player}")
-    if status != 200 or not data:
+    if status != 200 or not isinstance(data, dict):
         return None
     return data.get("state")
 
@@ -71,39 +91,72 @@ async def _wait_for_idle(media_player: str) -> bool:
     return False
 
 
+def _is_device_id(value: str) -> bool:
+    return bool(value) and bool(DEVICE_ID_RE.fullmatch(value))
+
+
+def _is_tts_entity(value: str) -> bool:
+    return bool(value) and value.startswith("tts.") and not LEGACY_SAY_RE.search(value)
+
+
+async def resolve_tts_device_id(tts_entity: str) -> str:
+    """Resolve a TTS entity to its Home Assistant device_id via the template API."""
+    if not tts_entity or not _is_tts_entity(tts_entity):
+        return ""
+    status, data = await _ha_request(
+        "POST",
+        "/api/template",
+        {"template": "{{ device_id('%s') }}" % tts_entity.replace("'", "")},
+    )
+    if status not in (200, 201) or data is None:
+        logger.warning("Could not resolve device_id for %s (status=%s)", tts_entity, status)
+        return ""
+    if isinstance(data, dict):
+        raw = str(data.get("result") or data.get("message") or "").strip()
+    else:
+        raw = str(data).strip().strip('"')
+    if raw in ("", "None", "none", "null"):
+        return ""
+    return raw if _is_device_id(raw) else raw
+
+
 async def send_tts(
     message: str,
     media_player: str,
     volume: float = 0.7,
     wait_for_idle: bool = True,
-    tts_service: str = "tts.google_translate_say",
+    tts_service: str = "",
     language: str = "",
-    cache: bool = False,
+    cache: bool = True,
+    tts_device_id: str = "",
 ) -> tuple[bool, str]:
     """
-    Send TTS via Home Assistant using tts.speak service (HA 2024+).
-    Uses direct HA REST API when running as addon.
-    
-    Args:
-        message: The text to speak
-        media_player: Target media player entity_id
-        volume: Volume level 0.0-1.0
-        wait_for_idle: Wait for media player to be idle before playing
-        tts_service: TTS entity (e.g., tts.google_en_com) or legacy service name
-        language: Optional language code
-        cache: Whether to cache the TTS audio
+    Send TTS via Home Assistant action tts.speak.
+
+    Target prefers device_id (resolved from the configured TTS entity when needed).
+    Data always includes cache, media_player_entity_id, and message.
     """
     if not message or not media_player:
         return False, "Message and media player required"
     media_player = media_player.strip()
-    tts_service = tts_service.strip() if tts_service else "tts.google_translate_say"
+    tts_service = (tts_service or "").strip()
+    tts_device_id = (tts_device_id or "").strip()
+
+    if _is_device_id(tts_service) and not tts_device_id:
+        tts_device_id = tts_service
+        tts_service = ""
+
+    if not tts_device_id and _is_tts_entity(tts_service):
+        tts_device_id = await resolve_tts_device_id(tts_service)
+
+    if not tts_device_id and not _is_tts_entity(tts_service):
+        return False, "No TTS device or entity configured for tts.speak"
 
     if wait_for_idle:
         idle = await _wait_for_idle(media_player)
         if not idle:
             return False, "Media player did not become idle in time"
 
-    # Set volume first
     status, _ = await _ha_request(
         "POST",
         "/api/services/media_player/volume_set",
@@ -112,46 +165,49 @@ async def send_tts(
     if status not in (200, 201):
         logger.warning(f"Volume set returned {status}, continuing with TTS")
 
-    # Build service data for tts.speak (the modern HA way)
-    service_data = {
+    service_data: dict[str, Any] = {
         "media_player_entity_id": media_player,
         "message": message,
-        "cache": cache,
+        "cache": True if cache is None else bool(cache),
     }
-    
-    # Only add language if non-empty
     if language and language.strip():
         service_data["language"] = language.strip()
-    
-    # Use tts.speak with target entity_id pointing to the TTS entity
-    # This is how home-weather does it
+
+    if tts_device_id:
+        service_data["device_id"] = tts_device_id
+        target_desc = f"device_id={tts_device_id}"
+    else:
+        service_data["entity_id"] = tts_service
+        target_desc = f"entity_id={tts_service}"
+
     status, data = await _ha_request(
         "POST",
         "/api/services/tts/speak",
-        {
-            **service_data,
-            "entity_id": tts_service,  # TTS entity as target
-        },
+        service_data,
     )
-    
+
     if status in (200, 201):
-        logger.info(f"TTS sent to {media_player} via tts.speak targeting {tts_service}")
+        logger.info("TTS sent to %s via tts.speak targeting %s", media_player, target_desc)
         return True, ""
-    
-    # Fallback: try legacy format for older TTS services like tts.google_translate_say
-    if "_say" in tts_service or "_speak" in tts_service:
-        domain, service = tts_service.split(".", 1) if "." in tts_service else ("tts", "google_translate_say")
-        status, data = await _ha_request(
-            "POST",
-            f"/api/services/{domain}/{service}",
-            {"entity_id": media_player, "message": message},
-        )
-        if status in (200, 201):
-            logger.info(f"TTS sent to {media_player} via legacy {domain}/{service}")
-            return True, ""
-    
-    error_msg = f"TTS service returned {status}"
-    if data and isinstance(data, dict) and data.get("message"):
+
+    error_msg = f"tts.speak returned {status}"
+    if isinstance(data, dict) and data.get("message"):
         error_msg = f"{error_msg}: {data.get('message')}"
-    
+    elif isinstance(data, str) and data:
+        error_msg = f"{error_msg}: {data}"
+
     return False, error_msg
+
+
+async def speak_from_config(message: str, tts_config: dict) -> tuple[bool, str]:
+    """Speak using the saved addon TTS config (always tts.speak)."""
+    return await send_tts(
+        message=message,
+        media_player=(tts_config.get("media_player") or "").strip(),
+        volume=tts_config.get("volume", 0.7),
+        wait_for_idle=tts_config.get("wait_for_idle", True),
+        tts_service=tts_config.get("tts_service") or "",
+        tts_device_id=tts_config.get("tts_device_id") or "",
+        language=tts_config.get("language") or "",
+        cache=True,
+    )

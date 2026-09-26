@@ -29,7 +29,7 @@ import db
 app = FastAPI(title="Con Edison API")
 
 # Code version for deployment verification
-CODE_VERSION = "1.3.94"
+CODE_VERSION = "1.3.95"
 
 @app.on_event("startup")
 async def startup():
@@ -162,7 +162,8 @@ DEFAULT_TTS_CONFIG = {
     "language": "en",
     "prefix": DEFAULT_TTS_PREFIX,
     "wait_for_idle": True,
-    "tts_service": "tts.google_translate_say",
+    "tts_service": "",
+    "tts_device_id": "",
     "underpayment_streak_enabled": False,
     "underpayment_streak_send_time": "09:15",
     "messages": {
@@ -2920,6 +2921,53 @@ async def get_realtime_usage(day_offset: int = 0, refresh: bool = False):
     }
 
 
+@app.get("/api/meter-reading/calendar")
+async def get_realtime_calendar(refresh: bool = False):
+    """Daily kWh and estimated cost for the usage calendar (US Eastern days)."""
+    from meter_service import get_meter_service
+
+    service = get_meter_service()
+    if not service.is_enabled():
+        raise HTTPException(status_code=400, detail="Meter tracking is not enabled")
+
+    if refresh:
+        await service.fetch_quarter_hour_reads(720)
+
+    summaries = await db.get_realtime_daily_summaries()
+
+    kwh_cost = None
+    latest_bill = await db.get_latest_bill_with_details()
+    if latest_bill and latest_bill.get("kwh_cost"):
+        kwh_cost = float(latest_bill["kwh_cost"])
+    if not kwh_cost:
+        forecast = await service.get_cached_forecast()
+        if forecast:
+            fc = forecast.get("forecasted_cost")
+            fu = forecast.get("forecasted_usage")
+            if fc is not None and fu and float(fu) > 0:
+                kwh_cost = float(fc) / float(fu)
+
+    days = []
+    for row in summaries:
+        kwh = float(row.get("kwh") or 0)
+        cost = round(kwh * kwh_cost, 2) if kwh_cost else None
+        days.append({
+            "date": row["date"],
+            "kwh": round(kwh, 2),
+            "cost": cost,
+            "day_offset": row["day_offset"],
+        })
+
+    months = sorted({d["date"][:7] for d in days}, reverse=True)
+    return {
+        "success": True,
+        "kwh_cost": kwh_cost,
+        "days": days,
+        "months": months,
+        "cached": not refresh,
+    }
+
+
 # ========== TTS Configuration ==========
 async def load_tts_config() -> dict:
     """Load TTS configuration from database (persists across reinstalls)"""
@@ -2944,7 +2992,8 @@ async def load_tts_config() -> dict:
     try:
         merged = DEFAULT_TTS_CONFIG.copy()
         merged.update(data)
-        merged.setdefault("tts_service", "tts.google_translate_say")
+        merged.setdefault("tts_service", "")
+        merged.setdefault("tts_device_id", "")
         merged.setdefault("underpayment_streak_enabled", DEFAULT_TTS_CONFIG["underpayment_streak_enabled"])
         merged.setdefault("underpayment_streak_send_time", DEFAULT_TTS_CONFIG["underpayment_streak_send_time"])
         if "messages" not in data or not data["messages"]:
@@ -2973,6 +3022,7 @@ class TTSConfigModel(BaseModel):
     prefix: Optional[str] = None
     wait_for_idle: Optional[bool] = None
     tts_service: Optional[str] = None
+    tts_device_id: Optional[str] = None
     messages: Optional[dict] = None
     underpayment_streak_enabled: Optional[bool] = None
     underpayment_streak_send_time: Optional[str] = None
@@ -3073,17 +3123,10 @@ async def test_tts():
     
     volume = config.get("volume", 0.7)
     wait_for_idle = config.get("wait_for_idle", True)
-    tts_service = config.get("tts_service", "tts.google_translate_say")
 
     if os.environ.get("SUPERVISOR_TOKEN"):
-        from ha_tts import send_tts
-        success, err = await send_tts(
-            message=full_msg,
-            media_player=media_player,
-            volume=volume,
-            wait_for_idle=wait_for_idle,
-            tts_service=tts_service,
-        )
+        from ha_tts import speak_from_config
+        success, err = await speak_from_config(full_msg, config)
         if success:
             return {"success": True, "message": "TTS sent via Home Assistant."}
         raise HTTPException(status_code=500, detail=err or "TTS failed")
@@ -3464,8 +3507,9 @@ async def trigger_bill_summary_tts():
         raise HTTPException(status_code=400, detail="No media player configured")
     
     tts_service = (tts_config.get("tts_service") or "").strip()
-    if not tts_service:
-        raise HTTPException(status_code=400, detail="No TTS entity configured")
+    tts_device_id = (tts_config.get("tts_device_id") or "").strip()
+    if not tts_service and not tts_device_id:
+        raise HTTPException(status_code=400, detail="No TTS device or entity configured")
 
     scheduler = get_scheduler()
     await scheduler._send_scheduled_tts(tts_config)
@@ -3513,11 +3557,17 @@ async def get_ha_entities():
                     elif entity_id.startswith("tts."):
                         result["tts_entities"].append({
                             "entity_id": entity_id,
-                            "friendly_name": friendly_name
+                            "friendly_name": friendly_name,
+                            "device_id": ""
                         })
                 
                 result["media_players"].sort(key=lambda x: x["friendly_name"])
                 result["tts_entities"].sort(key=lambda x: x["friendly_name"])
+
+                if result["tts_entities"]:
+                    from ha_tts import resolve_tts_device_id
+                    for tts_ent in result["tts_entities"]:
+                        tts_ent["device_id"] = await resolve_tts_device_id(tts_ent["entity_id"])
                 
     except Exception as e:
         await db.add_log("error", f"Failed to fetch HA entities: {str(e)}")

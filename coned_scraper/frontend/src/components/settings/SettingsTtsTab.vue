@@ -47,9 +47,9 @@
             </div>
 
             <div class="tts-form-group">
-              <label class="tts-label">TTS Entity <span class="tts-required">*</span></label>
-              <select v-model="config.tts_service" class="tts-select">
-                <option value="">-- Select TTS Entity --</option>
+              <label class="tts-label">TTS Engine <span class="tts-required">*</span></label>
+              <select v-model="config.tts_service" class="tts-select" @change="syncTtsDeviceId">
+                <option value="">-- Select TTS Engine --</option>
                 <option v-for="tts in ttsEntities" :key="tts.entity_id" :value="tts.entity_id">
                   {{ tts.friendly_name }}
                 </option>
@@ -60,7 +60,9 @@
                 type="text"
                 class="tts-input tts-input-mt"
                 placeholder="tts.google_en_com"
+                @change="syncTtsDeviceId"
               />
+              <p class="tts-hint">Uses action tts.speak with cache enabled. Target is the engine device when available.</p>
             </div>
 
             <div class="tts-form-group">
@@ -471,6 +473,7 @@ interface HaEntity {
   entity_id: string
   friendly_name: string
   state?: string
+  device_id?: string
 }
 
 const loading = ref(true)
@@ -496,6 +499,7 @@ const config = reactive({
   media_player: '',
   volume: 0.7,
   tts_service: '',
+  tts_device_id: '',
   wait_for_idle: true,
   prefix: 'Message from Con Edison.',
   underpayment_streak_enabled: false,
@@ -544,6 +548,11 @@ const dayOptions = [
   { value: 'sat', label: 'Sat' },
   { value: 'sun', label: 'Sun' }
 ]
+
+function syncTtsDeviceId() {
+  const match = ttsEntities.value.find(t => t.entity_id === config.tts_service)
+  config.tts_device_id = match?.device_id || ''
+}
 
 function toggleSection(key: keyof typeof expandedSections) {
   expandedSections[key] = !expandedSections[key]
@@ -663,7 +672,11 @@ async function loadConfig() {
       config.media_player = data.media_player ?? ''
       config.volume = typeof data.volume === 'number' ? data.volume : 0.7
       config.tts_service = data.tts_service ?? ''
+      config.tts_device_id = data.tts_device_id ?? ''
       config.wait_for_idle = data.wait_for_idle ?? true
+      if (!config.tts_device_id) {
+        syncTtsDeviceId()
+      }
       config.prefix = data.prefix ?? 'Message from Con Edison.'
       config.underpayment_streak_enabled = data.underpayment_streak_enabled ?? false
       config.underpayment_streak_send_time = data.underpayment_streak_send_time ?? '09:15'
@@ -708,6 +721,7 @@ async function saveConfig() {
         media_player: config.media_player.trim(),
         volume: config.volume,
         tts_service: config.tts_service || '',
+        tts_device_id: config.tts_device_id || '',
         wait_for_idle: config.wait_for_idle,
         prefix: config.prefix || 'Message from Con Edison.',
         underpayment_streak_enabled: config.underpayment_streak_enabled,
@@ -918,6 +932,9 @@ async function checkMeterTracking() {
 
 onMounted(async () => {
   await Promise.all([loadHaEntities(), loadConfig(), loadSchedule(), checkMeterTracking()])
+  if (!config.tts_device_id) {
+    syncTtsDeviceId()
+  }
   loading.value = false
 })
 </script>

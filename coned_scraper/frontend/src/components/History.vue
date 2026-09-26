@@ -102,35 +102,87 @@
         </div>
         
         <div class="ha-chart-tab-content">
-          <!-- Hourly Usage Chart (prior days - API delayed, full 24h per day) -->
+          <!-- Daily Usage: calendar first, 15-min chart on day click -->
           <div v-show="activeChartTab === 'realtime'" class="ha-realtime-wrapper">
             <div class="ha-realtime-header">
               <div class="ha-realtime-day-nav">
-                <button 
-                  class="ha-day-nav-btn"
-                  :disabled="realtimeLoading || realtimeDayOffset >= realtimeTotalDays - 1"
-                  @click="goToPrevDay"
-                  title="Older day"
-                >‹</button>
-                <span class="ha-realtime-title">{{ realtimeDayLabel || 'Usage' }}</span>
-                <button 
-                  class="ha-day-nav-btn"
-                  :disabled="realtimeLoading || realtimeDayOffset <= 0"
-                  @click="goToNextDay"
-                  title="Newer day"
-                >›</button>
+                <template v-if="realtimeView === 'calendar'">
+                  <button
+                    class="ha-day-nav-btn"
+                    :disabled="calendarLoading || !canPrevCalendarMonth"
+                    @click="shiftCalendarMonth(-1)"
+                    title="Previous month"
+                  >‹</button>
+                  <span class="ha-realtime-title">{{ calendarMonthLabel }}</span>
+                  <button
+                    class="ha-day-nav-btn"
+                    :disabled="calendarLoading || !canNextCalendarMonth"
+                    @click="shiftCalendarMonth(1)"
+                    title="Next month"
+                  >›</button>
+                </template>
+                <template v-else>
+                  <button
+                    class="ha-back-calendar-btn"
+                    @click="backToCalendar"
+                    title="Back to calendar"
+                  >← Calendar</button>
+                  <span class="ha-realtime-title">{{ realtimeDayLabel || 'Usage' }}</span>
+                </template>
               </div>
               <button 
                 class="ha-refresh-btn" 
                 @click="refreshRealtimeData" 
-                :disabled="realtimeLoading"
+                :disabled="realtimeView === 'calendar' ? calendarLoading : realtimeLoading"
                 title="Fetch latest data from Con Edison"
               >
-                <span :class="{ 'ha-spin': realtimeLoading }">🔄</span>
+                <span :class="{ 'ha-spin': realtimeView === 'calendar' ? calendarLoading : realtimeLoading }">🔄</span>
                 Refresh
               </button>
             </div>
-            <div class="ha-chart-container ha-chart-container-tall">
+
+            <div v-if="realtimeView === 'calendar'" class="ha-usage-calendar">
+              <div v-if="calendarLoading" class="ha-realtime-loading">
+                <div class="ha-loading-spinner small"></div>
+                <span>Loading calendar...</span>
+              </div>
+              <div v-else-if="calendarError" class="ha-realtime-error">
+                {{ calendarError }}
+              </div>
+              <div v-else-if="!calendarDays.length" class="ha-realtime-empty">
+                <p>No usage data yet.</p>
+                <p class="ha-realtime-hint" v-if="!meterEnabled">Enable Meter Tracking in Settings, then click <strong>Refresh</strong> above to fetch data from Con Edison.</p>
+                <p class="ha-realtime-hint" v-else>Click <strong>Refresh</strong> above to fetch data. Con Edison usage data is typically delayed 1–24 hours.</p>
+              </div>
+              <template v-else>
+                <div class="ha-cal-weekdays">
+                  <span v-for="wd in calendarWeekdays" :key="wd">{{ wd }}</span>
+                </div>
+                <div class="ha-cal-grid">
+                  <button
+                    v-for="cell in calendarCells"
+                    :key="cell.key"
+                    type="button"
+                    class="ha-cal-cell"
+                    :class="{
+                      'is-pad': !cell.inMonth,
+                      'has-data': !!cell.data,
+                      'is-empty': cell.inMonth && !cell.data
+                    }"
+                    :disabled="!cell.data"
+                    @click="cell.data && openCalendarDay(cell.data)"
+                  >
+                    <span v-if="cell.inMonth" class="ha-cal-date">{{ cell.dayNum }}</span>
+                    <template v-if="cell.data">
+                      <span class="ha-cal-kwh">{{ formatCalKwh(cell.data.kwh) }} kWh</span>
+                      <span class="ha-cal-cost">{{ formatCalCost(cell.data.cost) }}</span>
+                    </template>
+                  </button>
+                </div>
+              </template>
+            </div>
+
+            <div v-else class="ha-chart-container ha-chart-container-tall">
               <div v-if="realtimeLoading" class="ha-realtime-loading">
                 <div class="ha-loading-spinner small"></div>
                 <span>Loading real-time data...</span>
@@ -139,20 +191,27 @@
                 {{ realtimeError }}
               </div>
               <div v-else-if="!realtimeData.length" class="ha-realtime-empty">
-                <p>No usage data yet.</p>
-                <p class="ha-realtime-hint" v-if="!meterEnabled">Enable Meter Tracking in Settings, then click <strong>Refresh</strong> above to fetch data from Con Edison.</p>
-                <p class="ha-realtime-hint" v-else>Click <strong>Refresh</strong> above to fetch data. Con Edison usage data is typically delayed 1–24 hours.</p>
+                <p>No interval data for this day.</p>
+                <p class="ha-realtime-hint">Use <strong>Calendar</strong> to pick another day, or click <strong>Refresh</strong>.</p>
               </div>
               <canvas v-show="realtimeData.length && !realtimeLoading" ref="realtimeChart"></canvas>
             </div>
-            <div v-if="realtimeData.length && !realtimeLoading" class="ha-realtime-disclaimer">
+            <div v-if="realtimeView === 'day' && realtimeData.length && !realtimeLoading" class="ha-realtime-disclaimer">
               <p v-if="realtimeDayOffset === 0 && realtimeDataRange?.isStale" class="ha-delay-notice">
                 <strong>Data is {{ realtimeDataRange.hoursAgo }} hours behind.</strong> Con Edison usage data is typically delayed 1-24 hours.
               </p>
               <p>
                 <strong v-if="realtimeDayTotalDisplay">Day total: {{ realtimeDayTotalDisplay }} kWh.</strong>
+                <span v-if="selectedDayCostDisplay"> Estimated cost: {{ selectedDayCostDisplay }}.</span>
                 <span v-if="realtimeDayTotalDisplay">&nbsp;</span>
                 Please note: As per Con Edison, your real-time usage may not match billing. Billed usage is validated (reconciled) and may have a multiplier applied (peak hour kWh rates), which will be shown on your bill statement.
+              </p>
+            </div>
+            <div v-else-if="realtimeView === 'calendar' && calendarDays.length && !calendarLoading" class="ha-realtime-disclaimer">
+              <p>
+                Tap a day for the 15-minute usage chart. Totals use interval kWh
+                <span v-if="calendarKwhCost"> and ${{ calendarKwhCost.toFixed(4) }}/kWh from your latest bill</span>.
+                Con Edison usage data is typically delayed 1–24 hours.
               </p>
             </div>
           </div>
@@ -278,6 +337,21 @@ interface RealtimeReading {
   consumption: number
 }
 
+interface CalendarDay {
+  date: string
+  kwh: number
+  cost: number | null
+  day_offset: number
+}
+
+interface CalendarCell {
+  key: string
+  inMonth: boolean
+  dayNum: number | null
+  date: string | null
+  data: CalendarDay | null
+}
+
 const isLoading = ref(true)
 const error = ref<string | null>(null)
 const historyData = ref<HistoryRow[]>([])
@@ -291,6 +365,13 @@ const meterEnabled = ref(false)
 const realtimeDayOffset = ref(0)  // 0 = most recent day, 1 = day before, etc.
 const realtimeTotalDays = ref(0)
 const realtimeDayLabel = ref<string | null>(null)
+const realtimeView = ref<'calendar' | 'day'>('calendar')
+const calendarLoading = ref(false)
+const calendarError = ref<string | null>(null)
+const calendarDays = ref<CalendarDay[]>([])
+const calendarKwhCost = ref<number | null>(null)
+const calendarMonth = ref({ year: new Date().getFullYear(), month: new Date().getMonth() })
+const calendarWeekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
 const realtimeChart = ref<HTMLCanvasElement | null>(null)
 const kwhChart = ref<HTMLCanvasElement | null>(null)
@@ -417,11 +498,149 @@ async function fetchHistory() {
   }
 }
 
+function pad2(n: number): string {
+  return String(n).padStart(2, '0')
+}
+
+function formatCalKwh(kwh: number): string {
+  return (Number(kwh) || 0).toFixed(2)
+}
+
+function formatCalCost(cost: number | null): string {
+  if (cost == null) return '—'
+  return `$${cost.toFixed(2)}`
+}
+
+const daysByDate = computed(() => {
+  const map = new Map<string, CalendarDay>()
+  for (const d of calendarDays.value) map.set(d.date, d)
+  return map
+})
+
+const calendarMonthLabel = computed(() => {
+  return new Date(calendarMonth.value.year, calendarMonth.value.month, 1)
+    .toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+})
+
+const availableMonthKeys = computed(() => {
+  const keys = new Set(calendarDays.value.map(d => d.date.slice(0, 7)))
+  return Array.from(keys).sort()
+})
+
+const currentMonthKey = computed(() => {
+  return `${calendarMonth.value.year}-${pad2(calendarMonth.value.month + 1)}`
+})
+
+const canPrevCalendarMonth = computed(() => {
+  const keys = availableMonthKeys.value
+  const idx = keys.indexOf(currentMonthKey.value)
+  return idx > 0
+})
+
+const canNextCalendarMonth = computed(() => {
+  const keys = availableMonthKeys.value
+  const idx = keys.indexOf(currentMonthKey.value)
+  return idx >= 0 && idx < keys.length - 1
+})
+
+const calendarCells = computed((): CalendarCell[] => {
+  const { year, month } = calendarMonth.value
+  const first = new Date(year, month, 1)
+  const startWeekday = first.getDay()
+  const daysInMonth = new Date(year, month + 1, 0).getDate()
+  const cells: CalendarCell[] = []
+  for (let i = 0; i < startWeekday; i++) {
+    cells.push({ key: `pad-${year}-${month}-${i}`, inMonth: false, dayNum: null, date: null, data: null })
+  }
+  for (let day = 1; day <= daysInMonth; day++) {
+    const date = `${year}-${pad2(month + 1)}-${pad2(day)}`
+    cells.push({
+      key: date,
+      inMonth: true,
+      dayNum: day,
+      date,
+      data: daysByDate.value.get(date) || null
+    })
+  }
+  return cells
+})
+
+const selectedDayCostDisplay = computed((): string | null => {
+  const match = calendarDays.value.find(d => d.day_offset === realtimeDayOffset.value)
+  if (!match || match.cost == null) return null
+  return `$${match.cost.toFixed(2)}`
+})
+
+function setCalendarMonthFromLatest() {
+  if (!calendarDays.value.length) return
+  const latest = calendarDays.value[0].date
+  const [y, m] = latest.split('-').map(Number)
+  if (!y || !m) return
+  calendarMonth.value = { year: y, month: m - 1 }
+}
+
+function shiftCalendarMonth(delta: number) {
+  const keys = availableMonthKeys.value
+  const idx = keys.indexOf(currentMonthKey.value)
+  const nextIdx = idx < 0 ? (delta < 0 ? 0 : keys.length - 1) : idx + delta
+  if (nextIdx < 0 || nextIdx >= keys.length) return
+  const [y, m] = keys[nextIdx].split('-').map(Number)
+  if (!y || !m) return
+  calendarMonth.value = { year: y, month: m - 1 }
+}
+
+async function fetchCalendarData(forceRefresh: boolean = false) {
+  calendarLoading.value = true
+  calendarError.value = null
+  try {
+    const statusRes = await fetch(`${getApiBase()}/meter-reading`)
+    if (statusRes.ok) {
+      const statusData = await statusRes.json()
+      meterEnabled.value = statusData.enabled === true
+    }
+
+    if (!meterEnabled.value) {
+      calendarDays.value = []
+      if (activeChartTab.value === 'realtime') {
+        activeChartTab.value = 'billHistory'
+      }
+      return
+    }
+
+    const refreshParam = forceRefresh ? '?refresh=true' : ''
+    const res = await fetch(`${getApiBase()}/meter-reading/calendar${refreshParam}`)
+    if (!res.ok) {
+      if (res.status === 400) {
+        calendarDays.value = []
+        if (activeChartTab.value === 'realtime') {
+          activeChartTab.value = 'billHistory'
+        }
+        return
+      }
+      throw new Error(`HTTP ${res.status}`)
+    }
+    const data = await res.json()
+    calendarDays.value = data.days || []
+    calendarKwhCost.value = typeof data.kwh_cost === 'number' ? data.kwh_cost : null
+    realtimeTotalDays.value = calendarDays.value.length
+    if (calendarDays.value.length) {
+      const stillInRange = availableMonthKeys.value.includes(currentMonthKey.value)
+      if (!stillInRange) {
+        setCalendarMonthFromLatest()
+      }
+    }
+  } catch (e: any) {
+    calendarError.value = e.message || 'Failed to load calendar'
+    calendarDays.value = []
+  } finally {
+    calendarLoading.value = false
+  }
+}
+
 async function fetchRealtimeData(forceRefresh: boolean = false) {
   realtimeLoading.value = true
   realtimeError.value = null
   try {
-    // First check if meter tracking is enabled (tab shows when enabled, even if no data yet)
     const statusRes = await fetch(`${getApiBase()}/meter-reading`)
     if (statusRes.ok) {
       const statusData = await statusRes.json()
@@ -436,7 +655,6 @@ async function fetchRealtimeData(forceRefresh: boolean = false) {
       return
     }
     
-    // day_offset: 0 = most recent day, 1 = day before. API returns full 24h of that day.
     const refreshParam = forceRefresh ? '&refresh=true' : ''
     const res = await fetch(`${getApiBase()}/meter-reading/realtime?day_offset=${realtimeDayOffset.value}${refreshParam}`)
     if (!res.ok) {
@@ -444,9 +662,6 @@ async function fetchRealtimeData(forceRefresh: boolean = false) {
         realtimeData.value = []
         realtimeTotalDays.value = 0
         realtimeDayLabel.value = null
-        if (activeChartTab.value === 'realtime') {
-          activeChartTab.value = 'billHistory'
-        }
         return
       }
       throw new Error(`HTTP ${res.status}`)
@@ -454,17 +669,11 @@ async function fetchRealtimeData(forceRefresh: boolean = false) {
     const data = await res.json()
     const readings = data.readings || []
     realtimeData.value = readings
-    realtimeTotalDays.value = data.total_available_days ?? 0
+    realtimeTotalDays.value = data.total_available_days ?? realtimeTotalDays.value
     realtimeDayLabel.value = data.day_label ?? null
 
-    if (!realtimeData.value.length) {
-      if (meterEnabled.value && !forceRefresh) {
-        await fetchRealtimeData(true)
-        return
-      }
-      if (activeChartTab.value === 'realtime') {
-        activeChartTab.value = 'billHistory'
-      }
+    if (!realtimeData.value.length && meterEnabled.value && !forceRefresh) {
+      await fetchRealtimeData(true)
       return
     }
     
@@ -478,20 +687,24 @@ async function fetchRealtimeData(forceRefresh: boolean = false) {
   }
 }
 
+async function openCalendarDay(day: CalendarDay) {
+  realtimeDayOffset.value = day.day_offset
+  realtimeView.value = 'day'
+  await fetchRealtimeData(false)
+}
+
+function backToCalendar() {
+  realtimeView.value = 'calendar'
+  destroyRealtimeChart()
+}
+
 async function refreshRealtimeData() {
+  if (realtimeView.value === 'calendar') {
+    await fetchCalendarData(true)
+    return
+  }
   await fetchRealtimeData(true)
-}
-
-function goToPrevDay() {
-  if (realtimeDayOffset.value >= realtimeTotalDays.value - 1 || realtimeLoading.value) return
-  realtimeDayOffset.value++
-  fetchRealtimeData(false)
-}
-
-function goToNextDay() {
-  if (realtimeDayOffset.value <= 0 || realtimeLoading.value) return
-  realtimeDayOffset.value--
-  fetchRealtimeData(false)
+  await fetchCalendarData(false)
 }
 
 function destroyRealtimeChart() {
@@ -845,18 +1058,21 @@ watch(historyData, async () => {
 watch(activeChartTab, async (newTab) => {
   await nextTick()
   if (newTab === 'realtime') {
-    await fetchRealtimeData(false)
-    if (realtimeData.value.length && !realtimeChartInstance) {
-      createRealtimeChart()
+    if (realtimeView.value === 'calendar') {
+      await fetchCalendarData(false)
+    } else {
+      await fetchRealtimeData(false)
+      if (realtimeData.value.length && !realtimeChartInstance) {
+        createRealtimeChart()
+      }
     }
   }
 })
 
 onMounted(async () => {
-  // Fetch both history and realtime data in parallel
   await Promise.all([
     fetchHistory(),
-    fetchRealtimeData()
+    fetchCalendarData()
   ])
 })
 
@@ -1142,6 +1358,109 @@ onUnmounted(() => {
   cursor: not-allowed;
 }
 
+.ha-back-calendar-btn {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ha-primary-color, #0088cc);
+  background: transparent;
+  border: 1px solid var(--ha-border-color, #e0e0e0);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.ha-back-calendar-btn:hover {
+  background: rgba(0, 136, 204, 0.1);
+  border-color: var(--ha-primary-color, #0088cc);
+}
+
+.ha-usage-calendar {
+  padding: 16px;
+}
+
+.ha-cal-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.ha-cal-weekdays span {
+  text-align: center;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ha-secondary-text-color, #666);
+}
+
+.ha-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.ha-cal-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  min-height: 88px;
+  padding: 8px;
+  text-align: left;
+  background: var(--ha-card-background, #fff);
+  border: 1px solid var(--ha-border-color, #e0e0e0);
+  border-radius: 8px;
+  cursor: default;
+}
+
+.ha-cal-cell.is-pad {
+  visibility: hidden;
+}
+
+.ha-cal-cell.is-empty {
+  background: #f8f9fa;
+}
+
+.ha-cal-cell.has-data {
+  cursor: pointer;
+  border-color: rgba(0, 136, 204, 0.28);
+  background: linear-gradient(180deg, rgba(0, 136, 204, 0.06) 0%, #fff 46%);
+}
+
+.ha-cal-cell.has-data:hover {
+  border-color: var(--ha-primary-color, #0088cc);
+  box-shadow: 0 2px 8px rgba(0, 136, 204, 0.12);
+}
+
+.ha-cal-cell.has-data:focus-visible {
+  outline: 2px solid var(--ha-primary-color, #0088cc);
+  outline-offset: 2px;
+}
+
+.ha-cal-date {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ha-primary-text-color, #333);
+}
+
+.ha-cal-kwh {
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ha-primary-color, #0088cc);
+}
+
+.ha-cal-cost {
+  margin-top: 2px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #1b7a3a;
+}
+
 .ha-realtime-day-count {
   font-weight: normal;
   color: #6c757d;
@@ -1330,6 +1649,29 @@ onUnmounted(() => {
   .ha-realtime-disclaimer {
     font-size: 10px;
     padding: 8px 10px;
+  }
+
+  .ha-usage-calendar {
+    padding: 12px;
+  }
+
+  .ha-cal-grid,
+  .ha-cal-weekdays {
+    gap: 4px;
+  }
+
+  .ha-cal-cell {
+    min-height: 72px;
+    padding: 6px;
+  }
+
+  .ha-cal-date {
+    font-size: 12px;
+  }
+
+  .ha-cal-kwh,
+  .ha-cal-cost {
+    font-size: 10px;
   }
   
   .ha-history-table {

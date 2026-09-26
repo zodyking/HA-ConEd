@@ -371,7 +371,7 @@ class TTSScheduler:
     
     async def _send_scheduled_tts(self, tts_config: Dict[str, Any]):
         """Send the scheduled TTS announcement."""
-        from ha_tts import send_tts
+        from ha_tts import speak_from_config
         
         media_player = tts_config.get("media_player", "").strip()
         if not media_player:
@@ -383,18 +383,8 @@ class TTSScheduler:
             logger.warning("No TTS message generated")
             return
         
-        volume = tts_config.get("volume", 0.7)
-        wait_for_idle = tts_config.get("wait_for_idle", True)
-        tts_service = tts_config.get("tts_service", "tts.google_translate_say")
-        
         try:
-            success, err = await send_tts(
-                message=message,
-                media_player=media_player,
-                volume=volume,
-                wait_for_idle=wait_for_idle,
-                tts_service=tts_service,
-            )
+            success, err = await speak_from_config(message, tts_config)
             if success:
                 logger.info("Scheduled TTS sent successfully")
             else:
@@ -459,16 +449,10 @@ async def trigger_new_bill_tts(bill_month_range: str, bill_total: str, due_date:
     except KeyError:
         message = template
     
-    from ha_tts import send_tts
+    from ha_tts import speak_from_config
     
     try:
-        success, err = await send_tts(
-            message=message,
-            media_player=media_player,
-            volume=tts_config.get("volume", 0.7),
-            wait_for_idle=tts_config.get("wait_for_idle", True),
-            tts_service=tts_config.get("tts_service", "tts.google_translate_say"),
-        )
+        success, err = await speak_from_config(message, tts_config)
         if success:
             logger.info("New bill TTS sent successfully")
             await db.add_log("info", f"New bill TTS sent: {bill_total} for {bill_month_range}")
@@ -507,16 +491,10 @@ async def trigger_payment_received_tts(amount: str, balance: str, payee_name: st
     except KeyError:
         message = template
     
-    from ha_tts import send_tts
+    from ha_tts import speak_from_config
     
     try:
-        success, err = await send_tts(
-            message=message,
-            media_player=media_player,
-            volume=tts_config.get("volume", 0.7),
-            wait_for_idle=tts_config.get("wait_for_idle", True),
-            tts_service=tts_config.get("tts_service", "tts.google_translate_say"),
-        )
+        success, err = await speak_from_config(message, tts_config)
         if success:
             logger.info("Payment received TTS sent successfully")
             await db.add_log("info", f"Payment TTS sent: {amount} received, balance {balance}")
@@ -555,16 +533,10 @@ async def trigger_late_fee_tts(late_fee_amount: str):
     except KeyError:
         message = template
 
-    from ha_tts import send_tts
+    from ha_tts import speak_from_config
 
     try:
-        success, err = await send_tts(
-            message=message,
-            media_player=media_player,
-            volume=tts_config.get("volume", 0.7),
-            wait_for_idle=tts_config.get("wait_for_idle", True),
-            tts_service=tts_config.get("tts_service", "tts.google_translate_say"),
-        )
+        success, err = await speak_from_config(message, tts_config)
         if success:
             logger.info("Late fee TTS sent successfully")
             await db.add_log("info", f"Late fee TTS sent: {late_fee_amount} added")
@@ -603,16 +575,10 @@ async def trigger_payment_claimed_tts(payee_name: str, amount: str, payment_date
     except KeyError:
         message = template
 
-    from ha_tts import send_tts
+    from ha_tts import speak_from_config
 
     try:
-        success, err = await send_tts(
-            message=message,
-            media_player=media_player,
-            volume=tts_config.get("volume", 0.7),
-            wait_for_idle=tts_config.get("wait_for_idle", True),
-            tts_service=tts_config.get("tts_service", "tts.google_translate_say"),
-        )
+        success, err = await speak_from_config(message, tts_config)
         if success:
             logger.info("Payment claimed TTS sent successfully")
             await db.add_log("info", f"Payment claimed TTS sent: {payee_name} claimed {amount}")
@@ -651,16 +617,10 @@ async def trigger_payment_unclaimed_tts(payee_name: str, amount: str, payment_da
     except KeyError:
         message = template
 
-    from ha_tts import send_tts
+    from ha_tts import speak_from_config
 
     try:
-        success, err = await send_tts(
-            message=message,
-            media_player=media_player,
-            volume=tts_config.get("volume", 0.7),
-            wait_for_idle=tts_config.get("wait_for_idle", True),
-            tts_service=tts_config.get("tts_service", "tts.google_translate_say"),
-        )
+        success, err = await speak_from_config(message, tts_config)
         if success:
             logger.info("Payment unclaimed TTS sent successfully")
             await db.add_log("info", f"Payment unclaimed TTS sent: {payee_name} unclaimed {amount}")
@@ -699,16 +659,10 @@ async def trigger_late_fee_tts_duplicate_removed(late_fee_amount: str):
     except KeyError:
         message = template
 
-    from ha_tts import send_tts
+    from ha_tts import speak_from_config
 
     try:
-        success, err = await send_tts(
-            message=message,
-            media_player=media_player,
-            volume=tts_config.get("volume", 0.7),
-            wait_for_idle=tts_config.get("wait_for_idle", True),
-            tts_service=tts_config.get("tts_service", "tts.google_translate_say"),
-        )
+        success, err = await speak_from_config(message, tts_config)
         if success:
             logger.info("Late fee TTS sent successfully")
             await db.add_log("info", f"Late fee TTS sent: {late_fee_amount} added to balance")
@@ -750,16 +704,10 @@ async def trigger_late_fee_tts(late_fee_amount: str):
     except KeyError:
         message = template
 
-    from ha_tts import send_tts
+    from ha_tts import speak_from_config
 
     try:
-        success, err = await send_tts(
-            message=message,
-            media_player=media_player,
-            volume=tts_config.get("volume", 0.7),
-            wait_for_idle=tts_config.get("wait_for_idle", True),
-            tts_service=tts_config.get("tts_service", "tts.google_translate_say"),
-        )
+        success, err = await speak_from_config(message, tts_config)
         if success:
             logger.info("Late fee TTS sent successfully")
             await db.add_log("info", f"Late fee TTS sent: {late_fee_amount} added")
@@ -783,7 +731,7 @@ async def check_and_trigger_underpayment_streak_tts() -> int:
     Returns number of successful announcements.
     """
     import db
-    from ha_tts import send_tts
+    from ha_tts import speak_from_config
 
     scheduler = get_scheduler()
     tts_config = await scheduler.load_tts_config()
@@ -825,13 +773,7 @@ async def check_and_trigger_underpayment_streak_tts() -> int:
         except KeyError:
             message = template
 
-        success, err = await send_tts(
-            message=message,
-            media_player=media_player,
-            volume=tts_config.get("volume", 0.7),
-            wait_for_idle=tts_config.get("wait_for_idle", True),
-            tts_service=tts_config.get("tts_service", "tts.google_translate_say"),
-        )
+        success, err = await speak_from_config(message, tts_config)
         if success:
             await db.record_underpayment_streak_tts_sent(uid)
             sent += 1
@@ -846,7 +788,7 @@ async def check_and_trigger_underpayment_streak_tts() -> int:
 async def trigger_underpayment_streak_tts_sample() -> None:
     """Speak one test underpayment-streak message (real data if available)."""
     import db
-    from ha_tts import send_tts
+    from ha_tts import speak_from_config
 
     scheduler = get_scheduler()
     tts_config = await scheduler.load_tts_config()
@@ -892,13 +834,7 @@ async def trigger_underpayment_streak_tts_sample() -> None:
     except KeyError:
         message = template
 
-    success, err = await send_tts(
-        message=message,
-        media_player=media_player,
-        volume=tts_config.get("volume", 0.7),
-        wait_for_idle=tts_config.get("wait_for_idle", True),
-        tts_service=tts_config.get("tts_service", "tts.google_translate_say"),
-    )
+    success, err = await speak_from_config(message, tts_config)
     if success:
         await db.add_log("info", "Test underpayment streak TTS sent")
     else:

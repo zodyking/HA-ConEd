@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.3.95
+
+### Added
+- Daily Usage now opens on a month calendar with each day's total kWh and estimated dollar amount
+- Clicking a calendar day opens the existing 15-minute usage chart, with a Calendar control to return
+
+### Changed
+- Day-to-day chart arrows are removed; month paging on the calendar is how you move between days
+- All TTS announcements now call Home Assistant `tts.speak` with cache enabled, targeting the TTS device when available
+
+### Fixed
+- TTS no longer falls back to deprecated `tts.*_say` services
+
 ## 1.3.94
 
 ### Fixed
