@@ -16,7 +16,7 @@ The add-on release version is the `version` key in [`coned_scraper/config.yaml`]
 To bump the add-on version when releasing:
 
 ```bash
-python3 scripts/sync_addon_version.py 1.3.95
+python3 scripts/sync_addon_version.py 1.3.96
 ```
 
 This updates `config.yaml`, `main.py` `CODE_VERSION`, and the startup log in `rootfs`.

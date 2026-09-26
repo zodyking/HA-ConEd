@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.3.96
+
+### Added
+- Daily Usage calendar shows today (even while data is still arriving) and current billing-period start/end markers
+- Clear “tap a day / View chart” affordance so the 15-minute chart is discoverable
+
+### Changed
+- Calendar layout restyled to match the add-on theme (period badge, legend, today ring)
+- TTS now uses the same Home-Delivery Supervisor path: `tts.speak` with the TTS engine `entity_id`, then a legacy service fallback
+
 ## 1.3.95
 
 ### Added

@@ -62,7 +62,7 @@
                 placeholder="tts.google_en_com"
                 @change="syncTtsDeviceId"
               />
-              <p class="tts-hint">Uses action tts.speak with cache enabled. Target is the engine device when available.</p>
+              <p class="tts-hint">Uses Home Assistant tts.speak (same path as Home-Delivery): engine entity + media player, cache on.</p>
             </div>
 
             <div class="tts-form-group">

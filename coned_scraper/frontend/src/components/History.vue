@@ -155,6 +155,19 @@
                 <p class="ha-realtime-hint" v-else>Click <strong>Refresh</strong> above to fetch data. Con Edison usage data is typically delayed 1–24 hours.</p>
               </div>
               <template v-else>
+                <div class="ha-cal-toolbar">
+                  <div class="ha-cal-period" v-if="billingPeriod">
+                    <span class="ha-cal-period-label">Billing period</span>
+                    <span class="ha-cal-period-range">{{ billingPeriod.label }}</span>
+                  </div>
+                  <p class="ha-cal-hint">Tap a day to open its 15-minute usage chart</p>
+                </div>
+                <div class="ha-cal-legend">
+                  <span><i class="ha-cal-swatch today"></i> Today</span>
+                  <span><i class="ha-cal-swatch period"></i> Current period</span>
+                  <span><i class="ha-cal-swatch start"></i> Period start</span>
+                  <span><i class="ha-cal-swatch end"></i> Period end</span>
+                </div>
                 <div class="ha-cal-weekdays">
                   <span v-for="wd in calendarWeekdays" :key="wd">{{ wd }}</span>
                 </div>
@@ -166,16 +179,28 @@
                     class="ha-cal-cell"
                     :class="{
                       'is-pad': !cell.inMonth,
-                      'has-data': !!cell.data,
-                      'is-empty': cell.inMonth && !cell.data
+                      'is-clickable': cell.clickable,
+                      'is-empty': cell.inMonth && !cell.clickable,
+                      'is-today': cell.isToday,
+                      'in-period': cell.inPeriod,
+                      'is-period-start': cell.isPeriodStart,
+                      'is-period-end': cell.isPeriodEnd,
+                      'is-future': cell.isFuture
                     }"
-                    :disabled="!cell.data"
-                    @click="cell.data && openCalendarDay(cell.data)"
+                    :disabled="!cell.clickable"
+                    :title="cell.clickable ? 'Open 15-minute chart' : undefined"
+                    @click="cell.clickable && cell.data && openCalendarDay(cell.data)"
                   >
-                    <span v-if="cell.inMonth" class="ha-cal-date">{{ cell.dayNum }}</span>
-                    <template v-if="cell.data">
-                      <span class="ha-cal-kwh">{{ formatCalKwh(cell.data.kwh) }} kWh</span>
-                      <span class="ha-cal-cost">{{ formatCalCost(cell.data.cost) }}</span>
+                    <span class="ha-cal-cell-top">
+                      <span v-if="cell.inMonth" class="ha-cal-date">{{ cell.dayNum }}</span>
+                      <span v-if="cell.isToday" class="ha-cal-chip today">Today</span>
+                      <span v-else-if="cell.isPeriodStart" class="ha-cal-chip start">Start</span>
+                      <span v-else-if="cell.isPeriodEnd" class="ha-cal-chip end">End</span>
+                    </span>
+                    <template v-if="cell.data && (cell.data.kwh > 0 || cell.isToday)">
+                      <span class="ha-cal-kwh">{{ cell.data.kwh > 0 ? `${formatCalKwh(cell.data.kwh)} kWh` : 'Updating…' }}</span>
+                      <span class="ha-cal-cost">{{ cell.data.kwh > 0 ? formatCalCost(cell.data.cost) : 'Partial day' }}</span>
+                      <span class="ha-cal-cta">View chart ›</span>
                     </template>
                   </button>
                 </div>
@@ -191,8 +216,8 @@
                 {{ realtimeError }}
               </div>
               <div v-else-if="!realtimeData.length" class="ha-realtime-empty">
-                <p>No interval data for this day.</p>
-                <p class="ha-realtime-hint">Use <strong>Calendar</strong> to pick another day, or click <strong>Refresh</strong>.</p>
+                <p>{{ selectedDate && calendarToday === selectedDate ? "Today’s 15-minute data is still arriving." : 'No interval data for this day.' }}</p>
+                <p class="ha-realtime-hint">Con Edison usage is typically delayed 1–24 hours. Use <strong>Calendar</strong> for another day, or Refresh.</p>
               </div>
               <canvas v-show="realtimeData.length && !realtimeLoading" ref="realtimeChart"></canvas>
             </div>
@@ -342,6 +367,15 @@ interface CalendarDay {
   kwh: number
   cost: number | null
   day_offset: number
+  is_today?: boolean
+  is_partial?: boolean
+}
+
+interface BillingPeriod {
+  start: string
+  end: string
+  label: string
+  source?: string
 }
 
 interface CalendarCell {
@@ -350,6 +384,12 @@ interface CalendarCell {
   dayNum: number | null
   date: string | null
   data: CalendarDay | null
+  clickable: boolean
+  isToday: boolean
+  inPeriod: boolean
+  isPeriodStart: boolean
+  isPeriodEnd: boolean
+  isFuture: boolean
 }
 
 const isLoading = ref(true)
@@ -370,6 +410,9 @@ const calendarLoading = ref(false)
 const calendarError = ref<string | null>(null)
 const calendarDays = ref<CalendarDay[]>([])
 const calendarKwhCost = ref<number | null>(null)
+const calendarToday = ref<string | null>(null)
+const billingPeriod = ref<BillingPeriod | null>(null)
+const selectedDate = ref<string | null>(null)
 const calendarMonth = ref({ year: new Date().getFullYear(), month: new Date().getMonth() })
 const calendarWeekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
@@ -524,6 +567,9 @@ const calendarMonthLabel = computed(() => {
 
 const availableMonthKeys = computed(() => {
   const keys = new Set(calendarDays.value.map(d => d.date.slice(0, 7)))
+  if (billingPeriod.value?.start) keys.add(billingPeriod.value.start.slice(0, 7))
+  if (billingPeriod.value?.end) keys.add(billingPeriod.value.end.slice(0, 7))
+  if (calendarToday.value) keys.add(calendarToday.value.slice(0, 7))
   return Array.from(keys).sort()
 })
 
@@ -548,18 +594,44 @@ const calendarCells = computed((): CalendarCell[] => {
   const first = new Date(year, month, 1)
   const startWeekday = first.getDay()
   const daysInMonth = new Date(year, month + 1, 0).getDate()
+  const today = calendarToday.value
+  const periodStart = billingPeriod.value?.start || null
+  const periodEnd = billingPeriod.value?.end || null
   const cells: CalendarCell[] = []
   for (let i = 0; i < startWeekday; i++) {
-    cells.push({ key: `pad-${year}-${month}-${i}`, inMonth: false, dayNum: null, date: null, data: null })
+    cells.push({
+      key: `pad-${year}-${month}-${i}`,
+      inMonth: false,
+      dayNum: null,
+      date: null,
+      data: null,
+      clickable: false,
+      isToday: false,
+      inPeriod: false,
+      isPeriodStart: false,
+      isPeriodEnd: false,
+      isFuture: false
+    })
   }
   for (let day = 1; day <= daysInMonth; day++) {
     const date = `${year}-${pad2(month + 1)}-${pad2(day)}`
+    const data = daysByDate.value.get(date) || null
+    const isToday = date === today || !!data?.is_today
+    const isFuture = !!(today && date > today)
+    const inPeriod = !!(periodStart && periodEnd && date >= periodStart && date <= periodEnd)
+    const clickable = !isFuture && (!!data || isToday)
     cells.push({
       key: date,
       inMonth: true,
       dayNum: day,
       date,
-      data: daysByDate.value.get(date) || null
+      data: data || (isToday ? { date, kwh: 0, cost: null, day_offset: 0, is_today: true, is_partial: true } : null),
+      clickable,
+      isToday,
+      inPeriod,
+      isPeriodStart: date === periodStart,
+      isPeriodEnd: date === periodEnd,
+      isFuture
     })
   }
   return cells
@@ -622,6 +694,8 @@ async function fetchCalendarData(forceRefresh: boolean = false) {
     const data = await res.json()
     calendarDays.value = data.days || []
     calendarKwhCost.value = typeof data.kwh_cost === 'number' ? data.kwh_cost : null
+    calendarToday.value = data.today || null
+    billingPeriod.value = data.billing_period || null
     realtimeTotalDays.value = calendarDays.value.length
     if (calendarDays.value.length) {
       const stillInRange = availableMonthKeys.value.includes(currentMonthKey.value)
@@ -656,7 +730,8 @@ async function fetchRealtimeData(forceRefresh: boolean = false) {
     }
     
     const refreshParam = forceRefresh ? '&refresh=true' : ''
-    const res = await fetch(`${getApiBase()}/meter-reading/realtime?day_offset=${realtimeDayOffset.value}${refreshParam}`)
+    const dateParam = selectedDate.value ? `&date=${encodeURIComponent(selectedDate.value)}` : ''
+    const res = await fetch(`${getApiBase()}/meter-reading/realtime?day_offset=${realtimeDayOffset.value}${dateParam}${refreshParam}`)
     if (!res.ok) {
       if (res.status === 400) {
         realtimeData.value = []
@@ -672,7 +747,7 @@ async function fetchRealtimeData(forceRefresh: boolean = false) {
     realtimeTotalDays.value = data.total_available_days ?? realtimeTotalDays.value
     realtimeDayLabel.value = data.day_label ?? null
 
-    if (!realtimeData.value.length && meterEnabled.value && !forceRefresh) {
+    if (!realtimeData.value.length && meterEnabled.value && !forceRefresh && !selectedDate.value) {
       await fetchRealtimeData(true)
       return
     }
@@ -688,6 +763,7 @@ async function fetchRealtimeData(forceRefresh: boolean = false) {
 }
 
 async function openCalendarDay(day: CalendarDay) {
+  selectedDate.value = day.date
   realtimeDayOffset.value = day.day_offset
   realtimeView.value = 'day'
   await fetchRealtimeData(false)
@@ -1378,7 +1454,89 @@ onUnmounted(() => {
 }
 
 .ha-usage-calendar {
-  padding: 16px;
+  padding: 16px 16px 8px;
+}
+
+.ha-cal-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.ha-cal-period {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 6px 12px;
+  background: #e1f5fe;
+  border: 1px solid #b3e5fc;
+  border-radius: 999px;
+}
+
+.ha-cal-period-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #0277bd;
+}
+
+.ha-cal-period-range {
+  font-size: 13px;
+  font-weight: 700;
+  color: #01579b;
+}
+
+.ha-cal-hint {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #0088cc;
+}
+
+.ha-cal-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+  margin-bottom: 14px;
+  font-size: 12px;
+  color: #546e7a;
+}
+
+.ha-cal-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ha-cal-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  border: 1px solid #cfd8dc;
+  background: #fff;
+}
+
+.ha-cal-swatch.today {
+  border-color: #03a9f4;
+  box-shadow: inset 0 0 0 2px #03a9f4;
+}
+
+.ha-cal-swatch.period {
+  background: #e1f5fe;
+  border-color: #81d4fa;
+}
+
+.ha-cal-swatch.start {
+  background: #43a047;
+}
+
+.ha-cal-swatch.end {
+  background: #ef6c00;
 }
 
 .ha-cal-weekdays {
@@ -1391,10 +1549,10 @@ onUnmounted(() => {
 .ha-cal-weekdays span {
   text-align: center;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--ha-secondary-text-color, #666);
+  color: #78909c;
 }
 
 .ha-cal-grid {
@@ -1406,14 +1564,14 @@ onUnmounted(() => {
 .ha-cal-cell {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: stretch;
   justify-content: flex-start;
-  min-height: 88px;
+  min-height: 108px;
   padding: 8px;
   text-align: left;
-  background: var(--ha-card-background, #fff);
-  border: 1px solid var(--ha-border-color, #e0e0e0);
-  border-radius: 8px;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 10px;
   cursor: default;
 }
 
@@ -1421,44 +1579,101 @@ onUnmounted(() => {
   visibility: hidden;
 }
 
-.ha-cal-cell.is-empty {
-  background: #f8f9fa;
+.ha-cal-cell.is-empty,
+.ha-cal-cell.is-future {
+  background: #fafafa;
 }
 
-.ha-cal-cell.has-data {
+.ha-cal-cell.in-period {
+  background: #f3fbff;
+  border-color: #b3e5fc;
+}
+
+.ha-cal-cell.is-clickable {
   cursor: pointer;
-  border-color: rgba(0, 136, 204, 0.28);
-  background: linear-gradient(180deg, rgba(0, 136, 204, 0.06) 0%, #fff 46%);
 }
 
-.ha-cal-cell.has-data:hover {
-  border-color: var(--ha-primary-color, #0088cc);
-  box-shadow: 0 2px 8px rgba(0, 136, 204, 0.12);
+.ha-cal-cell.is-clickable:hover {
+  border-color: #03a9f4;
+  box-shadow: 0 4px 12px rgba(3, 169, 244, 0.16);
+  transform: translateY(-1px);
 }
 
-.ha-cal-cell.has-data:focus-visible {
-  outline: 2px solid var(--ha-primary-color, #0088cc);
+.ha-cal-cell.is-clickable:focus-visible {
+  outline: 2px solid #03a9f4;
   outline-offset: 2px;
 }
 
+.ha-cal-cell.is-today {
+  border-color: #03a9f4;
+  box-shadow: inset 0 0 0 2px #03a9f4;
+}
+
+.ha-cal-cell.is-period-start {
+  border-left: 4px solid #43a047;
+}
+
+.ha-cal-cell.is-period-end {
+  border-left: 4px solid #ef6c00;
+}
+
+.ha-cal-cell-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+}
+
 .ha-cal-date {
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 700;
-  color: var(--ha-primary-text-color, #333);
+  color: #212121;
+}
+
+.ha-cal-chip {
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.ha-cal-chip.today {
+  background: #03a9f4;
+  color: #fff;
+}
+
+.ha-cal-chip.start {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.ha-cal-chip.end {
+  background: #fff3e0;
+  color: #e65100;
 }
 
 .ha-cal-kwh {
-  margin-top: 8px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--ha-primary-color, #0088cc);
+  margin-top: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #0088cc;
 }
 
 .ha-cal-cost {
   margin-top: 2px;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 700;
-  color: #1b7a3a;
+  color: #2e7d32;
+}
+
+.ha-cal-cta {
+  margin-top: auto;
+  padding-top: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #03a9f4;
 }
 
 .ha-realtime-day-count {
@@ -1661,17 +1876,25 @@ onUnmounted(() => {
   }
 
   .ha-cal-cell {
-    min-height: 72px;
+    min-height: 92px;
     padding: 6px;
   }
 
   .ha-cal-date {
-    font-size: 12px;
+    font-size: 13px;
   }
 
   .ha-cal-kwh,
   .ha-cal-cost {
+    font-size: 11px;
+  }
+
+  .ha-cal-cta {
     font-size: 10px;
+  }
+
+  .ha-cal-hint {
+    font-size: 12px;
   }
   
   .ha-history-table {

@@ -378,6 +378,16 @@ async def get_latest_bill_with_details() -> Optional[Dict[str, Any]]:
             "billing_days": bill.details.billingDays,
             "supply_charges": bill.details.supplyCharges,
             "delivery_charges": bill.details.deliveryCharges,
+            "billing_period_start": (
+                bill.details.billingPeriodStart.strftime("%Y-%m-%d")
+                if bill.details.billingPeriodStart
+                else None
+            ),
+            "billing_period_end": (
+                bill.details.billingPeriodEnd.strftime("%Y-%m-%d")
+                if bill.details.billingPeriodEnd
+                else None
+            ),
         })
     else:
         due_date_str = None
@@ -393,6 +403,8 @@ async def get_latest_bill_with_details() -> Optional[Dict[str, Any]]:
             "billing_days": None,
             "supply_charges": None,
             "delivery_charges": None,
+            "billing_period_start": None,
+            "billing_period_end": None,
         })
     
     return result
@@ -2170,6 +2182,12 @@ async def get_realtime_readings_for_day(day_offset: int = 0) -> tuple[List[Dict[
         return [], total_days
     
     target_date = dates[day_offset]
+    return await get_realtime_readings_for_date(target_date), total_days
+
+
+async def get_realtime_readings_for_date(target_date: date) -> List[Dict[str, Any]]:
+    """Get 15-minute readings for a specific US Eastern calendar day."""
+    await ensure_connected()
     day_start_et = datetime(target_date.year, target_date.month, target_date.day, 0, 0, 0, tzinfo=EASTERN)
     day_end_et = day_start_et + timedelta(days=1)
     day_start_utc = day_start_et.astimezone(timezone.utc)
@@ -2188,19 +2206,17 @@ async def get_realtime_readings_for_day(day_offset: int = 0) -> tuple[List[Dict[
             "consumption": float(r.consumption),
         }
         for r in readings
-    ], total_days
+    ]
 
 
 async def get_realtime_daily_summaries() -> List[Dict[str, Any]]:
     """
     Sum 15-minute readings by US Eastern calendar day.
-    day_offset matches get_realtime_readings_for_day (0 = most recent day).
+    Always includes today (even at 0 kWh) so the current day is on the calendar.
+    day_offset matches get_realtime_readings_for_day for days that have readings.
     """
     await ensure_connected()
     rows = await db.realtimereading.find_many(order={"endTime": "desc"})
-    if not rows:
-        return []
-
     by_date: Dict[date, float] = {}
     for r in rows:
         et = r.endTime
@@ -2209,12 +2225,17 @@ async def get_realtime_daily_summaries() -> List[Dict[str, Any]]:
         d = et.astimezone(EASTERN).date()
         by_date[d] = by_date.get(d, 0.0) + float(r.consumption or 0)
 
+    today = datetime.now(EASTERN).date()
+    by_date.setdefault(today, 0.0)
+
     dates = sorted(by_date.keys(), reverse=True)
     return [
         {
             "date": d.isoformat(),
             "kwh": round(by_date[d], 4),
             "day_offset": i,
+            "is_today": d == today,
+            "is_partial": d == today,
         }
         for i, d in enumerate(dates)
     ]

@@ -14,7 +14,7 @@ from cryptography.fernet import Fernet
 import base64
 import hashlib
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, date
 
 def utc_now() -> datetime:
     """Get current UTC time"""
@@ -29,7 +29,7 @@ import db
 app = FastAPI(title="Con Edison API")
 
 # Code version for deployment verification
-CODE_VERSION = "1.3.95"
+CODE_VERSION = "1.3.96"
 
 @app.on_event("startup")
 async def startup():
@@ -2873,17 +2873,52 @@ async def refresh_meter_reading():
     }
 
 
+def _format_period_label(start: date, end: date) -> str:
+    return f"{start.strftime('%b')} {start.day} – {end.strftime('%b')} {end.day}"
+
+
+async def _current_billing_period() -> Optional[dict]:
+    """Current cycle from meter forecast, else latest bill statement dates."""
+    from meter_service import get_meter_service
+
+    start = end = None
+    source = None
+    try:
+        forecast = await get_meter_service().get_cached_forecast()
+    except Exception:
+        forecast = None
+    if forecast:
+        start = db._parse_iso_forecast_date(forecast.get("start_date"))
+        end = db._parse_iso_forecast_date(forecast.get("end_date"))
+        if start and end:
+            source = "forecast"
+    if not (start and end):
+        latest_bill = await db.get_latest_bill_with_details()
+        if latest_bill:
+            start = db._parse_iso_date_only(latest_bill.get("billing_period_start"))
+            end = db._parse_iso_date_only(latest_bill.get("billing_period_end"))
+            if start and end:
+                source = "bill"
+    if not (start and end):
+        return None
+    return {
+        "start": start.isoformat(),
+        "end": end.isoformat(),
+        "label": _format_period_label(start, end),
+        "source": source,
+    }
+
+
 @app.get("/api/meter-reading/realtime")
-async def get_realtime_usage(day_offset: int = 0, refresh: bool = False):
+async def get_realtime_usage(day_offset: int = 0, date: Optional[str] = None, refresh: bool = False):
     """Get hourly/quarter-hour usage for a specific day. API is delayed, so we show prior days.
     
     Args:
         day_offset: 0 = most recent complete day, 1 = day before, etc.
+        date: Optional YYYY-MM-DD (US Eastern) to fetch that calendar day directly.
         refresh: If True, fetch fresh data from API and merge into DB.
-    
-    Returns:
-        readings for that day (full 24h), total_available_days, day_label
     """
+    from datetime import date as date_cls
     from meter_service import get_meter_service
     
     service = get_meter_service()
@@ -2891,29 +2926,39 @@ async def get_realtime_usage(day_offset: int = 0, refresh: bool = False):
     if not service.is_enabled():
         raise HTTPException(status_code=400, detail="Meter tracking is not enabled")
     
-    # Optionally fetch fresh data and merge (append) into DB (chunked: API ~6 days/request)
     if refresh:
-        await service.fetch_quarter_hour_reads(720)  # 30 days in 6-day chunks
-    
-    # Get readings for the requested day
-    readings, total_days = await db.get_realtime_readings_for_day(day_offset)
-    
-    # Build day label for display
-    day_label = None
-    if readings:
-        from datetime import datetime, timezone
-        first_end = readings[0].get("end_time") if isinstance(readings[0], dict) else None
-        if first_end:
+        await service.fetch_quarter_hour_reads(720)
+
+    target = None
+    if date:
+        try:
+            target = date_cls.fromisoformat(date)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD")
+        readings = await db.get_realtime_readings_for_date(target)
+        _, total_days = await db.get_realtime_readings_for_day(0)
+    else:
+        readings, total_days = await db.get_realtime_readings_for_day(day_offset)
+        if readings:
             try:
+                first_end = readings[0].get("end_time")
                 dt = datetime.fromisoformat(first_end.replace("Z", "+00:00"))
-                day_label = dt.strftime("%b %d, %Y")
-            except (ValueError, TypeError):
-                pass
+                target = dt.astimezone(db.EASTERN).date()
+            except Exception:
+                target = None
+
+    if target:
+        day_label = target.strftime("%b %d, %Y")
+        if target == datetime.now(db.EASTERN).date():
+            day_label = f"Today · {day_label}"
+    else:
+        day_label = None
     
     return {
         "success": True,
         "readings": readings,
         "day_offset": day_offset,
+        "date": target.isoformat() if target else date,
         "total_available_days": total_days,
         "day_label": day_label,
         "count": len(readings),
@@ -2939,14 +2984,14 @@ async def get_realtime_calendar(refresh: bool = False):
     latest_bill = await db.get_latest_bill_with_details()
     if latest_bill and latest_bill.get("kwh_cost"):
         kwh_cost = float(latest_bill["kwh_cost"])
-    if not kwh_cost:
-        forecast = await service.get_cached_forecast()
-        if forecast:
-            fc = forecast.get("forecasted_cost")
-            fu = forecast.get("forecasted_usage")
-            if fc is not None and fu and float(fu) > 0:
-                kwh_cost = float(fc) / float(fu)
+    forecast = await service.get_cached_forecast()
+    if not kwh_cost and forecast:
+        fc = forecast.get("forecasted_cost")
+        fu = forecast.get("forecasted_usage")
+        if fc is not None and fu and float(fu) > 0:
+            kwh_cost = float(fc) / float(fu)
 
+    today = datetime.now(db.EASTERN).date().isoformat()
     days = []
     for row in summaries:
         kwh = float(row.get("kwh") or 0)
@@ -2956,12 +3001,16 @@ async def get_realtime_calendar(refresh: bool = False):
             "kwh": round(kwh, 2),
             "cost": cost,
             "day_offset": row["day_offset"],
+            "is_today": bool(row.get("is_today")),
+            "is_partial": bool(row.get("is_partial")),
         })
 
     months = sorted({d["date"][:7] for d in days}, reverse=True)
     return {
         "success": True,
+        "today": today,
         "kwh_cost": kwh_cost,
+        "billing_period": await _current_billing_period(),
         "days": days,
         "months": months,
         "cached": not refresh,
@@ -3563,11 +3612,6 @@ async def get_ha_entities():
                 
                 result["media_players"].sort(key=lambda x: x["friendly_name"])
                 result["tts_entities"].sort(key=lambda x: x["friendly_name"])
-
-                if result["tts_entities"]:
-                    from ha_tts import resolve_tts_device_id
-                    for tts_ent in result["tts_entities"]:
-                        tts_ent["device_id"] = await resolve_tts_device_id(tts_ent["entity_id"])
                 
     except Exception as e:
         await db.add_log("error", f"Failed to fetch HA entities: {str(e)}")
