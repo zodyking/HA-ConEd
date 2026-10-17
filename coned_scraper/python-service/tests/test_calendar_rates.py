@@ -79,3 +79,28 @@ def test_missing_stored_rate_uses_period_electricity_total():
     priced = price_day_kwh(date(2026, 3, 10), 8, [period, PERIOD_B])
     assert priced["kwh_cost"] == 0.25
     assert priced["cost"] == round(8 * 0.25, 2)
+
+
+def test_open_period_uses_prior_month_rate_and_marks_it_estimated():
+    from calendar_rates import PRIOR_MONTH_ESTIMATE_NOTE
+
+    days = [
+        {"date": "2026-02-10", "kwh": 10},
+        {"date": "2026-03-02", "kwh": 4},
+        {"date": "2025-12-31", "kwh": 10},
+    ]
+    priced = {row["date"]: row for row in price_calendar_days(days, [PERIOD_A, PERIOD_B])}
+
+    february = priced["2026-02-10"]
+    march = priced["2026-03-02"]
+    before = priced["2025-12-31"]
+
+    assert february["rate_estimated"] is False
+    assert february["kwh_cost"] == 0.3184
+    assert march["rate_estimated"] is True
+    assert march["kwh_cost"] == 0.3184
+    assert march["cost"] == round(4 * 0.3184, 2)
+    assert march["rate_shares"][0]["bill_id"] == 2
+    assert before["cost"] is None
+    assert before["rate_estimated"] is False
+    assert PRIOR_MONTH_ESTIMATE_NOTE == "Rates Estimated From Prior Month"

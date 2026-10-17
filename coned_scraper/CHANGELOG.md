@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.100
+
+### Changed
+- Payee breakdown lists each dated underpayment or credit on its own. The extra rollover total is left off when those lines already add up to it
+- The open billing period uses the prior month’s rate until this period is billed, and the day detail marks it “(Rates Estimated From Prior Month)”
+
+### Added
+- The usage calendar alternates colors between billing periods and marks each period’s start and end
+
 ## 1.3.99
 
 ### Added

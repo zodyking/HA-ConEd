@@ -147,7 +147,7 @@ class PayeeRolloverTests(unittest.TestCase):
         self.assertEqual(tenant_b["amount_due"], 150.0)
         self.assertEqual(
             tenant_b["portion_reasons"],
-            ["$100 cycle charge", "$50 rollover balance", "$50 from 10/15/26 underpayment"],
+            ["$100 cycle charge", "$50 from 10/15/26 underpayment"],
         )
         # B paid this cycle only, so October's $50 is still theirs next time.
         self.assertEqual(tenant_b["current_balance"], 50.0)
@@ -164,7 +164,7 @@ class PayeeRolloverTests(unittest.TestCase):
         december = _payee(rows, 2, 1)
         self.assertEqual(
             december["portion_reasons"],
-            ["$200 cycle charge", "$50 rollover balance", "$50 from 10/15/26 underpayment"],
+            ["$200 cycle charge", "$50 from 10/15/26 underpayment"],
         )
         self.assertEqual(december["amount_due"], 250.0)
 
