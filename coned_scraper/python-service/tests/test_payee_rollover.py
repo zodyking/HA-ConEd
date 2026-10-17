@@ -111,6 +111,57 @@ class PayeeRolloverTests(unittest.TestCase):
         self.assertEqual(_payee(rows, 3, 1)["rollover_from_previous"], 90.0)
         self.assertEqual(_payee(rows, 3, 1)["amount_due"], 190.0)
 
+    def test_coned_rollover_stays_with_the_payee_who_underpaid(self):
+        """$200 cycle. A pays $100, B pays $50. Next ConEd bill is $250.
+
+        The $50 is B's underpayment. It is not split, so A does not owe $125.
+        """
+        bills = [
+            {
+                "month": "2026-10",
+                "cycle_date": "10/15/2026",
+                "cycle_total": 200.0,
+                "bill_total": 200.0,
+                "payments": {1: 100.0, 2: 50.0},
+            },
+            {
+                "month": "2026-11",
+                "cycle_date": "11/15/2026",
+                "bill_total": 250.0,
+                "balance_from_previous": 50.0,
+                "payments": {1: 100.0, 2: 100.0},
+            },
+        ]
+        payees = [
+            {"id": 1, "name": "Tenant A", "responsibility_percent": 50},
+            {"id": 2, "name": "Tenant B", "responsibility_percent": 50},
+        ]
+        rows = walk_payee_rollover(bills, payees)
+        tenant_a = _payee(rows, 1, 1)
+        tenant_b = _payee(rows, 1, 2)
+        self.assertEqual(tenant_a["share_of_bill"], 100.0)
+        self.assertEqual(tenant_a["amount_due"], 100.0)
+        self.assertEqual(tenant_a["portion_reasons"], [])
+        self.assertEqual(tenant_a["current_balance"], 0.0)
+        self.assertEqual(tenant_b["share_of_bill"], 100.0)
+        self.assertEqual(tenant_b["amount_due"], 150.0)
+        self.assertEqual(tenant_b["portion_reasons"], ["$50 from 10/15/26 underpayment"])
+        # B paid this cycle only, so October's $50 is still theirs next time.
+        self.assertEqual(tenant_b["current_balance"], 50.0)
+        self.assertEqual(_payee(rows, 0, 2)["current_balance"], 50.0)
+
+    def test_unpaid_rollover_keeps_its_original_bill_date(self):
+        bills = [
+            {"month": "2026-10", "cycle_date": "10/15/2026", "cycle_total": 200.0, "payments": {1: 150.0}},
+            {"month": "2026-11", "cycle_date": "11/15/2026", "cycle_total": 200.0, "payments": {1: 200.0}},
+            {"month": "2026-12", "cycle_date": "12/15/2026", "cycle_total": 200.0, "payments": {1: 0.0}},
+        ]
+        payees = [{"id": 1, "name": "Tenant B", "responsibility_percent": 100}]
+        rows = walk_payee_rollover(bills, payees)
+        december = _payee(rows, 2, 1)
+        self.assertEqual(december["portion_reasons"], ["$50 from 10/15/26 underpayment"])
+        self.assertEqual(december["amount_due"], 250.0)
+
     def test_clear_month_zeroes_a_credit_then_later_bills_carry(self):
         rows = walk_payee_rollover(BILLS, [ALICE, BOB], clear_month="2024-02")
         uncleared = walk_payee_rollover(BILLS, [ALICE, BOB])

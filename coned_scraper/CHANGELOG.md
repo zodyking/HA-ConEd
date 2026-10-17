@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.98
+
+### Fixed
+- Payee splits use the billing cycle’s new charges. Con Edison’s rolled-over balance stays with the payee who underpaid, instead of being divided by responsibility percent
+- Rollover view lists why a portion is higher, for example “$50 from 10/15/26 underpayment”
+
 ## 1.3.97
 
 ### Added

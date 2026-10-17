@@ -27,6 +27,7 @@
         :key="payee.user_id"
         class="ha-payee-row"
       >
+        <div class="ha-payee-main">
         <div class="ha-payee-name">
           {{ payee.name }}
           <span class="ha-payee-pct">{{ payee.responsibility_percent }}%</span>
@@ -52,6 +53,10 @@
             </span>
           </template>
         </div>
+        </div>
+        <ul v-if="showCumulative && reasonLines(payee).length" class="ha-payee-reasons">
+          <li v-for="(line, index) in reasonLines(payee)" :key="index">{{ line }}</li>
+        </ul>
       </div>
     </div>
   </div>
@@ -70,6 +75,7 @@ interface PayeeSummary {
   share_of_bill_cumulative?: number
   rollover_from_previous: number
   current_balance: number
+  portion_reasons?: string[]
   status: 'paid' | 'partial' | 'unpaid'
 }
 
@@ -94,6 +100,10 @@ const summary = computed(() => props.billSummaries[props.billId])
 
 function effectiveShare(payee: PayeeSummary) {
   return props.showCumulative ? (payee.share_of_bill_cumulative ?? payee.share_of_bill ?? 0) : (payee.share_of_bill ?? 0)
+}
+
+function reasonLines(payee: PayeeSummary) {
+  return (payee.portion_reasons || []).filter((line) => line.trim().length > 0)
 }
 
 const hasResponsibilities = computed(() =>
@@ -168,14 +178,28 @@ function isOverPaid(payee: PayeeSummary) {
 .ha-payee-rows { padding: 0.4rem; }
 .ha-payee-row {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  flex-wrap: wrap;
   padding: 0.5rem 0.6rem;
   margin-bottom: 0.3rem;
   background: #fff;
   border-radius: 4px;
   border: 1px solid #e0e0e0;
   font-size: 0.75rem;
+}
+.ha-payee-main {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  gap: 0.5rem;
+}
+.ha-payee-reasons {
+  width: 100%;
+  margin: 0.35rem 0 0;
+  padding-left: 1.1rem;
+  color: #5d4037;
+  font-size: 0.7rem;
+  line-height: 1.4;
 }
 .ha-payee-name { font-weight: 600; min-width: 80px; }
 .ha-payee-pct { font-size: 0.6rem; color: #999; font-weight: 400; margin-left: 0.3rem; }
