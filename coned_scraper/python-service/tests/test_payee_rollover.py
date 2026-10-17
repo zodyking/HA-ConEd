@@ -141,11 +141,14 @@ class PayeeRolloverTests(unittest.TestCase):
         tenant_b = _payee(rows, 1, 2)
         self.assertEqual(tenant_a["share_of_bill"], 100.0)
         self.assertEqual(tenant_a["amount_due"], 100.0)
-        self.assertEqual(tenant_a["portion_reasons"], [])
+        self.assertEqual(tenant_a["portion_reasons"], ["$100 cycle charge", "$0 rollover balance"])
         self.assertEqual(tenant_a["current_balance"], 0.0)
         self.assertEqual(tenant_b["share_of_bill"], 100.0)
         self.assertEqual(tenant_b["amount_due"], 150.0)
-        self.assertEqual(tenant_b["portion_reasons"], ["$50 from 10/15/26 underpayment"])
+        self.assertEqual(
+            tenant_b["portion_reasons"],
+            ["$100 cycle charge", "$50 rollover balance", "$50 from 10/15/26 underpayment"],
+        )
         # B paid this cycle only, so October's $50 is still theirs next time.
         self.assertEqual(tenant_b["current_balance"], 50.0)
         self.assertEqual(_payee(rows, 0, 2)["current_balance"], 50.0)
@@ -159,8 +162,61 @@ class PayeeRolloverTests(unittest.TestCase):
         payees = [{"id": 1, "name": "Tenant B", "responsibility_percent": 100}]
         rows = walk_payee_rollover(bills, payees)
         december = _payee(rows, 2, 1)
-        self.assertEqual(december["portion_reasons"], ["$50 from 10/15/26 underpayment"])
+        self.assertEqual(
+            december["portion_reasons"],
+            ["$200 cycle charge", "$50 rollover balance", "$50 from 10/15/26 underpayment"],
+        )
         self.assertEqual(december["amount_due"], 250.0)
+
+    def test_switches_start_rollover_without_changing_earlier_bills(self):
+        bills = [
+            {"month": "2026-09", "cycle_date": "9/15/2026", "cycle_total": 200.0, "payments": {1: 50.0, 2: 100.0}},
+            {"month": "2026-10", "cycle_date": "10/15/2026", "cycle_total": 200.0, "payments": {1: 100.0, 2: 50.0}},
+            {"month": "2026-11", "cycle_date": "11/15/2026", "cycle_total": 200.0, "payments": {1: 100.0, 2: 100.0}},
+            {"month": "2026-12", "cycle_date": "12/15/2026", "cycle_total": 200.0, "payments": {1: 100.0, 2: 100.0}},
+            {"month": "2027-01", "cycle_date": "1/15/2027", "cycle_total": 200.0, "payments": {1: 0.0, 2: 0.0}},
+        ]
+        payees = [
+            {"id": 1, "name": "Tenant A", "responsibility_percent": 50},
+            {"id": 2, "name": "Tenant B", "responsibility_percent": 50},
+        ]
+        switches = [
+            {"month": "2026-10", "mode": "rollover"},
+            {"month": "2026-12", "mode": "bill_only"},
+            {"month": "2027-01", "mode": "rollover"},
+        ]
+        rows = walk_payee_rollover(bills, payees, switches=switches)
+
+        september = _payee(rows, 0, 2)
+        self.assertFalse(rows[0]["uses_rollover"])
+        self.assertIsNone(rows[0]["calculation_note"])
+        self.assertEqual(september["amount_due"], 100.0)
+        self.assertEqual(september["portion_reasons"][1], "Rollover balance not applied")
+        self.assertEqual(september["current_balance"], 0.0)
+
+        october = rows[1]
+        self.assertTrue(october["uses_rollover"])
+        self.assertEqual(october["calculation_note"]["title"], "Rollover starts October 2026")
+        self.assertIn("earlier bills stay as they were", october["calculation_note"]["body"])
+        self.assertEqual(_payee(rows, 1, 2)["rollover_from_previous"], 0.0)
+        self.assertEqual(_payee(rows, 1, 2)["amount_due"], 100.0)
+        self.assertEqual(_payee(rows, 1, 2)["current_balance"], 50.0)
+
+        november_b = _payee(rows, 2, 2)
+        self.assertEqual(november_b["amount_due"], 150.0)
+        self.assertIn("$50 from 10/15/26 underpayment", november_b["portion_reasons"])
+
+        december = rows[3]
+        self.assertFalse(december["uses_rollover"])
+        self.assertEqual(december["calculation_note"]["title"], "Bill only starts December 2026")
+        self.assertEqual(_payee(rows, 3, 2)["amount_due"], 100.0)
+        self.assertEqual(_payee(rows, 3, 2)["rollover_from_previous"], 0.0)
+
+        january = rows[4]
+        self.assertTrue(january["uses_rollover"])
+        self.assertEqual(january["calculation_note"]["mode"], "rollover")
+        self.assertEqual(_payee(rows, 4, 2)["rollover_from_previous"], 0.0)
+        self.assertEqual(_payee(rows, 4, 2)["amount_due"], 100.0)
 
     def test_clear_month_zeroes_a_credit_then_later_bills_carry(self):
         rows = walk_payee_rollover(BILLS, [ALICE, BOB], clear_month="2024-02")

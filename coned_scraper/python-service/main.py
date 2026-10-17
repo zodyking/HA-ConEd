@@ -29,7 +29,7 @@ import db
 app = FastAPI(title="Con Edison API")
 
 # Code version for deployment verification
-CODE_VERSION = "1.3.98"
+CODE_VERSION = "1.3.99"
 
 @app.on_event("startup")
 async def startup():
@@ -1982,6 +1982,57 @@ async def delete_rollover_clear_endpoint():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     return {"month": None, "label": None}
+
+
+class CalculationSwitchModel(BaseModel):
+    month: str
+    mode: str
+
+
+def _switch_payload(switches):
+    return {
+        "switches": [
+            {
+                "month": item["month"],
+                "mode": item["mode"],
+                "label": db.format_clear_month_label(item["month"]),
+            }
+            for item in switches
+        ]
+    }
+
+
+@app.get("/api/calculation-switches")
+async def get_calculation_switches_endpoint():
+    """Bill-only and rollover start points, oldest first."""
+    try:
+        return _switch_payload(await db.get_calculation_switches())
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/calculation-switches")
+async def put_calculation_switch_endpoint(data: CalculationSwitchModel):
+    """Start a calculation method at a month. Replaces a switch already on that month."""
+    try:
+        switches = await db.set_calculation_switch(data.month, data.mode)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    return _switch_payload(switches)
+
+
+@app.delete("/api/calculation-switches")
+async def delete_calculation_switch_endpoint(month: str):
+    """Remove the switch at one month. Earlier and later switches stay."""
+    try:
+        switches = await db.remove_calculation_switch(month)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    return _switch_payload(switches)
 
 
 @app.get("/api/debug/pending-bill")

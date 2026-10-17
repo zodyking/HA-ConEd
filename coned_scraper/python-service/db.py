@@ -20,7 +20,7 @@ from prisma.models import (
     Bill, Payment, BillDetails, BillDocument, PayeeUser,
     AccountBalanceHistory, ScrapedData, Log, ScrapeHistory, AppSetting
 )
-from payee_rollover import format_cycle_label, settle_bill_payees
+from payee_rollover import format_cycle_label, normalize_switches, settle_bill_payees, span_flags
 from rollover_clear import (
     ROLLOVER_CLEAR_SETTING_KEY,
     bill_month_key,
@@ -2460,6 +2460,52 @@ async def clear_rollover_clear_month() -> None:
     await set_app_setting(ROLLOVER_CLEAR_SETTING_KEY, {"month": None})
 
 
+CALCULATION_SWITCHES_KEY = "calculation_switches"
+
+
+async def get_calculation_switches() -> List[Dict[str, str]]:
+    """Saved method switches. A missing setting falls back to one rollover start.
+
+    An explicit empty list means every bill stays bill only. A stored rollover
+    clear, when no switch list has been saved yet, starts rollover at that month.
+    """
+    raw = await get_app_setting(CALCULATION_SWITCHES_KEY)
+    if raw is None:
+        clear_month = await get_rollover_clear_month()
+        if clear_month:
+            return [{"month": clear_month, "mode": "rollover"}]
+        return []
+    return normalize_switches(raw)
+
+
+async def set_calculation_switch(month: str, mode: str) -> List[Dict[str, str]]:
+    """Add or replace the switch at one month. Raises ValueError when invalid."""
+    normalized = normalize_clear_month(month)
+    if not normalized:
+        raise ValueError("month must be YYYY-MM")
+    if mode not in {"bill_only", "rollover"}:
+        raise ValueError("mode must be bill_only or rollover")
+    raw = await get_app_setting(CALCULATION_SWITCHES_KEY)
+    current = [] if raw is None else normalize_switches(raw)
+    by_month = {item["month"]: item["mode"] for item in current}
+    by_month[normalized] = mode
+    switches = [{"month": key, "mode": by_month[key]} for key in sorted(by_month)]
+    await set_app_setting(CALCULATION_SWITCHES_KEY, {"switches": switches})
+    return switches
+
+
+async def remove_calculation_switch(month: str) -> List[Dict[str, str]]:
+    """Remove one switch. The stored list may become empty."""
+    normalized = normalize_clear_month(month)
+    if not normalized:
+        raise ValueError("month must be YYYY-MM")
+    raw = await get_app_setting(CALCULATION_SWITCHES_KEY)
+    current = [] if raw is None else normalize_switches(raw)
+    switches = [item for item in current if item["month"] != normalized]
+    await set_app_setting(CALCULATION_SWITCHES_KEY, {"switches": switches})
+    return switches
+
+
 def payee_remaining_for_balance_reminder(
     pr: Dict[str, Any], breakdown_show_rollover: bool
 ) -> float:
@@ -2468,6 +2514,10 @@ def payee_remaining_for_balance_reminder(
     Cumulative when breakdown_show_rollover; else current-bill share only (matches BillPayeeSummary).
     """
     ap = float(pr.get("amount_paid") or 0)
+    # amount_due already follows that bill's method: cycle only, or cycle plus rollover.
+    if pr.get("uses_rollover") is not None or pr.get("amount_due") is not None:
+        ad = float(pr.get("amount_due") or 0)
+        return max(0.0, ad - ap)
     if breakdown_show_rollover:
         ad = float(pr.get("amount_due") or 0)
         return max(0.0, ad - ap)
@@ -3519,6 +3569,7 @@ async def get_ledger_data() -> Dict[str, Any]:
     pending_new_bill = await compute_pending_new_bill_state(reference_bill_for_pending, account_balance)
 
     rollover_clear_month = await get_rollover_clear_month()
+    calculation_switches = await get_calculation_switches()
 
     return {
         "account_balance": account_balance,
@@ -3532,6 +3583,14 @@ async def get_ledger_data() -> Dict[str, Any]:
             "month": rollover_clear_month,
             "label": format_clear_month_label(rollover_clear_month) if rollover_clear_month else None,
         },
+        "calculation_switches": [
+            {
+                "month": item["month"],
+                "mode": item["mode"],
+                "label": format_clear_month_label(item["month"]),
+            }
+            for item in calculation_switches
+        ],
     }
 
 # =============================================================================
@@ -3559,8 +3618,8 @@ async def calculate_all_payee_balances() -> List[Dict[str, Any]]:
         {"id": u.id, "name": u.name, "responsibility_percent": u.responsibilityPercent}
         for u in users
     ]
-    # One marker: zero incoming rollover at the first bill on or after this month.
-    clear_marker = await get_rollover_clear_month()
+    switches = await get_calculation_switches()
+    previous_mode = None
     
     for bill in reversed(bills):  # Process oldest first for rollover
         bill_total = decimal_to_float(bill.billTotal) or 0
@@ -3607,7 +3666,10 @@ async def calculate_all_payee_balances() -> List[Dict[str, Any]]:
         if cycle_total is None:
             cycle_total = bill_total
         origin = format_cycle_label(bill.billCycleDate) or bill_month or "a previous bill"
-        payee_rows, rollover_by_user, items_by_user, clear_marker = settle_bill_payees(
+        use_rollover, reset_incoming, note, previous_mode = span_flags(
+            bill_month, switches, previous_mode
+        )
+        payee_rows, rollover_by_user, items_by_user, _clear_marker = settle_bill_payees(
             payee_inputs,
             payments_by_user,
             rollover_by_user,
@@ -3615,8 +3677,12 @@ async def calculate_all_payee_balances() -> List[Dict[str, Any]]:
             cycle_total,
             origin,
             bill_month,
-            clear_marker,
+            None,
+            use_rollover=use_rollover,
+            reset_incoming=reset_incoming,
         )
+        bill_result["uses_rollover"] = use_rollover
+        bill_result["calculation_note"] = note
         bill_result["payees"].extend(payee_rows)
         
         results.append(bill_result)
@@ -3652,6 +3718,7 @@ def _format_payee_summaries_for_frontend(raw: List[Dict[str, Any]]) -> Dict[int,
                 "rollover_from_previous": p.get("rollover_from_previous", 0),
                 "current_balance": p.get("current_balance", 0),
                 "portion_reasons": p.get("portion_reasons") or [],
+                "uses_rollover": p.get("uses_rollover", False),
                 "status": "paid" if p.get("status") == "paid" else "partial" if p.get("status") == "overpaid" else "unpaid",
             }
             for p in s.get("payees") or []
@@ -3662,6 +3729,8 @@ def _format_payee_summaries_for_frontend(raw: List[Dict[str, Any]]) -> Dict[int,
             "total_paid": total_paid,
             "bill_balance": bill_balance,
             "bill_status": bill_status,
+            "uses_rollover": s.get("uses_rollover", False),
+            "calculation_note": s.get("calculation_note"),
             "payee_summaries": payee_summaries,
         }
     return out

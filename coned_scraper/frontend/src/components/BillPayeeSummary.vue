@@ -4,6 +4,10 @@
     Set payee responsibilities in Settings → Payees
   </div>
   <div v-else class="ha-payee-summary">
+    <div v-if="summary.calculation_note" class="ha-calc-note">
+      <p class="ha-calc-note-title">{{ summary.calculation_note.title }}</p>
+      <p class="ha-calc-note-body">{{ summary.calculation_note.body }}</p>
+    </div>
     <div
       class="ha-payee-header"
       :class="summary.bill_status"
@@ -17,7 +21,7 @@
         </template>
       </span>
       <span class="ha-payee-header-right">
-        <span class="ha-payee-mode-label">{{ showCumulative ? 'Rollover' : 'Bill only' }}</span>
+        <span class="ha-payee-mode-label">{{ usesRollover ? 'Rollover' : 'Bill only' }}</span>
         <span class="ha-payee-toggle">{{ expanded ? '▼' : '▶' }}</span>
       </span>
     </div>
@@ -54,7 +58,7 @@
           </template>
         </div>
         </div>
-        <ul v-if="showCumulative && reasonLines(payee).length" class="ha-payee-reasons">
+        <ul v-if="reasonLines(payee).length" class="ha-payee-reasons">
           <li v-for="(line, index) in reasonLines(payee)" :key="index">{{ line }}</li>
         </ul>
       </div>
@@ -79,12 +83,21 @@ interface PayeeSummary {
   status: 'paid' | 'partial' | 'unpaid'
 }
 
+interface CalculationNote {
+  title: string
+  body: string
+  mode?: string
+  label?: string
+}
+
 interface BillSummaryData {
   bill_id: number
   bill_total: number
   total_paid: number
   bill_balance: number
   bill_status: 'paid' | 'partial' | 'unpaid'
+  uses_rollover?: boolean
+  calculation_note?: CalculationNote | null
   payee_summaries: PayeeSummary[]
 }
 
@@ -98,8 +111,13 @@ const expanded = ref(true)
 
 const summary = computed(() => props.billSummaries[props.billId])
 
+const usesRollover = computed(() => {
+  if (typeof summary.value?.uses_rollover === 'boolean') return summary.value.uses_rollover
+  return props.showCumulative === true
+})
+
 function effectiveShare(payee: PayeeSummary) {
-  return props.showCumulative ? (payee.share_of_bill_cumulative ?? payee.share_of_bill ?? 0) : (payee.share_of_bill ?? 0)
+  return usesRollover.value ? (payee.share_of_bill_cumulative ?? payee.share_of_bill ?? 0) : (payee.share_of_bill ?? 0)
 }
 
 function reasonLines(payee: PayeeSummary) {
@@ -152,6 +170,25 @@ function isOverPaid(payee: PayeeSummary) {
   border-radius: 6px;
   border: 1px solid #e8e8e8;
   overflow: hidden;
+}
+.ha-calc-note {
+  margin: 0;
+  padding: 0.55rem 0.7rem;
+  background: #f3f9fc;
+  border-bottom: 1px solid #d7ebf5;
+  border-left: 3px solid #03a9f4;
+}
+.ha-calc-note-title {
+  margin: 0 0 0.2rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #01579b;
+}
+.ha-calc-note-body {
+  margin: 0;
+  font-size: 0.7rem;
+  line-height: 1.4;
+  color: #37474f;
 }
 .ha-payee-header {
   display: flex;

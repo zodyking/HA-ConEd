@@ -82,60 +82,44 @@
           </div>
         </div>
 
-        <div class="ha-breakdown-setting" style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #e0e0e0;">
-          <label class="ha-breakdown-label">
-            <input v-model="breakdownShowRollover" type="checkbox" :disabled="breakdownSaving" @change="handleBreakdownChange" />
-            {{ breakdownShowRollover ? 'Rollover' : 'Bill only' }}
-          </label>
-          <div class="ha-breakdown-desc">Breakdown view in ledger: show current bill only, or cumulative rollover</div>
-        </div>
-
-        <section class="ha-rollover-clear" aria-labelledby="rollover-clear-heading">
-          <h3 id="rollover-clear-heading" class="ha-rollover-clear-title">Rollover balance</h3>
+        <section class="ha-rollover-clear" aria-labelledby="calc-switch-heading">
+          <h3 id="calc-switch-heading" class="ha-rollover-clear-title">How payee shares are counted</h3>
           <p class="ha-breakdown-desc ha-rollover-clear-desc">
-            Bills from the chosen month on start from zero. Earlier bills stay the same.
+            Bill only fits a household where everyone pays their share in full each month. Each bill stands on its own.
           </p>
-          <p v-if="rolloverClearError" class="ha-rollover-clear-error" role="alert">{{ rolloverClearError }}</p>
-          <p v-if="rolloverClearStatus === 'loading'" class="ha-rollover-clear-empty">Loading rollover setting…</p>
-          <template v-else-if="rolloverClearStatus === 'ready' && rolloverClearMonth">
-            <p class="ha-rollover-clear-note" aria-live="polite">
-              Rollover balance cleared starting {{ rolloverClearLabel }}
-            </p>
-            <button
-              type="button"
-              class="ha-rollover-undo"
-              :disabled="rolloverClearSaving"
-              @click="undoRolloverClear"
-            >
-              {{ rolloverClearSaving ? 'Undoing…' : 'Undo' }}
-            </button>
-          </template>
-          <p v-else-if="rolloverClearStatus === 'ready' && rolloverMonthOptions.length === 0" class="ha-rollover-clear-empty">
-            No bill months available to clear.
+          <p class="ha-breakdown-desc ha-rollover-clear-desc">
+            Rollover fits a household that needs an unpaid amount carried onto the next bill. It starts clean at the month you choose, and earlier bills stay as they were.
           </p>
-          <form
-            v-else-if="rolloverClearStatus === 'ready'"
-            class="ha-rollover-clear-form"
-            @submit.prevent="requestRolloverClear"
-          >
-            <label class="ha-rollover-clear-label" for="rollover-clear-month">Starting month</label>
-            <select
-              id="rollover-clear-month"
-              v-model="selectedRolloverMonth"
-              :disabled="rolloverClearSaving"
-            >
+          <p v-if="switchError" class="ha-rollover-clear-error" role="alert">{{ switchError }}</p>
+          <p v-if="switchStatus === 'loading'" class="ha-rollover-clear-empty">Loading calculation switches…</p>
+          <ul v-else-if="calculationSwitches.length" class="ha-switch-list">
+            <li v-for="item in calculationSwitches" :key="item.month" class="ha-switch-item">
+              <span>{{ item.mode === 'rollover' ? 'Rollover' : 'Bill only' }} starts {{ item.label || formatMonthLabel(item.month) }}</span>
+              <button type="button" class="ha-rollover-undo" :disabled="switchSaving" @click="removeCalculationSwitch(item.month)">
+                Remove
+              </button>
+            </li>
+          </ul>
+          <p v-else-if="switchStatus === 'ready'" class="ha-rollover-clear-empty">
+            No switches yet. Every bill uses bill only until you add one.
+          </p>
+          <form v-if="switchStatus === 'ready' && rolloverMonthOptions.length" class="ha-rollover-clear-form" @submit.prevent="addCalculationSwitch">
+            <label class="ha-rollover-clear-label" for="calc-switch-month">Starting month</label>
+            <select id="calc-switch-month" v-model="selectedRolloverMonth" :disabled="switchSaving">
               <option v-for="opt in rolloverMonthOptions" :key="opt.month" :value="opt.month">
                 {{ opt.optionLabel }}
               </option>
             </select>
-            <button
-              type="submit"
-              class="ha-rollover-clear-btn"
-              :disabled="rolloverClearSaving || !selectedRolloverMonth"
-            >
-              {{ rolloverClearSaving ? 'Clearing…' : `Clear rollover starting ${selectedRolloverLabel}` }}
+            <label class="ha-rollover-clear-label" for="calc-switch-mode">Method</label>
+            <select id="calc-switch-mode" v-model="selectedSwitchMode" :disabled="switchSaving">
+              <option value="rollover">Rollover</option>
+              <option value="bill_only">Bill only</option>
+            </select>
+            <button type="submit" class="ha-rollover-clear-btn" :disabled="switchSaving || !selectedRolloverMonth">
+              {{ switchSaving ? 'Saving…' : `Start ${selectedSwitchMode === 'rollover' ? 'rollover' : 'bill only'} ${selectedRolloverLabel}` }}
             </button>
           </form>
+          <p v-else-if="switchStatus === 'ready'" class="ha-rollover-clear-empty">No bill months available yet.</p>
         </section>
         <div v-if="totalResponsibility > 0 && Math.abs(totalResponsibility - 100) > 0.1" class="ha-warn">Total: {{ totalResponsibility.toFixed(1) }}% — must equal 100%</div>
         <button v-if="users.length" type="button" class="ha-button ha-button-primary" :disabled="isLoading || (totalResponsibility > 0 && Math.abs(totalResponsibility - 100) > 0.1)" @click="handleSaveResponsibilities">{{ isLoading ? 'Saving...' : 'Save Responsibilities' }}</button>
@@ -855,6 +839,18 @@ const rolloverMonthOptions = computed(() => {
     }))
 })
 
+interface CalculationSwitch {
+  month: string
+  mode: 'bill_only' | 'rollover'
+  label?: string | null
+}
+
+const calculationSwitches = ref<CalculationSwitch[]>([])
+const switchStatus = ref<'loading' | 'ready' | 'error'>('loading')
+const switchSaving = ref(false)
+const switchError = ref<string | null>(null)
+const selectedSwitchMode = ref<'bill_only' | 'rollover'>('rollover')
+
 const selectedRolloverLabel = computed(() => {
   const match = rolloverMonthOptions.value.find((opt) => opt.month === selectedRolloverMonth.value)
   return match?.label || (selectedRolloverMonth.value ? formatMonthLabel(selectedRolloverMonth.value) : 'the selected month')
@@ -876,6 +872,79 @@ watch(rolloverConfirmOpen, async (open) => {
   await nextTick()
   rolloverConfirmButton.value?.focus()
 })
+
+async function loadCalculationSwitches() {
+  switchStatus.value = 'loading'
+  switchError.value = null
+  try {
+    const [switchRes, ledgerRes] = await Promise.all([
+      fetch(`${getApiBase()}/calculation-switches`),
+      fetch(`${getApiBase()}/ledger`),
+    ])
+    if (!switchRes.ok) {
+      switchStatus.value = 'error'
+      switchError.value = "Couldn't load the calculation switches."
+      return
+    }
+    const data = await switchRes.json()
+    calculationSwitches.value = Array.isArray(data?.switches) ? data.switches : []
+    if (ledgerRes.ok) {
+      const ledger = await ledgerRes.json()
+      rolloverBills.value = Array.isArray(ledger?.bills) ? ledger.bills : []
+    }
+    switchStatus.value = 'ready'
+  } catch {
+    switchStatus.value = 'error'
+    switchError.value = "Couldn't load the calculation switches."
+  }
+}
+
+async function addCalculationSwitch() {
+  const month = selectedRolloverMonth.value
+  if (!month || switchSaving.value) return
+  const methodLabel = selectedSwitchMode.value === 'rollover' ? 'rollover' : 'bill only'
+  const label = selectedRolloverLabel.value
+  if (!confirm(`Start ${methodLabel} in ${label}? Earlier bills stay on their current method.`)) return
+  switchSaving.value = true
+  switchError.value = null
+  try {
+    const res = await fetch(`${getApiBase()}/calculation-switches`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ month, mode: selectedSwitchMode.value }),
+    })
+    if (!res.ok) {
+      switchError.value = "Couldn't save that switch. Nothing was changed."
+      return
+    }
+    const data = await res.json()
+    calculationSwitches.value = Array.isArray(data?.switches) ? data.switches : calculationSwitches.value
+  } catch {
+    switchError.value = "Couldn't save that switch. Nothing was changed."
+  } finally {
+    switchSaving.value = false
+  }
+}
+
+async function removeCalculationSwitch(month: string) {
+  if (switchSaving.value) return
+  if (!confirm(`Remove the switch for ${formatMonthLabel(month)}?`)) return
+  switchSaving.value = true
+  switchError.value = null
+  try {
+    const res = await fetch(`${getApiBase()}/calculation-switches?month=${encodeURIComponent(month)}`, { method: 'DELETE' })
+    if (!res.ok) {
+      switchError.value = "Couldn't remove that switch. It is still in place."
+      return
+    }
+    const data = await res.json()
+    calculationSwitches.value = Array.isArray(data?.switches) ? data.switches : []
+  } catch {
+    switchError.value = "Couldn't remove that switch. It is still in place."
+  } finally {
+    switchSaving.value = false
+  }
+}
 
 async function loadRolloverClearControl() {
   rolloverClearStatus.value = 'loading'
@@ -969,7 +1038,7 @@ onMounted(() => {
   loadPaymentsData()
   loadAppSettings()
   loadHaUsersAndServices()
-  loadRolloverClearControl()
+  loadCalculationSwitches()
 })
 </script>
 
@@ -1087,6 +1156,25 @@ onMounted(() => {
   margin-top: 1rem;
   padding-top: 1rem;
   border-top: 1px solid #e0e0e0;
+}
+.ha-switch-list {
+  list-style: none;
+  margin: 0.6rem 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.ha-switch-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.6rem;
+  background: #f3f9fc;
+  border: 1px solid #d7ebf5;
+  border-radius: 6px;
+  font-size: 0.85rem;
 }
 .ha-rollover-clear-title {
   margin: 0 0 0.25rem;
