@@ -2,6 +2,7 @@
 Shared PDF download and store logic.
 Used by both the API (manual download) and the scraper (auto-download).
 """
+import asyncio
 import os
 
 import db
@@ -51,7 +52,7 @@ async def download_and_store_pdf(pdf_url: str, bill_id: int) -> dict:
     try:
         from pdf_parser import parse_coned_bill_pdf
 
-        parsed_data = parse_coned_bill_pdf(str(pdf_path))
+        parsed_data = await asyncio.to_thread(parse_coned_bill_pdf, str(pdf_path))
         if "error" not in parsed_data:
             kwargs = db.filter_bill_detail_kwargs(parsed_data)
             await db.upsert_bill_details(bill_id, **kwargs)

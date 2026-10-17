@@ -36,6 +36,26 @@ class MeterService:
         self._opower = None
         self._session = None
         self._accounts: List[Any] = []
+        self._fetch_lock = asyncio.Lock()
+
+    async def _close_session(self) -> None:
+        session = getattr(self, "_session", None)
+        self._session = None
+        if session is None or getattr(session, "closed", True):
+            return
+        try:
+            await session.close()
+        except Exception as e:
+            logger.warning("Failed to close meter HTTP session: %s", e)
+
+    async def _acquire_meter_slot(self, label: str) -> bool:
+        """One meter fetch at a time. Overlapping Opower calls pile up and exhaust the process."""
+        try:
+            await asyncio.wait_for(self._fetch_lock.acquire(), timeout=1)
+            return True
+        except asyncio.TimeoutError:
+            logger.warning("Skipping overlapping meter fetch (%s)", label)
+            return False
     
     def is_configured(self) -> bool:
         """Check if meter service is properly configured.
@@ -77,12 +97,11 @@ class MeterService:
                     # Failed to decrypt, use as-is
                     pass
             
-            # Close existing session if any
-            if hasattr(self, '_session') and self._session:
-                await self._session.close()
-            
-            # Create session with opower's cookie jar (required for proper auth)
-            self._session = aiohttp.ClientSession(cookie_jar=create_cookie_jar())
+            await self._close_session()
+            self._session = aiohttp.ClientSession(
+                cookie_jar=create_cookie_jar(),
+                timeout=aiohttp.ClientTimeout(total=45, connect=10, sock_read=30),
+            )
             
             # Initialize opower with ConEd utility (pass utility name as string)
             self._opower = Opower(
@@ -98,9 +117,11 @@ class MeterService:
             
         except ImportError as e:
             logger.error(f"opower library not installed: {e}")
+            await self._close_session()
             return False
         except Exception as e:
             logger.error(f"Failed to initialize meter service: {e}")
+            await self._close_session()
             return False
     
     async def _login(self) -> bool:
@@ -131,6 +152,21 @@ class MeterService:
         return self._accounts
     
     async def fetch_reading(self) -> Optional[Dict[str, Any]]:
+        """Fetch the latest meter reading. Overlapping calls are skipped; hung calls time out."""
+        if not self.is_configured():
+            logger.error("Meter not configured")
+            return None
+        if not await self._acquire_meter_slot("reading"):
+            return self.last_reading
+        try:
+            return await asyncio.wait_for(self._fetch_reading_impl(), timeout=90)
+        except asyncio.TimeoutError:
+            logger.error("Meter reading fetch timed out after 90s")
+            return None
+        finally:
+            self._fetch_lock.release()
+
+    async def _fetch_reading_impl(self) -> Optional[Dict[str, Any]]:
         """Fetch the latest meter reading from Con Edison using hourly historical data.
         
         Uses opower's hourly usage API which provides data typically delayed 1-24 hours.
@@ -200,6 +236,20 @@ class MeterService:
             return None
     
     async def fetch_forecast(self) -> Optional[Dict[str, Any]]:
+        """Fetch the current billing period forecast. Overlapping calls are skipped."""
+        if not self.is_configured():
+            return None
+        if not await self._acquire_meter_slot("forecast"):
+            return await self.get_cached_forecast()
+        try:
+            return await asyncio.wait_for(self._fetch_forecast_impl(), timeout=90)
+        except asyncio.TimeoutError:
+            logger.error("Meter forecast fetch timed out after 90s")
+            return None
+        finally:
+            self._fetch_lock.release()
+
+    async def _fetch_forecast_impl(self) -> Optional[Dict[str, Any]]:
         """Fetch the current billing period forecast from Con Edison."""
         if not self.is_configured():
             return None
@@ -239,6 +289,21 @@ class MeterService:
         return await db.get_meter_forecast_db()
     
     async def fetch_quarter_hour_reads(self, hours: int = 24) -> List[Dict[str, Any]]:
+        """Fetch quarter-hour usage. A second caller does not start another Opower session."""
+        if not self.is_configured():
+            logger.error("Meter not configured")
+            return []
+        if not await self._acquire_meter_slot("quarter-hour"):
+            return []
+        try:
+            return await asyncio.wait_for(self._fetch_quarter_hour_reads_impl(hours), timeout=90)
+        except asyncio.TimeoutError:
+            logger.error("Quarter-hour meter fetch timed out after 90s")
+            return []
+        finally:
+            self._fetch_lock.release()
+
+    async def _fetch_quarter_hour_reads_impl(self, hours: int = 24) -> List[Dict[str, Any]]:
         """Fetch quarter-hour (15-minute) usage data for real-time chart.
         
         Con Edison API limits each request to ~6 days. We fetch in 6-day chunks
@@ -440,9 +505,7 @@ class MeterService:
             self._polling_task = None
         
         # Close session
-        if hasattr(self, '_session') and self._session:
-            await self._session.close()
-            self._session = None
+        await self._close_session()
         
         logger.info("Meter polling stopped")
 

@@ -124,14 +124,16 @@
       @close="showPdfModal = false; viewingBillId = null"
     />
 
-    <!-- Loading -->
-    <div v-if="isLoading" class="ha-loading-state">
+    <RefreshStatus :phase="refreshPhase" :message="refreshMessage" />
+
+    <!-- Loading (only when nothing cached is ready to show) -->
+    <div v-if="isLoading && !ledgerData" class="ha-loading-state">
       <img :src="ajaxLoader" alt="Loading" class="ha-loading-img" />
       <div class="ha-loading-text">Loading account ledger...</div>
     </div>
 
     <!-- API Error -->
-    <div v-else-if="apiError" class="ha-error-state">{{ apiError }}</div>
+    <div v-else-if="apiError && !ledgerData" class="ha-error-state">{{ apiError }}</div>
 
     <!-- No Data -->
     <div
@@ -473,8 +475,11 @@ import { formatDate } from '../lib/timezone'
 import { getApiBase } from '../lib/api-base'
 import { ajaxLoader } from '../lib/assets'
 import { isInHaPanel, getHaUserId, getHaUserName } from '../lib/ha-user-admin'
+import { LEDGER_CACHE_KEY, readPageCache, writePageCache } from '../lib/page-cache'
+import { useRefreshStatus } from '../lib/refresh-status'
 import PdfViewer from './PdfViewer.vue'
 import BillPayeeSummary from './BillPayeeSummary.vue'
+import RefreshStatus from './RefreshStatus.vue'
 
 function normalizeHaUserId(id: string | null | undefined): string {
   return String(id ?? '').trim()
@@ -547,10 +552,35 @@ interface LedgerData {
   pending_new_bill?: PendingNewBill
 }
 
-const ledgerData = ref<LedgerData | null>(null)
+interface LedgerCachePayload {
+  ledger: LedgerData
+  petitionsEnabled: boolean
+}
+
+function isLedgerCachePayload(value: unknown): value is LedgerCachePayload {
+  if (!value || typeof value !== 'object') return false
+  const record = value as { ledger?: unknown; petitionsEnabled?: unknown }
+  if (typeof record.petitionsEnabled !== 'boolean') return false
+  const ledger = record.ledger
+  if (!ledger || typeof ledger !== 'object') return false
+  const bills = (ledger as { bills?: unknown }).bills
+  const orphans = (ledger as { orphan_payments?: unknown }).orphan_payments
+  return Array.isArray(bills) && Array.isArray(orphans)
+}
+
+const cachedLedger = readPageCache(LEDGER_CACHE_KEY, isLedgerCachePayload)
+const ledgerData = ref<LedgerData | null>(cachedLedger?.payload.ledger ?? null)
 const screenshotPath = ref<string | null>(null)
-const isLoading = ref(true)
+const isLoading = ref(cachedLedger === null)
 const apiError = ref<string | null>(null)
+const {
+  phase: refreshPhase,
+  message: refreshMessage,
+  setUpdating: setRefreshUpdating,
+  setUpdated: setRefreshUpdated,
+  setError: setRefreshError,
+  reset: resetRefreshStatus,
+} = useRefreshStatus()
 const showScreenshotModal = ref(false)
 const showPdfModal = ref(false)
 const viewingBillId = ref<number | null>(null)
@@ -571,7 +601,7 @@ const breakdownShowRollover = ref(false)
 const unclaimLoading = ref(false)
 const petitionLoading = ref(false)
 const claimLoading = ref(false)
-const petitionsEnabled = ref(true)
+const petitionsEnabled = ref(cachedLedger?.payload.petitionsEnabled ?? true)
 
 /** Single sheet: Claim / Unclaim / Petition */
 const paymentSheetPayment = ref<Payment | null>(null)
@@ -1086,55 +1116,113 @@ function formatPendingCharges(n: number): string {
   return v.toFixed(2)
 }
 
+let ledgerRequestGen = 0
+
+function applyLedgerApiData(data: any) {
+  const next: LedgerData = {
+    ...data,
+    bills: Array.isArray(data.bills) ? data.bills : [],
+    orphan_payments: Array.isArray(data.orphan_payments) ? data.orphan_payments : [],
+    payee_summaries:
+      data.payee_summaries && typeof data.payee_summaries === 'object'
+        ? data.payee_summaries
+        : {},
+  }
+  const petitions = data.petitions_enabled !== false
+  ledgerData.value = next
+  petitionsEnabled.value = petitions
+  writePageCache(LEDGER_CACHE_KEY, { ledger: next, petitionsEnabled: petitions })
+}
+
+function applyLegacyScraped(scraped: any) {
+  const next: LedgerData = {
+    account_balance: scraped.data?.account_balance || null,
+    balance_updated_at: scraped.timestamp,
+    latest_payment: null,
+    latest_bill: null,
+    bills: [],
+    orphan_payments: [],
+  }
+  ledgerData.value = next
+  if (scraped.screenshot_path) screenshotPath.value = scraped.screenshot_path
+  writePageCache(LEDGER_CACHE_KEY, {
+    ledger: next,
+    petitionsEnabled: petitionsEnabled.value,
+  })
+}
+
+async function loadScreenshot() {
+  try {
+    const api = getApiBase()
+    const screenshotRes = await fetch(`${api}/scraped-data?limit=1`)
+    if (!screenshotRes.ok) return
+    const screenshotData = await screenshotRes.json()
+    if (screenshotData.data?.[0]?.screenshot_path) {
+      screenshotPath.value = screenshotData.data[0].screenshot_path
+    }
+  } catch {
+    /* Screenshot is optional and must not blank the ledger. */
+  }
+}
+
 async function loadLedgerData() {
+  const requestGen = ++ledgerRequestGen
+  const showingKnownData = ledgerData.value != null
+  if (showingKnownData) {
+    setRefreshUpdating('Updating ledger…')
+  } else {
+    isLoading.value = true
+    apiError.value = null
+  }
+
+  let applied = false
+  let serverReachable = false
   try {
     const api = getApiBase()
     const response = await fetch(`${api}/ledger`)
+    serverReachable = true
+    if (requestGen !== ledgerRequestGen) return
+
     if (response.ok) {
       const data = await response.json()
-      ledgerData.value = {
-        ...data,
-        bills: Array.isArray(data.bills) ? data.bills : [],
-        orphan_payments: Array.isArray(data.orphan_payments) ? data.orphan_payments : [],
-        payee_summaries:
-          data.payee_summaries && typeof data.payee_summaries === 'object'
-            ? data.payee_summaries
-            : {},
-      }
-      petitionsEnabled.value = data.petitions_enabled !== false
+      if (requestGen !== ledgerRequestGen) return
+      applyLedgerApiData(data)
       apiError.value = null
+      applied = true
     } else {
       const legacyResponse = await fetch(`${api}/scraped-data?limit=1`)
+      if (requestGen !== ledgerRequestGen) return
       if (legacyResponse.ok) {
         const legacyData = await legacyResponse.json()
+        if (requestGen !== ledgerRequestGen) return
         if (legacyData.data?.[0]) {
-          const scraped = legacyData.data[0]
-          ledgerData.value = {
-            account_balance: scraped.data?.account_balance || null,
-            balance_updated_at: scraped.timestamp,
-            latest_payment: null,
-            latest_bill: null,
-            bills: [],
-            orphan_payments: [],
-          }
-          screenshotPath.value = scraped.screenshot_path || null
+          applyLegacyScraped(legacyData.data[0])
+          apiError.value = null
+          applied = true
         }
-      } else {
+      } else if (!ledgerData.value) {
         apiError.value = 'Failed to load ledger data'
       }
     }
-    const screenshotRes = await fetch(`${api}/scraped-data?limit=1`)
-    if (screenshotRes.ok) {
-      const screenshotData = await screenshotRes.json()
-      if (screenshotData.data?.[0]?.screenshot_path) {
-        screenshotPath.value = screenshotData.data[0].screenshot_path
-      }
-    }
   } catch {
-    apiError.value = "Cannot connect to Python service. Make sure it's running on port 8000."
+    if (requestGen !== ledgerRequestGen) return
+    if (!ledgerData.value) {
+      apiError.value = "Cannot connect to Python service. Make sure it's running on port 8000."
+    }
   } finally {
-    isLoading.value = false
-    initializeExpandedState()
+    if (requestGen === ledgerRequestGen) {
+      isLoading.value = false
+      initializeExpandedState()
+      if (applied) {
+        setRefreshUpdated('Ledger updated')
+      } else if (ledgerData.value) {
+        apiError.value = null
+        setRefreshError("Couldn't refresh the ledger. Showing the last saved data.")
+      } else {
+        resetRefreshStatus()
+      }
+      if (serverReachable) void loadScreenshot()
+    }
   }
 }
 

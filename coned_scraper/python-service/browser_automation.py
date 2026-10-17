@@ -512,6 +512,12 @@ async def perform_login(username: str, password: str, totp_code: str, test_only:
             await db.save_scraped_data({}, "error", error_msg, None)
             await browser.close()
             raise
+        except BaseException:
+            try:
+                await browser.close()
+            except Exception:
+                logger.warning("Browser close failed after cancellation")
+            raise
 
 async def scrape_account_data(page, context):
     """

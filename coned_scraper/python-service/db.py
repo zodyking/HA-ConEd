@@ -2,6 +2,7 @@
 Database module using Prisma ORM with PostgreSQL.
 Provides async database operations for the ConEd Scraper addon.
 """
+import asyncio
 import json
 import logging
 import hashlib
@@ -19,6 +20,16 @@ from prisma.models import (
     Bill, Payment, BillDetails, BillDocument, PayeeUser,
     AccountBalanceHistory, ScrapedData, Log, ScrapeHistory, AppSetting
 )
+from payee_rollover import portion_of_bill, settle_payee_bill
+from rollover_clear import (
+    ROLLOVER_CLEAR_SETTING_KEY,
+    apply_rollover_clear_at_bill,
+    bill_month_key,
+    format_clear_month_label,
+    marker_from_setting,
+    normalize_clear_month,
+)
+from safe_values import aware_datetime, charge_total, safe_float
 
 logger = logging.getLogger(__name__)
 
@@ -143,10 +154,35 @@ async def _raw_conn():
         raise RuntimeError("DATABASE_URL not set")
     return await asyncpg.connect(url)
 
+_connect_lock: Optional[asyncio.Lock] = None
+
+
+def _get_connect_lock() -> asyncio.Lock:
+    """Create the lock on the running loop. Concurrent connect() calls crash Prisma."""
+    global _connect_lock
+    if _connect_lock is None:
+        _connect_lock = asyncio.Lock()
+    return _connect_lock
+
+
 async def ensure_connected():
-    """Ensure database is connected"""
-    if not db.is_connected():
-        await connect()
+    """Ensure database is connected. Concurrent callers share one connect()."""
+    if db.is_connected():
+        return
+    async with _get_connect_lock():
+        if not db.is_connected():
+            await connect()
+
+
+async def reconnect():
+    """Drop a dead Prisma engine and connect again. Serialized with ensure_connected."""
+    async with _get_connect_lock():
+        try:
+            if db.is_connected():
+                await db.disconnect()
+        except Exception as e:
+            logger.warning("Prisma disconnect failed during reconnect: %s", e)
+        await db.connect()
 
 # =============================================================================
 # Helper Functions
@@ -243,12 +279,8 @@ def model_to_dict(model) -> Dict[str, Any]:
     return dict(model)
 
 def decimal_to_float(val) -> Optional[float]:
-    """Convert Decimal to float safely"""
-    if val is None:
-        return None
-    if isinstance(val, Decimal):
-        return float(val)
-    return float(val)
+    """Convert Decimal to float safely. Bad values return None instead of raising."""
+    return safe_float(val)
 
 # =============================================================================
 # Bills
@@ -420,45 +452,56 @@ async def get_bill_history_for_graph() -> List[Dict[str, Any]]:
     
     results = []
     for bill in bills:
-        kwh_used = decimal_to_float(bill.details.kwhUsed) if bill.details else 0
-        
-        result = {
-            "bill_id": bill.id,
-            "month_range": bill.monthRange,
-            "bill_cycle_date": bill.billCycleDate.strftime("%m/%d/%Y") if bill.billCycleDate else None,
-            "bill_total": f"${decimal_to_float(bill.billTotal):.2f}" if bill.billTotal else None,
-            "amount_numeric": decimal_to_float(bill.billTotal),
-            "kwh_used": kwh_used,
-            "kwh_cost": decimal_to_float(bill.details.kwhCost) if bill.details else None,
-            "electricity_total": decimal_to_float(bill.details.electricityTotal) if bill.details else None,
-            "total_from_billing_period": decimal_to_float(bill.details.totalFromBillingPeriod) if bill.details else None,
-            "balance_from_previous_bill": decimal_to_float(bill.details.balanceFromPreviousBill) if bill.details else None,
-            "billing_days": bill.details.billingDays if bill.details else None,
-        }
-        
-        # Calculate supply and delivery totals/rates from JSON
-        if bill.details:
-            supply = bill.details.supplyCharges or {}
-            delivery = bill.details.deliveryCharges or {}
-            
-            result["supply_total"] = supply.get("total", 0)
-            result["delivery_total"] = delivery.get("total", 0)
-            
-            if kwh_used > 0:
-                result["supply_rate"] = round(result["supply_total"] / kwh_used, 4) if result["supply_total"] else 0
-                result["delivery_rate"] = round(result["delivery_total"] / kwh_used, 4) if result["delivery_total"] else 0
-            else:
-                result["supply_rate"] = 0
-                result["delivery_rate"] = 0
+        try:
+            results.append(_bill_history_graph_row(bill))
+        except (TypeError, ValueError, AttributeError) as e:
+            logger.warning("Skipping bill %s in history graph: %s", getattr(bill, "id", None), e)
+    return results
+
+
+def _money_label(val) -> Optional[str]:
+    amount = decimal_to_float(val) if val else None
+    if amount is None:
+        return None
+    return f"${amount:.2f}"
+
+
+def _bill_history_graph_row(bill) -> Dict[str, Any]:
+    """One history row. Null kWh and non-dict charge JSON must not raise."""
+    details = bill.details
+    kwh_used = decimal_to_float(details.kwhUsed) if details else 0.0
+    if kwh_used is None:
+        kwh_used = 0.0
+
+    result = {
+        "bill_id": bill.id,
+        "month_range": bill.monthRange,
+        "bill_cycle_date": bill.billCycleDate.strftime("%m/%d/%Y") if bill.billCycleDate else None,
+        "bill_total": _money_label(bill.billTotal),
+        "amount_numeric": decimal_to_float(bill.billTotal),
+        "kwh_used": kwh_used,
+        "kwh_cost": decimal_to_float(details.kwhCost) if details else None,
+        "electricity_total": decimal_to_float(details.electricityTotal) if details else None,
+        "total_from_billing_period": decimal_to_float(details.totalFromBillingPeriod) if details else None,
+        "balance_from_previous_bill": decimal_to_float(details.balanceFromPreviousBill) if details else None,
+        "billing_days": details.billingDays if details else None,
+    }
+
+    if details:
+        result["supply_total"] = charge_total(details.supplyCharges)
+        result["delivery_total"] = charge_total(details.deliveryCharges)
+        if kwh_used > 0:
+            result["supply_rate"] = round(result["supply_total"] / kwh_used, 4) if result["supply_total"] else 0
+            result["delivery_rate"] = round(result["delivery_total"] / kwh_used, 4) if result["delivery_total"] else 0
         else:
-            result["supply_total"] = 0
-            result["delivery_total"] = 0
             result["supply_rate"] = 0
             result["delivery_rate"] = 0
-        
-        results.append(result)
-    
-    return results
+    else:
+        result["supply_total"] = 0
+        result["delivery_total"] = 0
+        result["supply_rate"] = 0
+        result["delivery_rate"] = 0
+    return result
 
 # =============================================================================
 # Bill Details
@@ -558,7 +601,7 @@ async def get_all_bill_details() -> List[Dict[str, Any]]:
     # Sort by bill cycle date descending in Python (nested order not supported)
     details_list = sorted(
         details_list,
-        key=lambda d: d.bill.billCycleDate if d.bill and d.bill.billCycleDate else datetime.min,
+        key=lambda d: aware_datetime(d.bill.billCycleDate if d.bill else None),
         reverse=True
     )
     
@@ -582,6 +625,47 @@ async def get_all_bill_details() -> List[Dict[str, Any]]:
         })
     
     return results
+
+def _bill_detail_iso_date(value) -> Optional[str]:
+    """Calendar date as stored on the bill, without shifting time zones."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.strftime("%Y-%m-%d")
+    if isinstance(value, date):
+        return value.isoformat()
+    return None
+
+
+async def get_billing_rate_periods() -> List[Dict[str, Any]]:
+    """Billed windows and the actual all-in rate used to price the usage calendar.
+
+    kwh_cost is the period rate saved from the bill (electricity total ÷ kWh,
+    which includes supply, delivery, and the taxes/fees in that total).
+    Totals are included so a missing kwh_cost can be rebuilt with that same formula.
+    """
+    await ensure_connected()
+    details_list = await db.billdetails.find_many(include={"bill": True})
+    periods = []
+    for d in details_list:
+        start = _bill_detail_iso_date(d.billingPeriodStart)
+        end = _bill_detail_iso_date(d.billingPeriodEnd)
+        if not start or not end:
+            continue
+        month_range = d.bill.monthRange if d.bill else None
+        periods.append({
+            "bill_id": d.billId,
+            "start": start,
+            "end": end,
+            "label": month_range,
+            "kwh_cost": decimal_to_float(d.kwhCost),
+            "kwh_used": decimal_to_float(d.kwhUsed),
+            "electricity_total": decimal_to_float(d.electricityTotal),
+            "total_from_billing_period": decimal_to_float(d.totalFromBillingPeriod),
+            "total_amount_due": decimal_to_float(getattr(d, "totalAmountDue", None)),
+        })
+    periods.sort(key=lambda period: (period["start"], period["end"], period["bill_id"] or 0))
+    return periods
 
 async def delete_bill_details(bill_id: int) -> bool:
     """Delete bill details"""
@@ -640,7 +724,7 @@ async def get_all_bill_documents_with_periods() -> List[Dict[str, Any]]:
     # Sort by bill cycle date descending in Python (nested order not supported)
     docs = sorted(
         docs,
-        key=lambda d: d.bill.billCycleDate if d.bill and d.bill.billCycleDate else datetime.min,
+        key=lambda d: aware_datetime(d.bill.billCycleDate if d.bill else None),
         reverse=True
     )
     
@@ -1889,10 +1973,14 @@ async def get_current_balance() -> Optional[Dict[str, Any]]:
     
     if not balance:
         return None
-    
+
+    numeric = decimal_to_float(balance.balance)
+    if numeric is None:
+        return None
+
     return {
-        "balance": f"${decimal_to_float(balance.balance):.2f}",
-        "balance_numeric": decimal_to_float(balance.balance),
+        "balance": f"${numeric:.2f}",
+        "balance_numeric": numeric,
         "scraped_at": balance.scrapedAt.isoformat() if balance.scrapedAt else None,
     }
 
@@ -1963,22 +2051,43 @@ async def get_latest_scraped_data(limit: int = 1) -> List[Dict[str, Any]]:
         for r in records
     ]
 
-async def get_all_scraped_data() -> List[Dict[str, Any]]:
-    """Get all scraped data"""
+def _json_ready(value: Any) -> Any:
+    """Make a Prisma JSON value safe for FastAPI to encode."""
+    if value is None or isinstance(value, (dict, list, str, int, float, bool)):
+        return value
+    try:
+        return json.loads(json.dumps(value, default=str))
+    except (TypeError, ValueError):
+        return None
+
+
+async def get_all_scraped_data(limit: int = 20) -> List[Dict[str, Any]]:
+    """Latest scraped payloads only. Loading every row has exhausted process memory."""
     await ensure_connected()
+    try:
+        take = int(limit)
+    except (TypeError, ValueError):
+        take = 20
+    take = max(1, min(take, 100))
 
-    records = await db.scrapeddata.find_many(order={"timestamp": "desc"})
+    records = await db.scrapeddata.find_many(
+        order={"timestamp": "desc"},
+        take=take,
+    )
 
-    return [
-        {
-            "id": r.id,
-            "timestamp": r.timestamp.isoformat() if r.timestamp else None,
-            "data": r.data,
-            "status": r.status,
-            "screenshot_path": r.screenshotPath,
-        }
-        for r in records
-    ]
+    rows = []
+    for r in records:
+        try:
+            rows.append({
+                "id": r.id,
+                "timestamp": r.timestamp.isoformat() if r.timestamp else None,
+                "data": _json_ready(r.data),
+                "status": r.status,
+                "screenshot_path": r.screenshotPath,
+            })
+        except (TypeError, ValueError, AttributeError) as e:
+            logger.warning("Skipping scraped_data row %s: %s", getattr(r, "id", None), e)
+    return rows
 
 async def add_log(level: str, message: str):
     """Add a log entry"""
@@ -2135,20 +2244,36 @@ async def save_meter_forecast_db(forecast: Dict[str, Any]):
     """Save meter forecast to cache"""
     await set_app_setting("meter_forecast_cache", forecast)
 
+
+def _eastern_reading_date(end_time) -> Optional[date]:
+    """US Eastern calendar day for a meter interval. Missing timestamps are skipped."""
+    if not isinstance(end_time, datetime):
+        return None
+    et = end_time if end_time.tzinfo else end_time.replace(tzinfo=timezone.utc)
+    try:
+        return et.astimezone(EASTERN).date()
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
+def _reading_payload(row) -> Optional[Dict[str, Any]]:
+    if not isinstance(getattr(row, "startTime", None), datetime) or not isinstance(getattr(row, "endTime", None), datetime):
+        return None
+    return {
+        "start_time": row.startTime.isoformat(),
+        "end_time": row.endTime.isoformat(),
+        "consumption": safe_float(row.consumption) or 0.0,
+    }
+
+
 async def get_realtime_readings_db() -> Optional[List[Dict[str, Any]]]:
     """Get all cached realtime readings (no limit - append storage)"""
     await ensure_connected()
     rows = await db.realtimereading.find_many(order={"endTime": "asc"})
     if not rows:
         return None
-    return [
-        {
-            "start_time": r.startTime.isoformat(),
-            "end_time": r.endTime.isoformat(),
-            "consumption": float(r.consumption),
-        }
-        for r in rows
-    ]
+    payloads = [payload for row in rows if (payload := _reading_payload(row))]
+    return payloads or None
 
 
 async def get_realtime_readings_for_day(day_offset: int = 0) -> tuple[List[Dict[str, Any]], int]:
@@ -2168,14 +2293,11 @@ async def get_realtime_readings_for_day(day_offset: int = 0) -> tuple[List[Dict[
     seen: set = set()
     dates: List[date] = []
     for r in rows:
-        et = r.endTime
-        if et.tzinfo is None:
-            et = et.replace(tzinfo=timezone.utc)
-        et_local = et.astimezone(EASTERN)
-        d = et_local.date()
-        if d not in seen:
-            seen.add(d)
-            dates.append(d)
+        d = _eastern_reading_date(r.endTime)
+        if d is None or d in seen:
+            continue
+        seen.add(d)
+        dates.append(d)
     dates.sort(reverse=True)
     total_days = len(dates)
     if day_offset >= total_days:
@@ -2199,14 +2321,7 @@ async def get_realtime_readings_for_date(target_date: date) -> List[Dict[str, An
         },
         order={"startTime": "asc"}
     )
-    return [
-        {
-            "start_time": r.startTime.isoformat(),
-            "end_time": r.endTime.isoformat(),
-            "consumption": float(r.consumption),
-        }
-        for r in readings
-    ]
+    return [payload for row in readings if (payload := _reading_payload(row))]
 
 
 async def get_realtime_daily_summaries() -> List[Dict[str, Any]]:
@@ -2219,11 +2334,10 @@ async def get_realtime_daily_summaries() -> List[Dict[str, Any]]:
     rows = await db.realtimereading.find_many(order={"endTime": "desc"})
     by_date: Dict[date, float] = {}
     for r in rows:
-        et = r.endTime
-        if et.tzinfo is None:
-            et = et.replace(tzinfo=timezone.utc)
-        d = et.astimezone(EASTERN).date()
-        by_date[d] = by_date.get(d, 0.0) + float(r.consumption or 0)
+        d = _eastern_reading_date(r.endTime)
+        if d is None:
+            continue
+        by_date[d] = by_date.get(d, 0.0) + (safe_float(r.consumption) or 0.0)
 
     today = datetime.now(EASTERN).date()
     by_date.setdefault(today, 0.0)
@@ -2325,6 +2439,26 @@ async def get_breakdown_show_rollover() -> bool:
     if not row:
         return False
     return _coerce_bool(row.get("breakdown_show_rollover"), False)
+
+
+async def get_rollover_clear_month() -> Optional[str]:
+    """YYYY-MM marker, or None when rollover has not been cleared (or was undone)."""
+    raw = await get_app_setting(ROLLOVER_CLEAR_SETTING_KEY)
+    return marker_from_setting(raw)
+
+
+async def set_rollover_clear_month(month: str) -> str:
+    """Store one active clear marker. Raises ValueError when month is not YYYY-MM."""
+    normalized = normalize_clear_month(month)
+    if not normalized:
+        raise ValueError("month must be YYYY-MM")
+    await set_app_setting(ROLLOVER_CLEAR_SETTING_KEY, {"month": normalized})
+    return normalized
+
+
+async def clear_rollover_clear_month() -> None:
+    """Remove the marker so the previous rollover chain is used again."""
+    await set_app_setting(ROLLOVER_CLEAR_SETTING_KEY, {"month": None})
 
 
 def payee_remaining_for_balance_reminder(
@@ -3242,18 +3376,24 @@ async def get_ledger_data() -> Dict[str, Any]:
             "document": True,
         }
     )
-    # Sort payments within each bill by date descending (nested order not supported in include)
+    # Sort payments within each bill by date descending (nested order not supported in include).
+    # Sort in place so a read-only relation cannot raise while building the response.
     for bill in bills:
-        if bill.payments:
-            bill.payments.sort(key=lambda p: p.paymentDate if p.paymentDate else datetime.min, reverse=True)
+        payments = getattr(bill, "payments", None)
+        if isinstance(payments, list) and payments:
+            payments.sort(key=lambda p: aware_datetime(getattr(p, "paymentDate", None)), reverse=True)
     
     bills_data = []
     for bill in bills:
         pdf_exists = False
         pdf_source_url = None
-        if bill.document:
-            full_path = DATA_DIR / bill.document.pdfPath
-            pdf_exists = full_path.is_file() if full_path else False
+        pdf_path = getattr(getattr(bill, "document", None), "pdfPath", None)
+        if pdf_path:
+            try:
+                full_path = DATA_DIR / str(pdf_path)
+                pdf_exists = full_path.is_file()
+            except (TypeError, ValueError, OSError):
+                pdf_exists = False
             pdf_source_url = bill.document.sourceUrl
         due_date_str = None
         if bill.details and bill.details.dueDate:
@@ -3266,7 +3406,7 @@ async def get_ledger_data() -> Dict[str, Any]:
             "bill_cycle_date": bill.billCycleDate.strftime("%m/%d/%Y") if bill.billCycleDate else None,
             "bill_date": bill.billDate.strftime("%Y-%m-%d") if bill.billDate else None,
             "month_range": bill.monthRange,
-            "bill_total": f"${decimal_to_float(bill.billTotal):.2f}" if bill.billTotal else None,
+            "bill_total": _money_label(bill.billTotal),
             "amount_numeric": decimal_to_float(bill.billTotal),
             "due_date": due_date_str,
             "has_statement_pdf": bill.document is not None,
@@ -3280,6 +3420,10 @@ async def get_ledger_data() -> Dict[str, Any]:
                 if bill.details and bill.details.billingPeriodEnd
                 else None
             ),
+            "rollover_month": bill_month_key(
+                bill.details.billingPeriodStart if bill.details else None,
+                bill.billCycleDate,
+            ),
             "pdf_exists": pdf_exists,
             "pdf_source_url": pdf_source_url,
             "payments": [
@@ -3287,7 +3431,7 @@ async def get_ledger_data() -> Dict[str, Any]:
                     "id": p.id,
                     "payment_date": p.paymentDate.strftime("%m/%d/%Y") if p.paymentDate else None,
                     "description": p.description,
-                    "amount": f"${decimal_to_float(p.amount):.2f}" if p.amount else None,
+                    "amount": _money_label(p.amount),
                     "amount_numeric": decimal_to_float(p.amount),
                     "payee_status": p.payeeStatus or "unverified",
                     "payee_name": p.payeeUser.name if p.payeeUser else None,
@@ -3296,11 +3440,15 @@ async def get_ledger_data() -> Dict[str, Any]:
                     "bill_manually_set": p.billManuallySet,
                     "manual_order": p.manualOrder,
                 }
-                for p in bill.payments
+                for p in (bill.payments or [])
             ]
         }
         # Include late fee if one was recorded for this bill
-        late_fee_amount = await get_stored_late_fee_amount(bill.id)
+        try:
+            late_fee_amount = await get_stored_late_fee_amount(bill.id)
+        except Exception as e:
+            logger.warning("Late fee lookup failed for bill %s: %s", bill.id, e)
+            late_fee_amount = None
         bill_dict["late_fee"] = (
             {"amount": f"${late_fee_amount:.2f}", "amount_numeric": late_fee_amount}
             if late_fee_amount
@@ -3331,7 +3479,7 @@ async def get_ledger_data() -> Dict[str, Any]:
                 "id": p.id,
                 "payment_date": p.paymentDate.strftime("%m/%d/%Y") if p.paymentDate else None,
                 "description": p.description or "Payment Received",
-                "amount": f"${decimal_to_float(p.amount):.2f}" if p.amount else None,
+                "amount": _money_label(p.amount),
                 "amount_numeric": decimal_to_float(p.amount),
                 "payee_status": p.payeeStatus or "unverified",
                 "payee_name": p.payeeUser.name if p.payeeUser else None,
@@ -3349,7 +3497,7 @@ async def get_ledger_data() -> Dict[str, Any]:
         # Re-sort payments within each bill
         for b in bills_data:
             b["payments"].sort(
-                key=lambda p: parse_date(p.get("payment_date") or "") or datetime.min,
+                key=lambda p: aware_datetime(parse_date(p.get("payment_date") or "")),
                 reverse=True
             )
 
@@ -3371,6 +3519,8 @@ async def get_ledger_data() -> Dict[str, Any]:
 
     pending_new_bill = await compute_pending_new_bill_state(reference_bill_for_pending, account_balance)
 
+    rollover_clear_month = await get_rollover_clear_month()
+
     return {
         "account_balance": account_balance,
         "bills": bills_data,
@@ -3379,6 +3529,10 @@ async def get_ledger_data() -> Dict[str, Any]:
         "payee_summaries": payee_summaries,
         "latest_payment": latest_payment,
         "pending_new_bill": pending_new_bill,
+        "rollover_clear": {
+            "month": rollover_clear_month,
+            "label": format_clear_month_label(rollover_clear_month) if rollover_clear_month else None,
+        },
     }
 
 # =============================================================================
@@ -3401,6 +3555,8 @@ async def calculate_all_payee_balances() -> List[Dict[str, Any]]:
     
     results = []
     rollover_by_user = {u.id: 0.0 for u in users}
+    # One marker: zero incoming rollover at the first bill on or after this month.
+    clear_marker = await get_rollover_clear_month()
     
     for bill in reversed(bills):  # Process oldest first for rollover
         bill_total = decimal_to_float(bill.billTotal) or 0
@@ -3424,7 +3580,7 @@ async def calculate_all_payee_balances() -> List[Dict[str, Any]]:
         
         # Calculate payments by user
         payments_by_user = {}
-        for p in bill.payments:
+        for p in bill.payments or []:
             user_id = p.payeeUserId or 0  # 0 for unassigned
             if user_id not in payments_by_user:
                 payments_by_user[user_id] = 0
@@ -3433,34 +3589,34 @@ async def calculate_all_payee_balances() -> List[Dict[str, Any]]:
         total_paid = sum(payments_by_user.values())
         bill_result["total_paid"] = total_paid
         bill_result["bill_balance"] = bill_total - total_paid
+
+        bill_month = bill_month_key(
+            det.billingPeriodStart if det else None,
+            bill.billCycleDate,
+        )
+        rollover_by_user, clear_marker = apply_rollover_clear_at_bill(
+            rollover_by_user, bill_month, clear_marker
+        )
         
-        # Calculate per-user status
+        # Calculate per-user status.
+        # share_of_bill is the portion (bill total x responsibility, once).
+        # current_balance is the signed carry into the next bill: positive
+        # still owed, negative credit. apply_rollover_clear_at_bill above
+        # zeroes that carry at the clear month; do not clamp credits to 0.
         for user in users:
-            responsibility = user.responsibilityPercent / 100.0
-            share_current = bill_total * responsibility  # Current bill only - default view
-            amount_due = bill_total * responsibility + rollover_by_user[user.id]  # Cumulative with rollover
-            amount_paid = payments_by_user.get(user.id, 0)
-            difference = amount_paid - amount_due
-            
-            status = "paid"
-            if difference < -0.01:
-                status = "underpaid"
-            elif difference > 0.01:
-                status = "overpaid"
-            
-            # Update rollover for next bill
-            rollover_by_user[user.id] = -difference if difference < 0 else 0
-            
+            incoming = float(rollover_by_user.get(user.id) or 0.0)
+            settled = settle_payee_bill(
+                portion_of_bill(bill_total, user.responsibilityPercent),
+                payments_by_user.get(user.id, 0),
+                incoming,
+            )
+            rollover_by_user[user.id] = settled["current_balance"]
+
             bill_result["payees"].append({
                 "user_id": user.id,
                 "name": user.name,
                 "responsibility_percent": user.responsibilityPercent,
-                "amount_due": round(amount_due, 2),
-                "share_of_bill": round(share_current, 2),
-                "share_of_bill_cumulative": round(amount_due, 2),
-                "amount_paid": round(amount_paid, 2),
-                "difference": round(difference, 2),
-                "status": status
+                **settled,
             })
         
         results.append(bill_result)
@@ -3493,8 +3649,8 @@ def _format_payee_summaries_for_frontend(raw: List[Dict[str, Any]]) -> Dict[int,
                 "amount_paid": p.get("amount_paid", 0),
                 "share_of_bill": p.get("share_of_bill", 0),
                 "share_of_bill_cumulative": p.get("share_of_bill_cumulative", 0),
-                "rollover_from_previous": 0,
-                "current_balance": 0,
+                "rollover_from_previous": p.get("rollover_from_previous", 0),
+                "current_balance": p.get("current_balance", 0),
                 "status": "paid" if p.get("status") == "paid" else "partial" if p.get("status") == "overpaid" else "unpaid",
             }
             for p in s.get("payees") or []

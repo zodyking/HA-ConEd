@@ -1,13 +1,15 @@
 <template>
   <div class="ha-history">
-    <!-- Loading -->
-    <div v-if="isLoading" class="ha-loading-state">
+    <RefreshStatus :phase="refreshPhase" :message="refreshMessage" />
+
+    <!-- Loading (only when nothing cached is ready to show) -->
+    <div v-if="isLoading && !historyData.length" class="ha-loading-state">
       <div class="ha-loading-spinner"></div>
       <div class="ha-loading-text">Loading billing history...</div>
     </div>
 
     <!-- Error -->
-    <div v-else-if="error" class="ha-error-state">{{ error }}</div>
+    <div v-else-if="error && !historyData.length" class="ha-error-state">{{ error }}</div>
 
     <!-- No Data -->
     <div v-else-if="!historyData.length" class="ha-empty-data">
@@ -108,16 +110,20 @@
               <div class="ha-realtime-day-nav">
                 <template v-if="realtimeView === 'calendar'">
                   <button
+                    type="button"
                     class="ha-day-nav-btn"
                     :disabled="calendarLoading || !canPrevCalendarMonth"
                     @click="shiftCalendarMonth(-1)"
+                    aria-label="Previous month"
                     title="Previous month"
                   >‹</button>
                   <span class="ha-realtime-title">{{ calendarMonthLabel }}</span>
                   <button
+                    type="button"
                     class="ha-day-nav-btn"
                     :disabled="calendarLoading || !canNextCalendarMonth"
                     @click="shiftCalendarMonth(1)"
+                    aria-label="Next month"
                     title="Next month"
                   >›</button>
                 </template>
@@ -160,7 +166,7 @@
                     <span class="ha-cal-period-label">Billing period</span>
                     <span class="ha-cal-period-range">{{ billingPeriod.label }}</span>
                   </div>
-                  <p class="ha-cal-hint">Tap a day to open its 15-minute usage chart</p>
+                  <p class="ha-cal-hint">Select a day to see usage and cost</p>
                 </div>
                 <div class="ha-cal-legend">
                   <span><i class="ha-cal-swatch today"></i> Today</span>
@@ -168,42 +174,90 @@
                   <span><i class="ha-cal-swatch start"></i> Period start</span>
                   <span><i class="ha-cal-swatch end"></i> Period end</span>
                 </div>
-                <div class="ha-cal-weekdays">
-                  <span v-for="wd in calendarWeekdays" :key="wd">{{ wd }}</span>
+                <div class="ha-cal-weekdays" aria-hidden="true">
+                  <span v-for="wd in calendarWeekdays" :key="wd">
+                    <span class="ha-cal-wd-short">{{ wd.charAt(0) }}</span>
+                    <span class="ha-cal-wd-long">{{ wd }}</span>
+                  </span>
                 </div>
-                <div class="ha-cal-grid">
-                  <button
-                    v-for="cell in calendarCells"
-                    :key="cell.key"
-                    type="button"
-                    class="ha-cal-cell"
-                    :class="{
-                      'is-pad': !cell.inMonth,
-                      'is-clickable': cell.clickable,
-                      'is-empty': cell.inMonth && !cell.clickable,
-                      'is-today': cell.isToday,
-                      'in-period': cell.inPeriod,
-                      'is-period-start': cell.isPeriodStart,
-                      'is-period-end': cell.isPeriodEnd,
-                      'is-future': cell.isFuture
-                    }"
-                    :disabled="!cell.clickable"
-                    :title="cell.clickable ? 'Open 15-minute chart' : undefined"
-                    @click="cell.clickable && cell.data && openCalendarDay(cell.data)"
-                  >
-                    <span class="ha-cal-cell-top">
-                      <span v-if="cell.inMonth" class="ha-cal-date">{{ cell.dayNum }}</span>
-                      <span v-if="cell.isToday" class="ha-cal-chip today">Today</span>
-                      <span v-else-if="cell.isPeriodStart" class="ha-cal-chip start">Start</span>
-                      <span v-else-if="cell.isPeriodEnd" class="ha-cal-chip end">End</span>
-                    </span>
-                    <template v-if="cell.data && (cell.data.kwh > 0 || cell.isToday)">
-                      <span class="ha-cal-kwh">{{ cell.data.kwh > 0 ? `${formatCalKwh(cell.data.kwh)} kWh` : 'Updating…' }}</span>
-                      <span class="ha-cal-cost">{{ cell.data.kwh > 0 ? formatCalCost(cell.data.cost) : 'Partial day' }}</span>
-                      <span class="ha-cal-cta">View chart ›</span>
-                    </template>
-                  </button>
+                <div class="ha-cal-grid" role="grid" aria-label="Daily usage">
+                  <template v-for="cell in calendarCells" :key="cell.key">
+                    <div v-if="!cell.inMonth" class="ha-cal-cell is-pad"></div>
+                    <button
+                      v-else
+                      type="button"
+                      class="ha-cal-cell"
+                      :class="{
+                        'is-clickable': cell.clickable,
+                        'is-empty': !cell.clickable,
+                        'is-today': cell.isToday,
+                        'is-selected': cell.date === selectedCalendarDate,
+                        'in-period': cell.inPeriod,
+                        'is-period-start': cell.isPeriodStart,
+                        'is-period-end': cell.isPeriodEnd,
+                        'is-future': cell.isFuture
+                      }"
+                      :disabled="!cell.clickable"
+                      :aria-pressed="cell.date === selectedCalendarDate"
+                      :aria-current="cell.isToday ? 'date' : undefined"
+                      :aria-label="calendarCellLabel(cell)"
+                      @click="cell.clickable && cell.data && selectCalendarDay(cell.data)"
+                    >
+                      <span class="ha-cal-cell-top">
+                        <span class="ha-cal-date">{{ cell.dayNum }}</span>
+                        <span v-if="cell.isToday" class="ha-cal-chip today">Today</span>
+                        <span v-else-if="cell.isPeriodStart" class="ha-cal-chip start">Start</span>
+                        <span v-else-if="cell.isPeriodEnd" class="ha-cal-chip end">End</span>
+                      </span>
+                      <span
+                        v-if="cell.data && cell.data.kwh > 0"
+                        class="ha-cal-dot"
+                        aria-hidden="true"
+                      ></span>
+                      <template v-if="cell.data && (cell.data.kwh > 0 || cell.isToday)">
+                        <span class="ha-cal-kwh">{{ cell.data.kwh > 0 ? `${formatCalKwh(cell.data.kwh)} kWh` : 'Updating…' }}</span>
+                        <span class="ha-cal-cost">{{ cell.data.kwh > 0 ? formatCalCost(cell.data.cost) : 'Partial day' }}</span>
+                      </template>
+                    </button>
+                  </template>
                 </div>
+                <section class="ha-cal-detail" aria-live="polite">
+                  <template v-if="selectedCalendarDay">
+                    <h3 class="ha-cal-detail-date">{{ formatCalendarLongDate(selectedCalendarDay.date) }}</h3>
+                    <dl class="ha-cal-detail-grid">
+                      <div>
+                        <dt>Usage</dt>
+                        <dd>{{ selectedCalendarDay.kwh > 0 ? `${formatCalKwh(selectedCalendarDay.kwh)} kWh` : (selectedCalendarDay.is_today ? 'Updating…' : '—') }}</dd>
+                      </div>
+                      <div>
+                        <dt>Cost</dt>
+                        <dd>{{ selectedCalendarDay.kwh > 0 ? formatCalCost(selectedCalendarDay.cost) : (selectedCalendarDay.is_today ? 'Partial day' : '—') }}</dd>
+                      </div>
+                      <div>
+                        <dt>Rate</dt>
+                        <dd>{{ selectedDayRateText }}</dd>
+                      </div>
+                      <div>
+                        <dt>Billing period</dt>
+                        <dd>{{ selectedDayPeriodText }}</dd>
+                      </div>
+                    </dl>
+                    <p v-if="selectedDayIsSplit" class="ha-cal-detail-note">
+                      This date is on more than one billing period, so its kWh is split evenly between those rates.
+                    </p>
+                    <p v-else-if="selectedDayUnpriced" class="ha-cal-detail-note">
+                      No billed rate covers this day, so cost is not shown.
+                    </p>
+                    <button
+                      type="button"
+                      class="ha-cal-chart-btn"
+                      @click="openCalendarDay(selectedCalendarDay)"
+                    >
+                      View 15-minute chart
+                    </button>
+                  </template>
+                  <p v-else class="ha-cal-detail-note">Select a day to see usage and cost.</p>
+                </section>
               </template>
             </div>
 
@@ -227,15 +281,16 @@
               </p>
               <p>
                 <strong v-if="realtimeDayTotalDisplay">Day total: {{ realtimeDayTotalDisplay }} kWh.</strong>
-                <span v-if="selectedDayCostDisplay"> Estimated cost: {{ selectedDayCostDisplay }}.</span>
+                <span v-if="selectedDayCostDisplay"> Cost: {{ selectedDayCostDisplay }}.</span>
+                <span v-if="selectedDayRateDisplay"> Rate: {{ selectedDayRateDisplay }}.</span>
                 <span v-if="realtimeDayTotalDisplay">&nbsp;</span>
                 Please note: As per Con Edison, your real-time usage may not match billing. Billed usage is validated (reconciled) and may have a multiplier applied (peak hour kWh rates), which will be shown on your bill statement.
               </p>
             </div>
             <div v-else-if="realtimeView === 'calendar' && calendarDays.length && !calendarLoading" class="ha-realtime-disclaimer">
               <p>
-                Tap a day for the 15-minute usage chart. Totals use interval kWh
-                <span v-if="calendarKwhCost"> and ${{ calendarKwhCost.toFixed(4) }}/kWh from your latest bill</span>.
+                Select a day for usage and cost. Cost uses that day’s billing-period rate
+                (electricity total ÷ kWh on the bill). A day on two periods splits its kWh evenly.
                 Con Edison usage data is typically delayed 1–24 hours.
               </p>
             </div>
@@ -309,6 +364,9 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { getApiBase } from '../lib/api-base'
+import { HISTORY_CACHE_KEY, LEDGER_CACHE_KEY, readPageCache, writePageCache } from '../lib/page-cache'
+import { useRefreshStatus } from '../lib/refresh-status'
+import RefreshStatus from './RefreshStatus.vue'
 import {
   Chart,
   CategoryScale,
@@ -362,10 +420,22 @@ interface RealtimeReading {
   consumption: number
 }
 
+interface CalendarRateShare {
+  bill_id?: number | null
+  start: string
+  end: string
+  label: string
+  range_label?: string
+  kwh_cost: number
+  kwh: number
+}
+
 interface CalendarDay {
   date: string
   kwh: number
   cost: number | null
+  kwh_cost: number | null
+  rate_shares: CalendarRateShare[]
   day_offset: number
   is_today?: boolean
   is_partial?: boolean
@@ -392,9 +462,66 @@ interface CalendarCell {
   isFuture: boolean
 }
 
-const isLoading = ref(true)
+function isHistoryRowList(value: unknown): value is HistoryRow[] {
+  if (!Array.isArray(value)) return false
+  return value.every((row) => {
+    if (!row || typeof row !== 'object') return false
+    return typeof (row as { bill_id?: unknown }).bill_id === 'number'
+  })
+}
+
+function isLedgerBillsCache(value: unknown): value is { ledger: { bills: any[] } } {
+  if (!value || typeof value !== 'object') return false
+  const ledger = (value as { ledger?: unknown }).ledger
+  if (!ledger || typeof ledger !== 'object') return false
+  return Array.isArray((ledger as { bills?: unknown }).bills)
+}
+
+function mapBillsToHistory(bills: any[], detailsMap: Record<number, any>): HistoryRow[] {
+  return bills.map((bill: any) => {
+    const details = detailsMap[bill.id] || {}
+    return {
+      bill_id: bill.id,
+      month_range: bill.month_range,
+      bill_cycle_date: bill.bill_cycle_date,
+      bill_total: bill.bill_total,
+      amount_numeric: bill.amount_numeric,
+      kwh_used: details.kwh_used || null,
+      kwh_cost: details.kwh_cost || null,
+      electricity_total: details.electricity_total || null,
+      total_from_billing_period: details.total_from_billing_period || null,
+      balance_from_previous_bill: details.balance_from_previous_bill || 0,
+      billing_days: details.billing_days || null,
+      supply_total: details.supply_total || 0,
+      supply_rate: details.supply_rate || 0,
+      delivery_total: details.delivery_total || 0,
+      delivery_rate: details.delivery_rate || 0,
+    }
+  })
+}
+
+const historyCache = readPageCache(HISTORY_CACHE_KEY, isHistoryRowList)
+const ledgerBillsCache = historyCache
+  ? null
+  : readPageCache(LEDGER_CACHE_KEY, isLedgerBillsCache)
+const seededHistory = historyCache
+  ? historyCache.payload
+  : ledgerBillsCache
+    ? mapBillsToHistory(ledgerBillsCache.payload.ledger.bills, {})
+    : null
+
+const isLoading = ref(seededHistory === null)
 const error = ref<string | null>(null)
-const historyData = ref<HistoryRow[]>([])
+const historyData = ref<HistoryRow[]>(seededHistory ?? [])
+const hasLastKnownHistory = ref(seededHistory !== null)
+const {
+  phase: refreshPhase,
+  message: refreshMessage,
+  setUpdating: setRefreshUpdating,
+  setUpdated: setRefreshUpdated,
+  setError: setRefreshError,
+  reset: resetRefreshStatus,
+} = useRefreshStatus()
 const activeChartTab = ref<'realtime' | 'billHistory' | 'kwh' | 'cost' | 'rates'>('billHistory')
 
 // Realtime data state (prior-day view: API is delayed, show full 24h of each day)
@@ -409,10 +536,10 @@ const realtimeView = ref<'calendar' | 'day'>('calendar')
 const calendarLoading = ref(false)
 const calendarError = ref<string | null>(null)
 const calendarDays = ref<CalendarDay[]>([])
-const calendarKwhCost = ref<number | null>(null)
 const calendarToday = ref<string | null>(null)
 const billingPeriod = ref<BillingPeriod | null>(null)
 const selectedDate = ref<string | null>(null)
+const selectedCalendarDate = ref<string | null>(null)
 const calendarMonth = ref({ year: new Date().getFullYear(), month: new Date().getMonth() })
 const calendarWeekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
@@ -493,51 +620,63 @@ function formatBillCycleDate(dateStr: string | null): string {
   }
 }
 
+let historyRequestGen = 0
+
 async function fetchHistory() {
-  isLoading.value = true
-  error.value = null
+  const requestGen = ++historyRequestGen
+  const showingKnownData = hasLastKnownHistory.value
+  if (showingKnownData) {
+    setRefreshUpdating('Updating history…')
+  } else {
+    isLoading.value = true
+    error.value = null
+  }
+
+  let applied = false
   try {
     // Use same endpoint as AccountLedger to ensure consistent data/ordering
     const res = await fetch(`${getApiBase()}/ledger`)
+    if (requestGen !== historyRequestGen) return
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const ledger = await res.json()
-    const bills = ledger.bills || []
-    
+    if (requestGen !== historyRequestGen) return
+    const bills = Array.isArray(ledger.bills) ? ledger.bills : []
+
     // Also fetch bill details for the extra parsed data (kwh, supply/delivery)
     const detailsRes = await fetch(`${getApiBase()}/bill-history`)
-    let detailsMap: Record<number, any> = {}
+    if (requestGen !== historyRequestGen) return
+    const detailsMap: Record<number, any> = {}
     if (detailsRes.ok) {
       const detailsData = await detailsRes.json()
       for (const d of (detailsData.history || [])) {
-        detailsMap[d.bill_id] = d
+        if (d && typeof d.bill_id === 'number') detailsMap[d.bill_id] = d
       }
     }
-    
+
+    if (requestGen !== historyRequestGen) return
     // Merge ledger bills with details - bills are already in correct order from ledger
-    historyData.value = bills.map((bill: any) => {
-      const details = detailsMap[bill.id] || {}
-      return {
-        bill_id: bill.id,
-        month_range: bill.month_range,
-        bill_cycle_date: bill.bill_cycle_date,
-        bill_total: bill.bill_total,
-        amount_numeric: bill.amount_numeric,
-        kwh_used: details.kwh_used || null,
-        kwh_cost: details.kwh_cost || null,
-        electricity_total: details.electricity_total || null,
-        total_from_billing_period: details.total_from_billing_period || null,
-        balance_from_previous_bill: details.balance_from_previous_bill || 0,
-        billing_days: details.billing_days || null,
-        supply_total: details.supply_total || 0,
-        supply_rate: details.supply_rate || 0,
-        delivery_total: details.delivery_total || 0,
-        delivery_rate: details.delivery_rate || 0,
-      }
-    })
-  } catch (e: any) {
-    error.value = e.message || 'Failed to load history'
+    historyData.value = mapBillsToHistory(bills, detailsMap)
+    writePageCache(HISTORY_CACHE_KEY, historyData.value)
+    hasLastKnownHistory.value = true
+    error.value = null
+    applied = true
+  } catch (e: unknown) {
+    if (requestGen !== historyRequestGen) return
+    if (!hasLastKnownHistory.value) {
+      error.value = e instanceof Error && e.message ? e.message : 'Failed to load history'
+    }
   } finally {
-    isLoading.value = false
+    if (requestGen === historyRequestGen) {
+      isLoading.value = false
+      if (applied) {
+        setRefreshUpdated('History updated')
+      } else if (hasLastKnownHistory.value) {
+        error.value = null
+        setRefreshError("Couldn't refresh history. Showing the last saved data.")
+      } else {
+        resetRefreshStatus()
+      }
+    }
   }
 }
 
@@ -552,6 +691,44 @@ function formatCalKwh(kwh: number): string {
 function formatCalCost(cost: number | null): string {
   if (cost == null) return '—'
   return `$${cost.toFixed(2)}`
+}
+
+function formatRate(rate: number | null | undefined): string {
+  if (rate == null) return '—'
+  return `$${rate.toFixed(4)}/kWh`
+}
+
+function formatCalendarLongDate(iso: string): string {
+  const [year, month, day] = iso.split('-').map(Number)
+  if (!year || !month || !day) return iso
+  return new Date(year, month - 1, day).toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric'
+  })
+}
+
+function normalizeCalendarDay(day: Partial<CalendarDay> & { date: string }): CalendarDay {
+  return {
+    date: day.date,
+    kwh: Number(day.kwh) || 0,
+    cost: day.cost ?? null,
+    kwh_cost: day.kwh_cost ?? null,
+    rate_shares: Array.isArray(day.rate_shares) ? day.rate_shares : [],
+    day_offset: day.day_offset ?? 0,
+    is_today: day.is_today,
+    is_partial: day.is_partial,
+  }
+}
+
+function calendarCellLabel(cell: CalendarCell): string {
+  const dateLabel = cell.date ? formatCalendarLongDate(cell.date) : `Day ${cell.dayNum}`
+  if (!cell.data || cell.data.kwh <= 0) {
+    return cell.isToday ? `${dateLabel}, usage still arriving` : dateLabel
+  }
+  const cost = cell.data.cost == null ? 'cost unavailable' : formatCalCost(cell.data.cost)
+  return `${dateLabel}, ${formatCalKwh(cell.data.kwh)} kilowatt hours, ${cost}`
 }
 
 const daysByDate = computed(() => {
@@ -625,7 +802,7 @@ const calendarCells = computed((): CalendarCell[] => {
       inMonth: true,
       dayNum: day,
       date,
-      data: data || (isToday ? { date, kwh: 0, cost: null, day_offset: 0, is_today: true, is_partial: true } : null),
+      data: data || (isToday ? normalizeCalendarDay({ date, kwh: 0, cost: null, day_offset: 0, is_today: true, is_partial: true }) : null),
       clickable,
       isToday,
       inPeriod,
@@ -637,16 +814,58 @@ const calendarCells = computed((): CalendarCell[] => {
   return cells
 })
 
+const selectedCalendarDay = computed((): CalendarDay | null => {
+  if (!selectedCalendarDate.value) return null
+  return calendarDays.value.find(d => d.date === selectedCalendarDate.value) || null
+})
+
+const selectedDayRateText = computed(() => {
+  const shares = selectedCalendarDay.value?.rate_shares || []
+  const only = shares[0]
+  if (!shares.length || !only) return '—'
+  if (shares.length === 1) return formatRate(only.kwh_cost)
+  return shares.map(share => `${formatRate(share.kwh_cost)} (${formatCalKwh(share.kwh)} kWh)`).join('; ')
+})
+
+const selectedDayPeriodText = computed(() => {
+  const shares = selectedCalendarDay.value?.rate_shares || []
+  if (!shares.length) return '—'
+  return shares.map(share => share.range_label || share.label).join('; ')
+})
+
+const selectedDayIsSplit = computed(() => (selectedCalendarDay.value?.rate_shares.length || 0) > 1)
+
+const selectedDayUnpriced = computed(() => {
+  const day = selectedCalendarDay.value
+  return !!day && day.kwh > 0 && day.rate_shares.length === 0
+})
+
+function chartCalendarDay(): CalendarDay | null {
+  if (selectedDate.value) {
+    const byDate = calendarDays.value.find(d => d.date === selectedDate.value)
+    if (byDate) return byDate
+  }
+  return calendarDays.value.find(d => d.day_offset === realtimeDayOffset.value) || null
+}
+
 const selectedDayCostDisplay = computed((): string | null => {
-  const match = calendarDays.value.find(d => d.day_offset === realtimeDayOffset.value)
+  const match = chartCalendarDay()
   if (!match || match.cost == null) return null
   return `$${match.cost.toFixed(2)}`
 })
 
+const selectedDayRateDisplay = computed((): string | null => {
+  const match = chartCalendarDay()
+  const onlyShare = match?.rate_shares[0]
+  if (!match || !onlyShare) return null
+  if (match.rate_shares.length === 1) return formatRate(match.kwh_cost ?? onlyShare.kwh_cost)
+  return match.rate_shares.map(share => formatRate(share.kwh_cost)).join(' + ')
+})
+
 function setCalendarMonthFromLatest() {
-  if (!calendarDays.value.length) return
-  const latest = calendarDays.value[0].date
-  const [y, m] = latest.split('-').map(Number)
+  const latest = calendarDays.value[0]
+  if (!latest) return
+  const [y, m] = latest.date.split('-').map(Number)
   if (!y || !m) return
   calendarMonth.value = { year: y, month: m - 1 }
 }
@@ -656,9 +875,36 @@ function shiftCalendarMonth(delta: number) {
   const idx = keys.indexOf(currentMonthKey.value)
   const nextIdx = idx < 0 ? (delta < 0 ? 0 : keys.length - 1) : idx + delta
   if (nextIdx < 0 || nextIdx >= keys.length) return
-  const [y, m] = keys[nextIdx].split('-').map(Number)
+  const nextKey = keys[nextIdx]
+  if (!nextKey) return
+  const [y, m] = nextKey.split('-').map(Number)
   if (!y || !m) return
   calendarMonth.value = { year: y, month: m - 1 }
+  selectDayInVisibleMonth()
+}
+
+function selectCalendarDay(day: CalendarDay) {
+  selectedCalendarDate.value = day.date
+}
+
+function selectDayInVisibleMonth() {
+  const key = currentMonthKey.value
+  if (selectedCalendarDate.value && selectedCalendarDate.value.startsWith(key)) return
+  if (calendarToday.value && calendarToday.value.startsWith(key)) {
+    selectedCalendarDate.value = calendarToday.value
+    return
+  }
+  const withUsage = calendarDays.value.find(d => d.date.startsWith(key) && d.kwh > 0)
+  selectedCalendarDate.value = withUsage?.date || calendarDays.value.find(d => d.date.startsWith(key))?.date || null
+}
+
+function ensureCalendarSelection() {
+  if (!selectedCalendarDate.value) {
+    selectDayInVisibleMonth()
+    return
+  }
+  const stillExists = calendarDays.value.some(d => d.date === selectedCalendarDate.value)
+  if (!stillExists) selectDayInVisibleMonth()
 }
 
 async function fetchCalendarData(forceRefresh: boolean = false) {
@@ -692,8 +938,7 @@ async function fetchCalendarData(forceRefresh: boolean = false) {
       throw new Error(`HTTP ${res.status}`)
     }
     const data = await res.json()
-    calendarDays.value = data.days || []
-    calendarKwhCost.value = typeof data.kwh_cost === 'number' ? data.kwh_cost : null
+    calendarDays.value = (data.days || []).map((day: CalendarDay) => normalizeCalendarDay(day))
     calendarToday.value = data.today || null
     billingPeriod.value = data.billing_period || null
     realtimeTotalDays.value = calendarDays.value.length
@@ -702,6 +947,7 @@ async function fetchCalendarData(forceRefresh: boolean = false) {
       if (!stillInRange) {
         setCalendarMonthFromLatest()
       }
+      ensureCalendarSelection()
     }
   } catch (e: any) {
     calendarError.value = e.message || 'Failed to load calendar'
@@ -763,6 +1009,7 @@ async function fetchRealtimeData(forceRefresh: boolean = false) {
 }
 
 async function openCalendarDay(day: CalendarDay) {
+  selectedCalendarDate.value = day.date
   selectedDate.value = day.date
   realtimeDayOffset.value = day.day_offset
   realtimeView.value = 'day'
@@ -1146,6 +1393,10 @@ watch(activeChartTab, async (newTab) => {
 })
 
 onMounted(async () => {
+  if (historyData.value.length > 0) {
+    await nextTick()
+    createCharts()
+  }
   await Promise.all([
     fetchHistory(),
     fetchCalendarData()
@@ -1159,6 +1410,8 @@ onUnmounted(() => {
 
 <style scoped>
 .ha-history {
+  max-width: 100%;
+  min-width: 0;
   padding: 16px;
 }
 
@@ -1220,6 +1473,8 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .ha-history-summary {
@@ -1267,6 +1522,8 @@ onUnmounted(() => {
   border: 1px solid var(--ha-border-color, #e0e0e0);
   border-radius: 8px;
   overflow: hidden;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .ha-chart-header {
@@ -1355,6 +1612,8 @@ onUnmounted(() => {
 
 .ha-chart-tab-content {
   min-height: 365px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .ha-chart-tab-content .ha-chart-container {
@@ -1368,6 +1627,9 @@ onUnmounted(() => {
 .ha-realtime-wrapper {
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 .ha-realtime-header {
@@ -1376,15 +1638,21 @@ onUnmounted(() => {
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
-  padding: 8px 16px;
+  padding: 8px;
   background: #f8f9fa;
   border-bottom: 1px solid #e9ecef;
 }
 
 .ha-realtime-title {
-  font-size: 13px;
-  font-weight: 500;
-  color: #495057;
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: #212121;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ha-realtime-day-count {
@@ -1403,17 +1671,20 @@ onUnmounted(() => {
 .ha-realtime-day-nav {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
+  flex: 1 1 200px;
+  min-width: 0;
 }
 
 .ha-day-nav-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
   padding: 0;
-  font-size: 18px;
+  font-size: 22px;
   font-weight: 600;
   color: var(--ha-primary-color, #0088cc);
   background: transparent;
@@ -1432,6 +1703,14 @@ onUnmounted(() => {
   color: #adb5bd;
   border-color: #e9ecef;
   cursor: not-allowed;
+}
+
+.ha-day-nav-btn:focus-visible,
+.ha-back-calendar-btn:focus-visible,
+.ha-refresh-btn:focus-visible,
+.ha-cal-chart-btn:focus-visible {
+  outline: 2px solid #0088cc;
+  outline-offset: 2px;
 }
 
 .ha-back-calendar-btn {
@@ -1454,7 +1733,9 @@ onUnmounted(() => {
 }
 
 .ha-usage-calendar {
-  padding: 16px 16px 8px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 8px 8px 4px;
 }
 
 .ha-cal-toolbar {
@@ -1469,7 +1750,9 @@ onUnmounted(() => {
 .ha-cal-period {
   display: inline-flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
+  max-width: 100%;
   min-height: 36px;
   padding: 6px 12px;
   background: #e1f5fe;
@@ -1542,41 +1825,57 @@ onUnmounted(() => {
 .ha-cal-weekdays {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 8px;
-  margin-bottom: 8px;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+  margin-bottom: 4px;
 }
 
 .ha-cal-weekdays span {
+  min-width: 0;
+  overflow: hidden;
   text-align: center;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
-  letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: #78909c;
+  color: #546e7a;
+}
+
+.ha-cal-wd-long {
+  display: none;
 }
 
 .ha-cal-grid {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 8px;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
 }
 
 .ha-cal-cell {
   display: flex;
   flex-direction: column;
-  align-items: stretch;
-  justify-content: flex-start;
-  min-height: 108px;
-  padding: 8px;
-  text-align: left;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 44px;
+  padding: 2px;
+  overflow: hidden;
+  text-align: center;
   background: #fff;
   border: 1px solid #e0e0e0;
-  border-radius: 10px;
+  border-radius: 6px;
   cursor: default;
 }
 
 .ha-cal-cell.is-pad {
   visibility: hidden;
+}
+
+.ha-cal-cell:disabled {
+  opacity: 1;
 }
 
 .ha-cal-cell.is-empty,
@@ -1595,8 +1894,7 @@ onUnmounted(() => {
 
 .ha-cal-cell.is-clickable:hover {
   border-color: #03a9f4;
-  box-shadow: 0 4px 12px rgba(3, 169, 244, 0.16);
-  transform: translateY(-1px);
+  box-shadow: inset 0 0 0 1px #03a9f4;
 }
 
 .ha-cal-cell.is-clickable:focus-visible {
@@ -1607,6 +1905,12 @@ onUnmounted(() => {
 .ha-cal-cell.is-today {
   border-color: #03a9f4;
   box-shadow: inset 0 0 0 2px #03a9f4;
+}
+
+.ha-cal-cell.is-selected {
+  border-color: #0088cc;
+  box-shadow: inset 0 0 0 2px #0088cc;
+  background: #e1f5fe;
 }
 
 .ha-cal-cell.is-period-start {
@@ -1620,14 +1924,25 @@ onUnmounted(() => {
 .ha-cal-cell-top {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
   gap: 4px;
+  max-width: 100%;
 }
 
 .ha-cal-date {
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 700;
+  line-height: 1.2;
   color: #212121;
+}
+
+.ha-cal-dot {
+  width: 6px;
+  height: 6px;
+  margin-top: 4px;
+  border-radius: 50%;
+  background: #0088cc;
+  flex: 0 0 auto;
 }
 
 .ha-cal-chip {
@@ -1654,6 +1969,12 @@ onUnmounted(() => {
   color: #e65100;
 }
 
+.ha-cal-kwh,
+.ha-cal-cost,
+.ha-cal-chip {
+  display: none;
+}
+
 .ha-cal-kwh {
   margin-top: 10px;
   font-size: 13px;
@@ -1665,15 +1986,75 @@ onUnmounted(() => {
   margin-top: 2px;
   font-size: 14px;
   font-weight: 700;
-  color: #2e7d32;
+  color: #1b5e20;
 }
 
-.ha-cal-cta {
-  margin-top: auto;
-  padding-top: 8px;
+.ha-cal-detail {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #b3e5fc;
+  border-radius: 8px;
+  background: #f3fbff;
+}
+
+.ha-cal-detail-date {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: #212121;
+}
+
+.ha-cal-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 12px;
+  margin: 0;
+}
+
+.ha-cal-detail-grid dt {
   font-size: 11px;
   font-weight: 700;
-  color: #03a9f4;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #455a64;
+}
+
+.ha-cal-detail-grid dd {
+  margin: 2px 0 0;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: #212121;
+  overflow-wrap: anywhere;
+}
+
+.ha-cal-detail-note {
+  margin: 10px 0 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: #37474f;
+}
+
+.ha-cal-chart-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 44px;
+  margin-top: 12px;
+  padding: 0 16px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+  background: #0088cc;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.ha-cal-chart-btn:hover {
+  background: #006699;
 }
 
 .ha-realtime-day-count {
@@ -1686,13 +2067,16 @@ onUnmounted(() => {
 .ha-refresh-btn {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 4px;
-  padding: 6px 12px;
-  font-size: 12px;
+  min-height: 44px;
+  padding: 0 16px;
+  font-size: 14px;
+  font-weight: 700;
   background: #0088cc;
   color: white;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
   transition: background 0.2s;
 }
@@ -1862,39 +2246,17 @@ onUnmounted(() => {
   }
 
   .ha-realtime-disclaimer {
-    font-size: 10px;
+    font-size: 12px;
     padding: 8px 10px;
   }
 
-  .ha-usage-calendar {
-    padding: 12px;
-  }
-
-  .ha-cal-grid,
-  .ha-cal-weekdays {
-    gap: 4px;
-  }
-
-  .ha-cal-cell {
-    min-height: 92px;
-    padding: 6px;
-  }
-
-  .ha-cal-date {
-    font-size: 13px;
-  }
-
-  .ha-cal-kwh,
-  .ha-cal-cost {
-    font-size: 11px;
-  }
-
-  .ha-cal-cta {
-    font-size: 10px;
+  .ha-realtime-day-nav,
+  .ha-refresh-btn {
+    flex: 1 1 100%;
   }
 
   .ha-cal-hint {
-    font-size: 12px;
+    font-size: 13px;
   }
   
   .ha-history-table {
@@ -1904,6 +2266,77 @@ onUnmounted(() => {
   .ha-history-table th,
   .ha-history-table td {
     padding: 8px 6px;
+  }
+}
+
+@media (min-width: 720px) {
+  .ha-realtime-header {
+    padding: 8px 16px;
+  }
+
+  .ha-usage-calendar {
+    padding: 16px 16px 8px;
+  }
+
+  .ha-cal-weekdays,
+  .ha-cal-grid {
+    gap: 8px;
+  }
+
+  .ha-cal-wd-short {
+    display: none;
+  }
+
+  .ha-cal-wd-long {
+    display: inline;
+  }
+
+  .ha-cal-cell {
+    align-items: stretch;
+    justify-content: flex-start;
+    min-height: 108px;
+    padding: 8px;
+    text-align: left;
+    border-radius: 10px;
+  }
+
+  .ha-cal-cell-top {
+    justify-content: space-between;
+  }
+
+  .ha-cal-dot {
+    display: none;
+  }
+
+  .ha-cal-kwh,
+  .ha-cal-cost {
+    display: block;
+  }
+
+  .ha-cal-chip {
+    display: inline-block;
+  }
+
+  .ha-cal-detail-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .ha-cal-chart-btn {
+    width: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ha-cal-cell.is-clickable,
+  .ha-day-nav-btn,
+  .ha-refresh-btn,
+  .ha-cal-chart-btn,
+  .ha-back-calendar-btn {
+    transition: none;
+  }
+
+  .ha-spin {
+    animation: none;
   }
 }
 </style>

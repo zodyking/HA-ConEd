@@ -89,6 +89,54 @@
           </label>
           <div class="ha-breakdown-desc">Breakdown view in ledger: show current bill only, or cumulative rollover</div>
         </div>
+
+        <section class="ha-rollover-clear" aria-labelledby="rollover-clear-heading">
+          <h3 id="rollover-clear-heading" class="ha-rollover-clear-title">Rollover balance</h3>
+          <p class="ha-breakdown-desc ha-rollover-clear-desc">
+            Bills from the chosen month on start from zero. Earlier bills stay the same.
+          </p>
+          <p v-if="rolloverClearError" class="ha-rollover-clear-error" role="alert">{{ rolloverClearError }}</p>
+          <p v-if="rolloverClearStatus === 'loading'" class="ha-rollover-clear-empty">Loading rollover setting…</p>
+          <template v-else-if="rolloverClearStatus === 'ready' && rolloverClearMonth">
+            <p class="ha-rollover-clear-note" aria-live="polite">
+              Rollover balance cleared starting {{ rolloverClearLabel }}
+            </p>
+            <button
+              type="button"
+              class="ha-rollover-undo"
+              :disabled="rolloverClearSaving"
+              @click="undoRolloverClear"
+            >
+              {{ rolloverClearSaving ? 'Undoing…' : 'Undo' }}
+            </button>
+          </template>
+          <p v-else-if="rolloverClearStatus === 'ready' && rolloverMonthOptions.length === 0" class="ha-rollover-clear-empty">
+            No bill months available to clear.
+          </p>
+          <form
+            v-else-if="rolloverClearStatus === 'ready'"
+            class="ha-rollover-clear-form"
+            @submit.prevent="requestRolloverClear"
+          >
+            <label class="ha-rollover-clear-label" for="rollover-clear-month">Starting month</label>
+            <select
+              id="rollover-clear-month"
+              v-model="selectedRolloverMonth"
+              :disabled="rolloverClearSaving"
+            >
+              <option v-for="opt in rolloverMonthOptions" :key="opt.month" :value="opt.month">
+                {{ opt.optionLabel }}
+              </option>
+            </select>
+            <button
+              type="submit"
+              class="ha-rollover-clear-btn"
+              :disabled="rolloverClearSaving || !selectedRolloverMonth"
+            >
+              {{ rolloverClearSaving ? 'Clearing…' : `Clear rollover starting ${selectedRolloverLabel}` }}
+            </button>
+          </form>
+        </section>
         <div v-if="totalResponsibility > 0 && Math.abs(totalResponsibility - 100) > 0.1" class="ha-warn">Total: {{ totalResponsibility.toFixed(1) }}% — must equal 100%</div>
         <button v-if="users.length" type="button" class="ha-button ha-button-primary" :disabled="isLoading || (totalResponsibility > 0 && Math.abs(totalResponsibility - 100) > 0.1)" @click="handleSaveResponsibilities">{{ isLoading ? 'Saving...' : 'Save Responsibilities' }}</button>
       </div>
@@ -278,12 +326,50 @@
       </div>
     </div>
 
+    <div
+      v-if="rolloverConfirmOpen"
+      class="ha-modal-overlay"
+      @click.self="rolloverConfirmOpen = false"
+      @keydown.esc.prevent="rolloverConfirmOpen = false"
+    >
+      <div
+        class="ha-modal ha-rollover-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="rollover-clear-title"
+      >
+        <div class="ha-modal-header ha-rollover-dialog-header">
+          <span id="rollover-clear-title">Clear rollover balance</span>
+        </div>
+        <div class="ha-modal-body">
+          <p>
+            Clear the rollover balance starting {{ selectedRolloverLabel }}? Bills from that month on start from zero.
+            Earlier bills stay the same. You can undo this.
+          </p>
+        </div>
+        <div class="ha-modal-footer ha-rollover-dialog-actions">
+          <button type="button" class="ha-btn ha-btn-gray ha-rollover-dialog-btn" @click="rolloverConfirmOpen = false">
+            Cancel
+          </button>
+          <button
+            ref="rolloverConfirmButton"
+            type="button"
+            class="ha-rollover-clear-btn ha-rollover-dialog-btn"
+            :disabled="rolloverClearSaving"
+            @click="applyRolloverClear"
+          >
+            Clear rollover starting {{ selectedRolloverLabel }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <div v-if="message" :class="['ha-message', message.type]">{{ message.text }}</div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { getApiBase } from '../../lib/api-base'
 
 interface User { 
@@ -297,6 +383,11 @@ interface User {
 }
 interface Payment { id: number; payment_date: string; amount: string; description: string; bill_id: number | null; bill_month: string | null; bill_cycle: string | null; payee_name: string | null; payee_user_id: number | null; payee_status: string }
 interface Bill { id: number; bill_cycle_date: string; month_range: string; bill_total: string; payments: Payment[] }
+interface RolloverBillMonth {
+  rollover_month?: string | null
+  bill_cycle_date?: string | null
+  month_range?: string | null
+}
 interface HaUser { id: string; name: string; username?: string; is_admin?: boolean; is_active?: boolean }
 interface NotifyService { service: string; friendly_name: string; full_service: string }
 
@@ -711,11 +802,174 @@ async function unlinkHaUser(user: User) {
   }
 }
 
+const MONTH_LABELS = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+]
+
+const rolloverBills = ref<RolloverBillMonth[]>([])
+const rolloverClearStatus = ref<'loading' | 'ready' | 'error'>('loading')
+const rolloverClearMonth = ref<string | null>(null)
+const rolloverClearLabel = ref<string | null>(null)
+const selectedRolloverMonth = ref('')
+const rolloverClearSaving = ref(false)
+const rolloverClearError = ref<string | null>(null)
+const rolloverConfirmOpen = ref(false)
+const rolloverConfirmButton = ref<HTMLButtonElement | null>(null)
+
+function formatMonthLabel(month: string): string {
+  const match = /^(\d{4})-(\d{2})$/.exec(month)
+  if (!match) return month
+  const index = Number(match[2]) - 1
+  const name = MONTH_LABELS[index]
+  return name ? `${name} ${match[1]}` : month
+}
+
+function monthFromCycleDate(cycle: string | null | undefined): string | null {
+  if (!cycle) return null
+  const us = /^(\d{1,2})\/\d{1,2}\/(\d{4})$/.exec(cycle.trim())
+  if (us) {
+    const month = Number(us[1])
+    if (month >= 1 && month <= 12) return `${us[2]}-${String(month).padStart(2, '0')}`
+  }
+  const iso = /^(\d{4})-(\d{2})/.exec(cycle.trim())
+  if (iso) return `${iso[1]}-${iso[2]}`
+  return null
+}
+
+const rolloverMonthOptions = computed(() => {
+  const byMonth = new Map<string, string>()
+  for (const bill of rolloverBills.value) {
+    const month = bill.rollover_month || monthFromCycleDate(bill.bill_cycle_date)
+    if (!month || byMonth.has(month)) continue
+    const label = formatMonthLabel(month)
+    const range = bill.month_range ? ` (${bill.month_range})` : ''
+    byMonth.set(month, `${label}${range}`)
+  }
+  return [...byMonth.entries()]
+    .sort((a, b) => b[0].localeCompare(a[0]))
+    .map(([month, optionLabel]) => ({
+      month,
+      label: formatMonthLabel(month),
+      optionLabel,
+    }))
+})
+
+const selectedRolloverLabel = computed(() => {
+  const match = rolloverMonthOptions.value.find((opt) => opt.month === selectedRolloverMonth.value)
+  return match?.label || (selectedRolloverMonth.value ? formatMonthLabel(selectedRolloverMonth.value) : 'the selected month')
+})
+
+watch(rolloverMonthOptions, (opts) => {
+  const first = opts[0]
+  if (!first) {
+    selectedRolloverMonth.value = ''
+    return
+  }
+  if (!opts.some((opt) => opt.month === selectedRolloverMonth.value)) {
+    selectedRolloverMonth.value = first.month
+  }
+}, { immediate: true })
+
+watch(rolloverConfirmOpen, async (open) => {
+  if (!open) return
+  await nextTick()
+  rolloverConfirmButton.value?.focus()
+})
+
+async function loadRolloverClearControl() {
+  rolloverClearStatus.value = 'loading'
+  rolloverClearError.value = null
+  try {
+    const [clearRes, ledgerRes] = await Promise.all([
+      fetch(`${getApiBase()}/rollover-clear`),
+      fetch(`${getApiBase()}/ledger`),
+    ])
+    if (!clearRes.ok) {
+      rolloverClearStatus.value = 'error'
+      rolloverClearError.value = "Couldn't load the rollover clear setting."
+      return
+    }
+    const clearData = await clearRes.json()
+    const month = typeof clearData?.month === 'string' && clearData.month ? clearData.month : null
+    rolloverClearMonth.value = month
+    rolloverClearLabel.value = month
+      ? (clearData.label || formatMonthLabel(month))
+      : null
+    if (ledgerRes.ok) {
+      const ledger = await ledgerRes.json()
+      rolloverBills.value = Array.isArray(ledger?.bills) ? ledger.bills : []
+    } else {
+      rolloverBills.value = []
+    }
+    rolloverClearStatus.value = 'ready'
+  } catch {
+    rolloverClearStatus.value = 'error'
+    rolloverClearError.value = "Couldn't load the rollover clear setting."
+  }
+}
+
+function requestRolloverClear() {
+  if (!selectedRolloverMonth.value || rolloverClearSaving.value) return
+  rolloverClearError.value = null
+  rolloverConfirmOpen.value = true
+}
+
+async function applyRolloverClear() {
+  const month = selectedRolloverMonth.value
+  if (!month || rolloverClearSaving.value) return
+  rolloverConfirmOpen.value = false
+  rolloverClearSaving.value = true
+  rolloverClearError.value = null
+  try {
+    const res = await fetch(`${getApiBase()}/rollover-clear`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ month }),
+    })
+    if (!res.ok) {
+      rolloverClearError.value = "Couldn't clear the rollover balance. Nothing was changed."
+      return
+    }
+    const data = await res.json()
+    if (!data?.month) {
+      rolloverClearError.value = "Couldn't clear the rollover balance. Nothing was changed."
+      return
+    }
+    rolloverClearMonth.value = data.month
+    rolloverClearLabel.value = data.label || formatMonthLabel(data.month)
+  } catch {
+    rolloverClearError.value = "Couldn't clear the rollover balance. Nothing was changed."
+  } finally {
+    rolloverClearSaving.value = false
+  }
+}
+
+async function undoRolloverClear() {
+  if (rolloverClearSaving.value) return
+  rolloverClearSaving.value = true
+  rolloverClearError.value = null
+  try {
+    const res = await fetch(`${getApiBase()}/rollover-clear`, { method: 'DELETE' })
+    if (!res.ok) {
+      rolloverClearError.value = "Couldn't undo the rollover clear. It is still in place."
+      return
+    }
+    rolloverClearMonth.value = null
+    rolloverClearLabel.value = null
+  } catch {
+    rolloverClearError.value = "Couldn't undo the rollover clear. It is still in place."
+  } finally {
+    rolloverClearSaving.value = false
+  }
+}
+
 onMounted(() => {
   loadUsers()
   loadPaymentsData()
   loadAppSettings()
   loadHaUsersAndServices()
+  loadRolloverClearControl()
 })
 </script>
 
@@ -828,4 +1082,134 @@ onMounted(() => {
 /* Button secondary */
 .ha-button-secondary { background: #e3f2fd; color: #1976d2; border: 1px solid #90caf9; }
 .ha-button-secondary:hover { background: #bbdefb; }
+
+.ha-rollover-clear {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #e0e0e0;
+}
+.ha-rollover-clear-title {
+  margin: 0 0 0.25rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #212121;
+}
+.ha-rollover-clear-desc {
+  margin-left: 0;
+  margin-bottom: 0.75rem;
+}
+.ha-rollover-clear-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-width: 100%;
+}
+.ha-rollover-clear-label {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #212121;
+}
+.ha-rollover-clear select {
+  min-height: 44px;
+  width: 100%;
+  max-width: 100%;
+  font-size: 1rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid #0088cc;
+  border-radius: 6px;
+  background: #fff;
+  color: #212121;
+}
+.ha-rollover-clear-btn,
+.ha-rollover-undo,
+.ha-rollover-dialog-btn {
+  min-height: 44px;
+  font-size: 1rem;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.ha-rollover-clear-btn,
+.ha-rollover-undo {
+  width: 100%;
+  max-width: 28rem;
+}
+.ha-rollover-clear-btn {
+  background: #0088cc;
+  color: #fff;
+  border: none;
+  font-weight: 600;
+  text-align: center;
+  white-space: normal;
+  line-height: 1.3;
+}
+.ha-rollover-clear-btn:hover:not(:disabled) {
+  background: #006699;
+}
+.ha-rollover-clear-btn:disabled,
+.ha-rollover-undo:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+.ha-rollover-undo {
+  background: #fff;
+  color: #01579b;
+  border: 2px solid #0088cc;
+  font-weight: 600;
+}
+.ha-rollover-undo:hover:not(:disabled) {
+  background: #e3f2fd;
+}
+.ha-rollover-clear select:focus-visible,
+.ha-rollover-clear-btn:focus-visible,
+.ha-rollover-undo:focus-visible,
+.ha-rollover-dialog-btn:focus-visible {
+  outline: 2px solid #01579b;
+  outline-offset: 2px;
+}
+.ha-rollover-clear-note {
+  margin: 0 0 0.6rem;
+  color: #01579b;
+  font-size: 1rem;
+  line-height: 1.4;
+}
+.ha-rollover-clear-empty {
+  margin: 0;
+  color: #424242;
+  font-size: 0.95rem;
+}
+.ha-rollover-clear-error {
+  margin: 0 0 0.6rem;
+  padding: 0.5rem 0.65rem;
+  background: #ffebee;
+  color: #b71c1c;
+  border-radius: 6px;
+  font-size: 0.95rem;
+}
+.ha-rollover-dialog-header {
+  background: #03a9f4;
+  color: #fff;
+  border-bottom: none;
+}
+.ha-rollover-dialog-actions {
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.ha-rollover-dialog-actions .ha-rollover-dialog-btn {
+  flex: 1 1 10rem;
+  width: auto;
+  max-width: none;
+  white-space: normal;
+}
+@media (min-width: 720px) {
+  .ha-rollover-clear-form {
+    display: grid;
+    grid-template-columns: minmax(8rem, auto) minmax(0, 1fr);
+    align-items: center;
+  }
+  .ha-rollover-clear-btn {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+}
 </style>
