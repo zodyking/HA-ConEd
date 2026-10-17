@@ -20,10 +20,9 @@ from prisma.models import (
     Bill, Payment, BillDetails, BillDocument, PayeeUser,
     AccountBalanceHistory, ScrapedData, Log, ScrapeHistory, AppSetting
 )
-from payee_rollover import portion_of_bill, settle_payee_bill
+from payee_rollover import format_cycle_label, settle_bill_payees
 from rollover_clear import (
     ROLLOVER_CLEAR_SETTING_KEY,
-    apply_rollover_clear_at_bill,
     bill_month_key,
     format_clear_month_label,
     marker_from_setting,
@@ -3555,6 +3554,11 @@ async def calculate_all_payee_balances() -> List[Dict[str, Any]]:
     
     results = []
     rollover_by_user = {u.id: 0.0 for u in users}
+    items_by_user = {u.id: [] for u in users}
+    payee_inputs = [
+        {"id": u.id, "name": u.name, "responsibility_percent": u.responsibilityPercent}
+        for u in users
+    ]
     # One marker: zero incoming rollover at the first bill on or after this month.
     clear_marker = await get_rollover_clear_month()
     
@@ -3594,30 +3598,26 @@ async def calculate_all_payee_balances() -> List[Dict[str, Any]]:
             det.billingPeriodStart if det else None,
             bill.billCycleDate,
         )
-        rollover_by_user, clear_marker = apply_rollover_clear_at_bill(
-            rollover_by_user, bill_month, clear_marker
+        # Split the cycle's new charges. Con Edison's previous balance is not
+        # a shared cost; it is the payee underpayment already tracked below.
+        cycle_total = decimal_to_float(det.totalFromBillingPeriod) if det else None
+        previous_balance = decimal_to_float(det.balanceFromPreviousBill) if det else None
+        if cycle_total is None and previous_balance is not None:
+            cycle_total = round(bill_total - previous_balance, 2)
+        if cycle_total is None:
+            cycle_total = bill_total
+        origin = format_cycle_label(bill.billCycleDate) or bill_month or "a previous bill"
+        payee_rows, rollover_by_user, items_by_user, clear_marker = settle_bill_payees(
+            payee_inputs,
+            payments_by_user,
+            rollover_by_user,
+            items_by_user,
+            cycle_total,
+            origin,
+            bill_month,
+            clear_marker,
         )
-        
-        # Calculate per-user status.
-        # share_of_bill is the portion (bill total x responsibility, once).
-        # current_balance is the signed carry into the next bill: positive
-        # still owed, negative credit. apply_rollover_clear_at_bill above
-        # zeroes that carry at the clear month; do not clamp credits to 0.
-        for user in users:
-            incoming = float(rollover_by_user.get(user.id) or 0.0)
-            settled = settle_payee_bill(
-                portion_of_bill(bill_total, user.responsibilityPercent),
-                payments_by_user.get(user.id, 0),
-                incoming,
-            )
-            rollover_by_user[user.id] = settled["current_balance"]
-
-            bill_result["payees"].append({
-                "user_id": user.id,
-                "name": user.name,
-                "responsibility_percent": user.responsibilityPercent,
-                **settled,
-            })
+        bill_result["payees"].extend(payee_rows)
         
         results.append(bill_result)
     
@@ -3651,6 +3651,7 @@ def _format_payee_summaries_for_frontend(raw: List[Dict[str, Any]]) -> Dict[int,
                 "share_of_bill_cumulative": p.get("share_of_bill_cumulative", 0),
                 "rollover_from_previous": p.get("rollover_from_previous", 0),
                 "current_balance": p.get("current_balance", 0),
+                "portion_reasons": p.get("portion_reasons") or [],
                 "status": "paid" if p.get("status") == "paid" else "partial" if p.get("status") == "overpaid" else "unpaid",
             }
             for p in s.get("payees") or []
