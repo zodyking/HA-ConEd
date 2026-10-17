@@ -170,7 +170,8 @@
                 </div>
                 <div class="ha-cal-legend">
                   <span><i class="ha-cal-swatch today"></i> Today</span>
-                  <span><i class="ha-cal-swatch period"></i> Current period</span>
+                  <span><i class="ha-cal-swatch period"></i> One billing period</span>
+                  <span><i class="ha-cal-swatch period-alt"></i> Next billing period</span>
                   <span><i class="ha-cal-swatch start"></i> Period start</span>
                   <span><i class="ha-cal-swatch end"></i> Period end</span>
                 </div>
@@ -193,6 +194,8 @@
                         'is-today': cell.isToday,
                         'is-selected': cell.date === selectedCalendarDate,
                         'in-period': cell.inPeriod,
+                        'period-band-0': cell.periodBand === 0,
+                        'period-band-1': cell.periodBand === 1,
                         'is-period-start': cell.isPeriodStart,
                         'is-period-end': cell.isPeriodEnd,
                         'is-future': cell.isFuture
@@ -235,7 +238,10 @@
                       </div>
                       <div>
                         <dt>Rate</dt>
-                        <dd>{{ selectedDayRateText }}</dd>
+                        <dd>
+                          {{ selectedDayRateText }}
+                          <span v-if="selectedDayRateEstimated" class="ha-cal-estimate">(Rates Estimated From Prior Month)</span>
+                        </dd>
                       </div>
                       <div>
                         <dt>Billing period</dt>
@@ -436,6 +442,7 @@ interface CalendarDay {
   cost: number | null
   kwh_cost: number | null
   rate_shares: CalendarRateShare[]
+  rate_estimated?: boolean
   day_offset: number
   is_today?: boolean
   is_partial?: boolean
@@ -457,6 +464,7 @@ interface CalendarCell {
   clickable: boolean
   isToday: boolean
   inPeriod: boolean
+  periodBand: number | null
   isPeriodStart: boolean
   isPeriodEnd: boolean
   isFuture: boolean
@@ -538,6 +546,7 @@ const calendarError = ref<string | null>(null)
 const calendarDays = ref<CalendarDay[]>([])
 const calendarToday = ref<string | null>(null)
 const billingPeriod = ref<BillingPeriod | null>(null)
+const billingPeriods = ref<BillingPeriod[]>([])
 const selectedDate = ref<string | null>(null)
 const selectedCalendarDate = ref<string | null>(null)
 const calendarMonth = ref({ year: new Date().getFullYear(), month: new Date().getMonth() })
@@ -716,6 +725,7 @@ function normalizeCalendarDay(day: Partial<CalendarDay> & { date: string }): Cal
     cost: day.cost ?? null,
     kwh_cost: day.kwh_cost ?? null,
     rate_shares: Array.isArray(day.rate_shares) ? day.rate_shares : [],
+    rate_estimated: !!day.rate_estimated,
     day_offset: day.day_offset ?? 0,
     is_today: day.is_today,
     is_partial: day.is_partial,
@@ -766,6 +776,22 @@ const canNextCalendarMonth = computed(() => {
   return idx >= 0 && idx < keys.length - 1
 })
 
+function periodBandForDate(date: string): { index: number; isStart: boolean; isEnd: boolean } | null {
+  const spans = [
+    ...billingPeriods.value.map((period) => ({ start: period.start, end: period.end })),
+  ]
+  const current = billingPeriod.value
+  if (current?.start && current?.end && !spans.some((span) => span.start === current.start && span.end === current.end)) {
+    spans.push({ start: current.start, end: current.end })
+  }
+  spans.sort((a, b) => a.start.localeCompare(b.start) || a.end.localeCompare(b.end))
+  const index = spans.findIndex((span) => date >= span.start && date <= span.end)
+  if (index < 0) return null
+  const span = spans[index]
+  if (!span) return null
+  return { index: index % 2, isStart: date === span.start, isEnd: date === span.end }
+}
+
 const calendarCells = computed((): CalendarCell[] => {
   const { year, month } = calendarMonth.value
   const first = new Date(year, month, 1)
@@ -785,6 +811,7 @@ const calendarCells = computed((): CalendarCell[] => {
       clickable: false,
       isToday: false,
       inPeriod: false,
+      periodBand: null,
       isPeriodStart: false,
       isPeriodEnd: false,
       isFuture: false
@@ -795,7 +822,8 @@ const calendarCells = computed((): CalendarCell[] => {
     const data = daysByDate.value.get(date) || null
     const isToday = date === today || !!data?.is_today
     const isFuture = !!(today && date > today)
-    const inPeriod = !!(periodStart && periodEnd && date >= periodStart && date <= periodEnd)
+    const band = periodBandForDate(date)
+    const inPeriod = band != null || !!(periodStart && periodEnd && date >= periodStart && date <= periodEnd)
     const clickable = !isFuture && (!!data || isToday)
     cells.push({
       key: date,
@@ -806,8 +834,9 @@ const calendarCells = computed((): CalendarCell[] => {
       clickable,
       isToday,
       inPeriod,
-      isPeriodStart: date === periodStart,
-      isPeriodEnd: date === periodEnd,
+      periodBand: band?.index ?? null,
+      isPeriodStart: band?.isStart || date === periodStart,
+      isPeriodEnd: band?.isEnd || date === periodEnd,
       isFuture
     })
   }
@@ -832,6 +861,8 @@ const selectedDayPeriodText = computed(() => {
   if (!shares.length) return '—'
   return shares.map(share => share.range_label || share.label).join('; ')
 })
+
+const selectedDayRateEstimated = computed(() => selectedCalendarDay.value?.rate_estimated === true)
 
 const selectedDayIsSplit = computed(() => (selectedCalendarDay.value?.rate_shares.length || 0) > 1)
 
@@ -941,6 +972,9 @@ async function fetchCalendarData(forceRefresh: boolean = false) {
     calendarDays.value = (data.days || []).map((day: CalendarDay) => normalizeCalendarDay(day))
     calendarToday.value = data.today || null
     billingPeriod.value = data.billing_period || null
+    billingPeriods.value = Array.isArray(data.billing_periods)
+      ? data.billing_periods.filter((period: BillingPeriod) => period?.start && period?.end)
+      : []
     realtimeTotalDays.value = calendarDays.value.length
     if (calendarDays.value.length) {
       const stillInRange = availableMonthKeys.value.includes(currentMonthKey.value)
@@ -1810,8 +1844,8 @@ onUnmounted(() => {
 }
 
 .ha-cal-swatch.period {
-  background: #e1f5fe;
-  border-color: #81d4fa;
+  background: #e3f6ff;
+  border-color: #90caf9;
 }
 
 .ha-cal-swatch.start {
@@ -1883,9 +1917,28 @@ onUnmounted(() => {
   background: #fafafa;
 }
 
-.ha-cal-cell.in-period {
-  background: #f3fbff;
-  border-color: #b3e5fc;
+.ha-cal-cell.period-band-0 {
+  background: #e3f6ff;
+  border-color: #90caf9;
+}
+
+.ha-cal-cell.period-band-1 {
+  background: #fff4e8;
+  border-color: #ffcc80;
+}
+
+.ha-cal-estimate {
+  display: block;
+  margin-top: 0.15rem;
+  color: #6d4c41;
+  font-size: 0.72rem;
+  font-weight: 500;
+  line-height: 1.3;
+}
+
+.ha-cal-swatch.period-alt {
+  background: #fff4e8;
+  border-color: #ffcc80;
 }
 
 .ha-cal-cell.is-clickable {

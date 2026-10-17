@@ -115,6 +115,73 @@ def price_day_kwh(day: date, kwh: float, periods: list) -> dict:
     return {"cost": cost, "kwh_cost": kwh_cost, "rate_shares": rate_shares}
 
 
+PRIOR_MONTH_ESTIMATE_NOTE = "Rates Estimated From Prior Month"
+
+
+def _latest_billed_period(periods: list) -> Optional[dict]:
+    latest = None
+    latest_end = None
+    for period in periods or []:
+        start = _as_date(period.get("start") or period.get("billing_period_start"))
+        end = _as_date(period.get("end") or period.get("billing_period_end"))
+        rate = resolve_period_rate(period)
+        if start is None or end is None or rate is None or start > end:
+            continue
+        if latest_end is None or end > latest_end:
+            latest_end = end
+            latest = {
+                "bill_id": period.get("bill_id"),
+                "start": start.isoformat(),
+                "end": end.isoformat(),
+                "label": str(period.get("label") or _range_label(start, end)),
+                "range_label": _range_label(start, end),
+                "kwh_cost": rate,
+                "_end": end,
+            }
+    return latest
+
+
+def apply_prior_month_estimate(days: list, periods: list) -> list:
+    """Price days after the last billed period with that period's rate.
+
+    The open cycle has no bill yet, so its rate is not known. Those days
+    keep a temporary cost from the previous period and are marked estimated.
+    Days inside a billed period, and days before the first bill, are unchanged.
+    """
+    latest = _latest_billed_period(periods)
+    if latest is None:
+        return [{**(row or {}), "rate_estimated": bool((row or {}).get("rate_estimated"))} for row in days or []]
+
+    estimated = []
+    for row in days or []:
+        current = dict(row or {})
+        day = _as_date(current.get("date"))
+        already_priced = bool(current.get("rate_shares"))
+        try:
+            kwh = float(current.get("kwh") or 0)
+        except (TypeError, ValueError):
+            kwh = 0.0
+        if (
+            day is not None
+            and day > latest["_end"]
+            and not already_priced
+            and kwh > 0
+        ):
+            rate = latest["kwh_cost"]
+            share = {key: value for key, value in latest.items() if not key.startswith("_")}
+            share["kwh"] = round(kwh, 4)
+            current.update({
+                "cost": round(kwh * rate, 2),
+                "kwh_cost": rate,
+                "rate_estimated": True,
+                "rate_shares": [share],
+            })
+        else:
+            current["rate_estimated"] = bool(current.get("rate_estimated"))
+        estimated.append(current)
+    return estimated
+
+
 def price_calendar_days(days: list, periods: list) -> list:
     """Return a new list of day rows with period cost fields added."""
     priced = []
@@ -125,5 +192,5 @@ def price_calendar_days(days: list, periods: list) -> list:
             costs = {"cost": None, "kwh_cost": None, "rate_shares": []}
         else:
             costs = price_day_kwh(day, kwh, periods)
-        priced.append({**(row or {}), **costs})
-    return priced
+        priced.append({**(row or {}), **costs, "rate_estimated": False})
+    return apply_prior_month_estimate(priced, periods)

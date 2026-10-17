@@ -170,12 +170,16 @@ def portion_breakdown_lines(
     if not use_rollover:
         lines.append("Rollover balance not applied")
         return lines
+    details = portion_reason_lines(incoming_items)
+    if details:
+        # The dated lines already add up to the rollover. Do not also print the total.
+        lines.extend(details)
+        return lines
     incoming = _sum_items(incoming_items)
     if incoming < -0.009:
         lines.append(f"{money_label(abs(incoming))} rollover credit")
     else:
         lines.append(f"{money_label(max(incoming, 0.0))} rollover balance")
-    lines.extend(portion_reason_lines(incoming_items))
     return lines
 
 

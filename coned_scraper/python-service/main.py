@@ -29,7 +29,7 @@ import db
 app = FastAPI(title="Con Edison API")
 
 # Code version for deployment verification
-CODE_VERSION = "1.3.99"
+CODE_VERSION = "1.3.100"
 
 @app.on_event("startup")
 async def startup():
@@ -3146,6 +3146,7 @@ async def get_realtime_calendar(refresh: bool = False):
             "cost": None if priced is None else priced.get("cost"),
             "kwh_cost": None if priced is None else priced.get("kwh_cost"),
             "rate_shares": [] if priced is None else (priced.get("rate_shares") or []),
+            "rate_estimated": False if priced is None else bool(priced.get("rate_estimated")),
             "day_offset": row["day_offset"],
             "is_today": bool(row.get("is_today")),
             "is_partial": bool(row.get("is_partial")),
