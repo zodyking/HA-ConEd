@@ -156,7 +156,8 @@ def portion_reason_lines(items: Sequence[Mapping[str, Any]]) -> List[str]:
         if amount > 0:
             lines.append(f"{money_label(amount)} from {origin} underpayment")
         else:
-            lines.append(f"{money_label(abs(amount))} credit from {origin} overpayment")
+            # A leading minus so the lines add up to the amount owed.
+            lines.append(f"-{money_label(abs(amount))} credit from {origin} overpayment")
     return lines
 
 

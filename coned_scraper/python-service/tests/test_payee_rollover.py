@@ -218,6 +218,40 @@ class PayeeRolloverTests(unittest.TestCase):
         self.assertEqual(_payee(rows, 4, 2)["rollover_from_previous"], 0.0)
         self.assertEqual(_payee(rows, 4, 2)["amount_due"], 100.0)
 
+    def test_owed_amount_is_cycle_charge_plus_signed_rollover(self):
+        """A credit is subtracted. The owed amount is not the raw cycle charge."""
+        bills = [
+            {
+                "month": "2026-08",
+                "cycle_date": "8/14/2026",
+                "cycle_total": 271.94,
+                "payments": {1: 136.72, 2: 135.21},
+            },
+            {
+                "month": "2026-09",
+                "cycle_date": "9/15/2026",
+                "cycle_total": 271.94,
+                "payments": {1: 136.00, 2: 0.0},
+            },
+        ]
+        payees = [
+            {"id": 1, "name": "Brandon", "responsibility_percent": 50},
+            {"id": 2, "name": "Nigel", "responsibility_percent": 50},
+        ]
+        september = walk_payee_rollover(bills, payees)[1]
+        brandon = _payee([september], 0, 1)
+        nigel = _payee([september], 0, 2)
+        self.assertEqual(
+            brandon["portion_reasons"],
+            ["$135.97 cycle charge", "-$0.75 credit from 8/14/26 overpayment"],
+        )
+        self.assertEqual(brandon["amount_due"], 135.22)
+        self.assertEqual(
+            nigel["portion_reasons"],
+            ["$135.97 cycle charge", "$0.76 from 8/14/26 underpayment"],
+        )
+        self.assertEqual(nigel["amount_due"], 136.73)
+
     def test_clear_month_zeroes_a_credit_then_later_bills_carry(self):
         rows = walk_payee_rollover(BILLS, [ALICE, BOB], clear_month="2024-02")
         uncleared = walk_payee_rollover(BILLS, [ALICE, BOB])
