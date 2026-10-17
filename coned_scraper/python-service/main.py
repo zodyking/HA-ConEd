@@ -29,11 +29,22 @@ import db
 app = FastAPI(title="Con Edison API")
 
 # Code version for deployment verification
-CODE_VERSION = "1.3.96"
+CODE_VERSION = "1.3.97"
 
 @app.on_event("startup")
 async def startup():
     """Connect to PostgreSQL database on startup (with retries for startup race)"""
+    loop = asyncio.get_running_loop()
+
+    def _asyncio_exception_handler(running_loop, context):
+        exc = context.get("exception")
+        logging.error(
+            "Unhandled asyncio error: %s",
+            context.get("message"),
+            exc_info=exc if isinstance(exc, BaseException) else None,
+        )
+
+    loop.set_exception_handler(_asyncio_exception_handler)
     for attempt in range(10):
         try:
             await db.connect()
@@ -43,12 +54,31 @@ async def startup():
                 logging.warning(f"DB connect attempt {attempt + 1}/10 failed: {e}, retrying in 2s...")
                 await asyncio.sleep(2)
             else:
-                raise
+                logging.error(
+                    "Database unavailable after 10 attempts; the API will stay up and retry on each request: %s",
+                    e,
+                )
 
 @app.on_event("shutdown")
 async def shutdown():
     """Disconnect from database on shutdown"""
     await db.disconnect()
+
+
+async def _with_db_retry(operation, label: str):
+    """Run a DB operation once more after reconnecting when the engine connection died."""
+    from safe_values import is_db_connection_error
+
+    try:
+        return await operation()
+    except HTTPException:
+        raise
+    except Exception as e:
+        if not is_db_connection_error(e):
+            raise
+        logging.warning("%s hit a database connection error (%s); reconnecting once", label, e)
+        await db.reconnect()
+        return await operation()
 
 @app.get("/api/version")
 async def get_version():
@@ -574,6 +604,15 @@ _claim_resend_task = None
 
 @app.on_event("startup")
 async def startup_event():
+    global _scheduler_task, _due_reminder_task, _claim_resend_task
+    global _payee_balance_reminder_task, _underpayment_streak_tts_task
+    try:
+        await _start_background_services()
+    except Exception as e:
+        logging.exception("Background startup failed; API will keep serving: %s", e)
+
+
+async def _start_background_services():
     global _scheduler_task, _due_reminder_task, _claim_resend_task
     global _payee_balance_reminder_task, _underpayment_streak_tts_task
 
@@ -1463,9 +1502,13 @@ async def get_scrape_history_endpoint(limit: int = 50):
 
 @app.get("/api/scraped-data")
 async def get_scraped_data_endpoint(limit: int = 100):
-    """Get scraped data"""
-    data = await db.get_all_scraped_data()
-    return {"data": data}
+    """Get scraped data. Limit is enforced so a full history dump cannot exhaust memory."""
+    try:
+        data = await _with_db_retry(lambda: db.get_all_scraped_data(limit), "scraped-data")
+        return {"data": data}
+    except Exception as e:
+        logging.exception("scraped-data failed")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/scraped-data/latest")
 async def get_latest_data():
@@ -1691,7 +1734,7 @@ async def parse_bill_pdf_endpoint(bill_id: int):
     if not os.path.exists(pdf_path):
         raise HTTPException(status_code=404, detail="PDF file missing")
     
-    parsed_data = parse_coned_bill_pdf(str(pdf_path))
+    parsed_data = await asyncio.to_thread(parse_coned_bill_pdf, str(pdf_path))
     if "error" in parsed_data:
         raise HTTPException(status_code=500, detail=parsed_data["error"])
 
@@ -1703,9 +1746,13 @@ async def parse_bill_pdf_endpoint(bill_id: int):
 @app.get("/api/bill-history")
 async def get_bill_history_endpoint():
     """Get bill history data for graphing"""
-    # Using db module for database operations
-    history = await db.get_bill_history_for_graph()
-    return {"history": history}
+    try:
+        history = await _with_db_retry(db.get_bill_history_for_graph, "bill-history")
+        return {"history": history}
+    except Exception as e:
+        logging.exception("bill-history failed")
+        await db.add_log("error", f"Failed to get bill history: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/bill-details/all")
 async def get_all_bill_details_endpoint():
@@ -1747,7 +1794,7 @@ async def reparse_all_bill_pdfs():
             continue
         
         try:
-            parsed_data = parse_coned_bill_pdf(str(pdf_path))
+            parsed_data = await asyncio.to_thread(parse_coned_bill_pdf, str(pdf_path))
             if "error" in parsed_data:
                 results["failed"] += 1
                 results["errors"].append(f"Bill {bill_id}: {parsed_data['error']}")
@@ -1886,13 +1933,55 @@ async def save_automated_schedule(schedule: ScheduleModel):
 async def get_ledger():
     """Get complete ledger data from normalized database tables"""
     try:
-        data = await db.get_ledger_data()
+        data = await _with_db_retry(db.get_ledger_data, "ledger")
         pv = await get_payment_verification_settings()
         data["petitions_enabled"] = pv.get("petitions_enabled", True)
         return data
     except Exception as e:
         await db.add_log("error", f"Failed to get ledger: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+class RolloverClearMonthModel(BaseModel):
+    month: str
+
+
+@app.get("/api/rollover-clear")
+async def get_rollover_clear_endpoint():
+    """Active rollover clear marker, if the user has zeroed the carry from a month."""
+    try:
+        month = await db.get_rollover_clear_month()
+        return {
+            "month": month,
+            "label": db.format_clear_month_label(month) if month else None,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/rollover-clear")
+async def put_rollover_clear_endpoint(data: RolloverClearMonthModel):
+    """Clear incoming rollover starting at month (YYYY-MM). Replaces any previous marker."""
+    try:
+        month = await db.set_rollover_clear_month(data.month)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    return {
+        "month": month,
+        "label": db.format_clear_month_label(month),
+    }
+
+
+@app.delete("/api/rollover-clear")
+async def delete_rollover_clear_endpoint():
+    """Undo the clear. The previous rollover chain is used again."""
+    try:
+        await db.clear_rollover_clear_month()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    return {"month": None, "label": None}
 
 
 @app.get("/api/debug/pending-bill")
@@ -2968,7 +3057,7 @@ async def get_realtime_usage(day_offset: int = 0, date: Optional[str] = None, re
 
 @app.get("/api/meter-reading/calendar")
 async def get_realtime_calendar(refresh: bool = False):
-    """Daily kWh and estimated cost for the usage calendar (US Eastern days)."""
+    """Daily kWh and period-rate cost for the usage calendar (US Eastern days)."""
     from meter_service import get_meter_service
 
     service = get_meter_service()
@@ -2979,27 +3068,33 @@ async def get_realtime_calendar(refresh: bool = False):
         await service.fetch_quarter_hour_reads(720)
 
     summaries = await db.get_realtime_daily_summaries()
+    # Price the same kWh the calendar displays (2 decimal places).
+    display_rows = [
+        {**row, "kwh": round(float(row.get("kwh") or 0), 2)}
+        for row in summaries
+    ]
 
-    kwh_cost = None
-    latest_bill = await db.get_latest_bill_with_details()
-    if latest_bill and latest_bill.get("kwh_cost"):
-        kwh_cost = float(latest_bill["kwh_cost"])
-    forecast = await service.get_cached_forecast()
-    if not kwh_cost and forecast:
-        fc = forecast.get("forecasted_cost")
-        fu = forecast.get("forecasted_usage")
-        if fc is not None and fu and float(fu) > 0:
-            kwh_cost = float(fc) / float(fu)
+    periods = []
+    priced_rows = None
+    try:
+        from calendar_rates import price_calendar_days
+        periods = await db.get_billing_rate_periods()
+        priced_rows = price_calendar_days(display_rows, periods)
+    except Exception:
+        logging.exception("Usage calendar period-rate pricing failed")
+
+    if not priced_rows or len(priced_rows) != len(display_rows):
+        priced_rows = [None] * len(display_rows)
 
     today = datetime.now(db.EASTERN).date().isoformat()
     days = []
-    for row in summaries:
-        kwh = float(row.get("kwh") or 0)
-        cost = round(kwh * kwh_cost, 2) if kwh_cost else None
+    for row, priced in zip(display_rows, priced_rows):
         days.append({
             "date": row["date"],
-            "kwh": round(kwh, 2),
-            "cost": cost,
+            "kwh": row["kwh"],
+            "cost": None if priced is None else priced.get("cost"),
+            "kwh_cost": None if priced is None else priced.get("kwh_cost"),
+            "rate_shares": [] if priced is None else (priced.get("rate_shares") or []),
             "day_offset": row["day_offset"],
             "is_today": bool(row.get("is_today")),
             "is_partial": bool(row.get("is_partial")),
@@ -3009,7 +3104,8 @@ async def get_realtime_calendar(refresh: bool = False):
     return {
         "success": True,
         "today": today,
-        "kwh_cost": kwh_cost,
+        "kwh_cost": None,
+        "billing_periods": periods,
         "billing_period": await _current_billing_period(),
         "days": days,
         "months": months,

@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.3.97
+
+### Added
+- Ledger and History open from the last successful data, then refresh in the background with an updating status
+- Payees & Payments can clear the rollover balance from a chosen month, and undo that clear
+- Usage calendar prices each day with that billing period’s actual all-in rate
+
+### Changed
+- Usage calendar fits a phone: compact day cells, larger month controls, and usage and cost in a panel under the grid
+
+### Fixed
+- Rollover keeps overpayment credits, so the next bill is reduced instead of charging the full portion again
+- Ledger, bill history, and scraped data no longer fail on mixed timezone dates, null kWh, non-object charge JSON, or an unbounded scrape load
+- Meter fetches time out and no longer pile up; PDF parsing no longer blocks the API; a cancelled scrape still closes the browser
+
 ## 1.3.96
 
 ### Added

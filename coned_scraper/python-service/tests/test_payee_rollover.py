@@ -1,0 +1,135 @@
+"""Rollover carries both unpaid amounts and overpayment credits.
+
+Portion owed stays bill_total * responsibility percent. That percent is not
+applied to the carry. A clear month still zeroes the incoming carry.
+"""
+import unittest
+
+from payee_rollover import portion_of_bill, settle_payee_bill, walk_payee_rollover
+
+
+ALICE = {"id": 1, "name": "Alice", "responsibility_percent": 60}
+BOB = {"id": 2, "name": "Bob", "responsibility_percent": 40}
+
+# $100 bills. Alice's portion is always $60, Bob's always $40.
+BILLS = [
+    {"month": "2024-01", "bill_total": 100.0, "payments": {1: 40.0, 2: 50.0}},
+    {"month": "2024-02", "bill_total": 100.0, "payments": {1: 80.0, 2: 30.0}},
+    {"month": "2024-03", "bill_total": 100.0, "payments": {1: 100.0, 2: 20.0}},
+    {"month": "2024-04", "bill_total": 100.0, "payments": {1: 20.0, 2: 60.0}},
+]
+
+
+def _payee(rows, index, user_id):
+    return next(p for p in rows[index]["payees"] if p["user_id"] == user_id)
+
+
+class PayeeRolloverTests(unittest.TestCase):
+    def test_portion_and_percent_ignore_carry(self):
+        self.assertEqual(portion_of_bill(100.0, 60), 60.0)
+        self.assertEqual(portion_of_bill(100.0, 40), 40.0)
+        # A $20 debt is added in full. It is not multiplied by 60% again ($12).
+        settled = settle_payee_bill(60.0, 0.0, 20.0)
+        self.assertEqual(settled["share_of_bill"], 60.0)
+        self.assertEqual(settled["amount_due"], 80.0)
+
+    def test_overpayment_credit_reduces_the_next_bill(self):
+        """$100 portion, pay $140. Next $100 bill is $60, not $100.
+
+        Before: the $40 credit was dropped, so the next bill still showed $100
+        and a $60 payment was $40 under. After: the next bill is $60 and $60
+        settles it.
+        """
+        first = settle_payee_bill(100.0, 140.0, 0.0)
+        self.assertEqual(first["share_of_bill"], 100.0)
+        self.assertEqual(first["current_balance"], -40.0)
+        second = settle_payee_bill(100.0, 60.0, first["current_balance"])
+        self.assertEqual(second["rollover_from_previous"], -40.0)
+        self.assertEqual(second["amount_due"], 60.0)
+        self.assertEqual(second["share_of_bill_cumulative"], 60.0)
+        self.assertEqual(second["status"], "paid")
+        self.assertEqual(second["current_balance"], 0.0)
+
+    def test_multi_bill_chain_carries_debt_and_credit(self):
+        rows = walk_payee_rollover(BILLS, [ALICE, BOB])
+
+        # January: Alice short $20. Bob over by $10.
+        alice_jan = _payee(rows, 0, 1)
+        bob_jan = _payee(rows, 0, 2)
+        self.assertEqual(alice_jan["share_of_bill"], 60.0)
+        self.assertEqual(bob_jan["share_of_bill"], 40.0)
+        self.assertEqual(alice_jan["current_balance"], 20.0)
+        self.assertEqual(bob_jan["current_balance"], -10.0)
+
+        # February: Alice pays the $60 portion plus the $20 debt.
+        # Bob's $10 credit makes $30 the amount due, and $30 settles it.
+        # Before the fix Bob's credit was dropped, so $30 against a $40
+        # portion was $10 under.
+        alice_feb = _payee(rows, 1, 1)
+        bob_feb = _payee(rows, 1, 2)
+        self.assertEqual(alice_feb["amount_due"], 80.0)
+        self.assertEqual(alice_feb["status"], "paid")
+        self.assertEqual(alice_feb["current_balance"], 0.0)
+        self.assertEqual(bob_feb["rollover_from_previous"], -10.0)
+        self.assertEqual(bob_feb["share_of_bill"], 40.0)
+        self.assertEqual(bob_feb["amount_due"], 30.0)
+        self.assertEqual(bob_feb["status"], "paid")
+
+        # March: Alice overpays the $60 portion by $40. Bob is short $20.
+        alice_mar = _payee(rows, 2, 1)
+        bob_mar = _payee(rows, 2, 2)
+        self.assertEqual(alice_mar["current_balance"], -40.0)
+        self.assertEqual(bob_mar["current_balance"], 20.0)
+
+        # April: Alice owes $20 ($60 - $40 credit) and pays $20.
+        # Before the fix April still showed $60, so $20 was $40 under.
+        # Bob owes $60 ($40 + $20) and pays $60.
+        alice_apr = _payee(rows, 3, 1)
+        bob_apr = _payee(rows, 3, 2)
+        self.assertEqual(alice_apr["share_of_bill"], 60.0)
+        self.assertEqual(alice_apr["rollover_from_previous"], -40.0)
+        self.assertEqual(alice_apr["amount_due"], 20.0)
+        self.assertEqual(alice_apr["status"], "paid")
+        self.assertEqual(bob_apr["amount_due"], 60.0)
+        self.assertEqual(bob_apr["status"], "paid")
+        self.assertEqual(bob_apr["current_balance"], 0.0)
+
+    def test_underpayment_chain_still_adds_the_remainder(self):
+        bills = [
+            {"month": "2024-01", "bill_total": 100.0, "payments": {1: 40.0}},
+            {"month": "2024-02", "bill_total": 100.0, "payments": {1: 100.0}},
+            {"month": "2024-03", "bill_total": 100.0, "payments": {1: 70.0}},
+            {"month": "2024-04", "bill_total": 100.0, "payments": {1: 100.0}},
+        ]
+        payees = [{"id": 1, "name": "Alex", "responsibility_percent": 100}]
+        rows = walk_payee_rollover(bills, payees)
+        self.assertEqual(_payee(rows, 0, 1)["current_balance"], 60.0)
+        self.assertEqual(_payee(rows, 1, 1)["amount_due"], 160.0)
+        self.assertEqual(_payee(rows, 1, 1)["current_balance"], 60.0)
+        self.assertEqual(_payee(rows, 2, 1)["amount_due"], 160.0)
+        self.assertEqual(_payee(rows, 2, 1)["current_balance"], 90.0)
+        self.assertEqual(_payee(rows, 3, 1)["rollover_from_previous"], 90.0)
+        self.assertEqual(_payee(rows, 3, 1)["amount_due"], 190.0)
+
+    def test_clear_month_zeroes_a_credit_then_later_bills_carry(self):
+        rows = walk_payee_rollover(BILLS, [ALICE, BOB], clear_month="2024-02")
+        uncleared = walk_payee_rollover(BILLS, [ALICE, BOB])
+
+        self.assertEqual(_payee(rows, 0, 1)["current_balance"], 20.0)
+        self.assertEqual(_payee(rows, 0, 2)["current_balance"], -10.0)
+        # February incoming debt and credit are both cleared.
+        self.assertEqual(_payee(rows, 1, 1)["rollover_from_previous"], 0.0)
+        self.assertEqual(_payee(rows, 1, 1)["amount_due"], 60.0)
+        self.assertEqual(_payee(rows, 1, 2)["rollover_from_previous"], 0.0)
+        self.assertEqual(_payee(rows, 1, 2)["amount_due"], 40.0)
+        # Alice paid $80 against a cleared $60 portion, so $20 credit carries to March.
+        self.assertEqual(_payee(rows, 2, 1)["rollover_from_previous"], -20.0)
+        self.assertEqual(_payee(rows, 2, 1)["amount_due"], 40.0)
+        self.assertNotEqual(
+            _payee(rows, 1, 2)["amount_due"],
+            _payee(uncleared, 1, 2)["amount_due"],
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()
