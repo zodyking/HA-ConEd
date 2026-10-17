@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.101
+
+### Fixed
+- A rollover credit is shown with a minus, so the cycle charge and the credit add up to the amount that payee owes
+
 ## 1.3.100
 
 ### Changed
