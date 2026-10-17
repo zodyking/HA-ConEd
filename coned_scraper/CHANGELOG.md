@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.3.99
+
+### Added
+- Payee breakdown lists the cycle charge and the rollover balance, plus the bill date of any unpaid amount
+- Payees & Payments can start bill only or rollover at more than one month. Each switch applies from that month forward
+- The ledger notes the first bill of a switch and when each method fits
+
+### Changed
+- Rollover counting starts at the switch. Earlier bills stay on the method they already used, and a later rollover switch starts from zero again
+
 ## 1.3.98
 
 ### Fixed
