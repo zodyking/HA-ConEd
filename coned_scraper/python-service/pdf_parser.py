@@ -308,6 +308,19 @@ def _parse_page2(text: str, result: Dict[str, Any]):
     if elec_total_match:
         result["electricity_total"] = _parse_amount(elec_total_match.group(1))
 
+    late_match = re.search(
+        r"Late\s+payment\s+charge\s*\$?([\d,]+\.?\d*)",
+        full_text,
+        re.IGNORECASE,
+    )
+    if late_match:
+        late_fee = _parse_amount(late_match.group(1))
+        if late_fee > 0:
+            result["late_payment_charge"] = late_fee
+            supply_charges = result.get("supply_charges") or {}
+            supply_charges["late_payment_charge"] = late_fee
+            result["supply_charges"] = supply_charges
+
 
 def _parse_amount(amount_str: str) -> float:
     """Parse a currency amount string to float."""

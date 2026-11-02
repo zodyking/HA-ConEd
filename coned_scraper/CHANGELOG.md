@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.102
+
+### Fixed
+- Rollover payee amounts now add up to the Con Edison bill to the penny. Leftover cents stay on the cycle charge instead of drifting onto the next bill
+
+### Added
+- A late fee is charged to the payee who missed the due date. If both missed it, they split it evenly, and the line points to that bill PDF
+
 ## 1.3.101
 
 ### Fixed

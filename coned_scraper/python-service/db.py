@@ -20,7 +20,13 @@ from prisma.models import (
     Bill, Payment, BillDetails, BillDocument, PayeeUser,
     AccountBalanceHistory, ScrapedData, Log, ScrapeHistory, AppSetting
 )
-from payee_rollover import format_cycle_label, normalize_switches, settle_bill_payees, span_flags
+from payee_rollover import (
+    format_cycle_label,
+    normalize_switches,
+    payees_who_caused_late_fee,
+    settle_bill_payees,
+    span_flags,
+)
 from rollover_clear import (
     ROLLOVER_CLEAR_SETTING_KEY,
     bill_month_key,
@@ -3597,6 +3603,24 @@ async def get_ledger_data() -> Dict[str, Any]:
 # Payee Balance Calculations
 # =============================================================================
 
+def _late_fee_from_details(det) -> float:
+    """Late payment charge parsed onto the bill, stored with the supply charges."""
+    if det is None:
+        return 0.0
+    raw = getattr(det, "supplyCharges", None)
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except (TypeError, ValueError):
+            return 0.0
+    if not isinstance(raw, dict):
+        return 0.0
+    try:
+        return round(max(float(raw.get("late_payment_charge") or 0.0), 0.0), 2)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 async def calculate_all_payee_balances() -> List[Dict[str, Any]]:
     """Calculate payee balances for all bills"""
     await ensure_connected()
@@ -3620,6 +3644,7 @@ async def calculate_all_payee_balances() -> List[Dict[str, Any]]:
     ]
     switches = await get_calculation_switches()
     previous_mode = None
+    previous_context = None
     
     for bill in reversed(bills):  # Process oldest first for rollover
         bill_total = decimal_to_float(bill.billTotal) or 0
@@ -3641,13 +3666,17 @@ async def calculate_all_payee_balances() -> List[Dict[str, Any]]:
             "payees": [],
         }
         
-        # Calculate payments by user
+        # Calculate payments by user. Dates decide who caused a late fee.
         payments_by_user = {}
+        payment_events = []
         for p in bill.payments or []:
             user_id = p.payeeUserId or 0  # 0 for unassigned
+            amount = decimal_to_float(p.amount) or 0
             if user_id not in payments_by_user:
                 payments_by_user[user_id] = 0
-            payments_by_user[user_id] += decimal_to_float(p.amount) or 0
+            payments_by_user[user_id] += amount
+            paid_on = p.paymentDate.date().isoformat() if getattr(p, "paymentDate", None) else None
+            payment_events.append({"user_id": user_id, "amount": amount, "date": paid_on})
         
         total_paid = sum(payments_by_user.values())
         bill_result["total_paid"] = total_paid
@@ -3669,6 +3698,21 @@ async def calculate_all_payee_balances() -> List[Dict[str, Any]]:
         use_rollover, reset_incoming, note, previous_mode = span_flags(
             bill_month, switches, previous_mode
         )
+        late_fee = _late_fee_from_details(det)
+        late_ids = []
+        if late_fee > 0.009 and previous_context is not None:
+            late_ids = payees_who_caused_late_fee(
+                previous_context["payees"],
+                previous_context.get("due_date"),
+                previous_context.get("payments") or [],
+            )
+            if not late_ids:
+                late_ids = [
+                    payee["user_id"]
+                    for payee in previous_context["payees"]
+                    if float(payee.get("responsibility_percent") or 0) > 0
+                    and float(payee.get("current_balance") or 0) > 0.009
+                ]
         payee_rows, rollover_by_user, items_by_user, _clear_marker = settle_bill_payees(
             payee_inputs,
             payments_by_user,
@@ -3680,7 +3724,16 @@ async def calculate_all_payee_balances() -> List[Dict[str, Any]]:
             None,
             use_rollover=use_rollover,
             reset_incoming=reset_incoming,
+            statement_total=bill_total if bill_total > 0 else None,
+            late_fee=late_fee,
+            late_fee_ids=late_ids,
+            late_fee_label=origin,
         )
+        previous_context = {
+            "payees": payee_rows,
+            "due_date": det.dueDate.date().isoformat() if det and det.dueDate else None,
+            "payments": payment_events,
+        }
         bill_result["uses_rollover"] = use_rollover
         bill_result["calculation_note"] = note
         bill_result["payees"].extend(payee_rows)
