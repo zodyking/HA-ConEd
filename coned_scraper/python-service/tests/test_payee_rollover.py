@@ -5,7 +5,7 @@ applied to the carry. A clear month still zeroes the incoming carry.
 """
 import unittest
 
-from payee_rollover import portion_of_bill, settle_payee_bill, walk_payee_rollover
+from payee_rollover import allocate_portions, portion_of_bill, settle_payee_bill, walk_payee_rollover
 
 
 ALICE = {"id": 1, "name": "Alice", "responsibility_percent": 60}
@@ -251,6 +251,130 @@ class PayeeRolloverTests(unittest.TestCase):
             ["$135.97 cycle charge", "$0.76 from 8/14/26 underpayment"],
         )
         self.assertEqual(nigel["amount_due"], 136.73)
+
+    def test_portions_sum_to_the_cycle_when_the_total_has_an_odd_cent(self):
+        payees = [
+            {"id": 1, "name": "Brandon", "responsibility_percent": 50},
+            {"id": 2, "name": "Nigel", "responsibility_percent": 50},
+        ]
+        shares = allocate_portions(271.93, payees)
+        self.assertEqual(round(shares[1] + shares[2], 2), 271.93)
+
+    def test_rollover_dues_match_the_statement_to_the_penny(self):
+        bills = [
+            {
+                "month": "2026-08",
+                "cycle_date": "8/14/2026",
+                "cycle_total": 271.94,
+                "statement_total": 271.94,
+                "payments": {1: 136.72, 2: 135.21},
+            },
+            {
+                "month": "2026-09",
+                "cycle_date": "9/15/2026",
+                "cycle_total": 271.94,
+                "statement_total": 271.93,
+                "payments": {1: 136.00, 2: 0.0},
+            },
+            {
+                "month": "2026-10",
+                "cycle_date": "10/14/2026",
+                "cycle_total": 182.06,
+                "statement_total": 317.99,
+                "payments": {1: 90.25, 2: 50.0},
+            },
+        ]
+        payees = [
+            {"id": 1, "name": "Brandon", "responsibility_percent": 50},
+            {"id": 2, "name": "Nigel", "responsibility_percent": 50},
+        ]
+        rows = walk_payee_rollover(bills, payees)
+        for bill, row in zip(bills, rows):
+            due = round(sum(payee["amount_due"] for payee in row["payees"]), 2)
+            self.assertEqual(due, bill["statement_total"])
+
+    def test_a_previous_balance_is_not_split_just_to_match_the_statement(self):
+        payees = [
+            {"id": 1, "name": "Brandon", "responsibility_percent": 50},
+            {"id": 2, "name": "Nigel", "responsibility_percent": 50},
+        ]
+        rows = walk_payee_rollover(
+            [{"month": "2026-10", "cycle_total": 200.0, "statement_total": 250.0, "payments": {}}],
+            payees,
+        )
+        self.assertEqual(_payee(rows, 0, 1)["amount_due"], 100.0)
+        self.assertEqual(_payee(rows, 0, 2)["amount_due"], 100.0)
+
+    def test_late_fee_goes_to_the_payee_who_missed_the_due_date(self):
+        payees = [
+            {"id": 1, "name": "Brandon", "responsibility_percent": 50},
+            {"id": 2, "name": "Nigel", "responsibility_percent": 50},
+        ]
+        bills = [
+            {
+                "month": "2026-09",
+                "cycle_date": "9/15/2026",
+                "cycle_total": 200.0,
+                "statement_total": 200.0,
+                "due_date": "2026-10-01",
+                "payments": {1: 100.0, 2: 0.0},
+                "payment_events": [
+                    {"user_id": 1, "amount": 100.0, "date": "2026-09-20"},
+                ],
+            },
+            {
+                "month": "2026-10",
+                "cycle_date": "10/14/2026",
+                "cycle_total": 180.0,
+                "statement_total": 282.0,
+                "late_fee": 2.0,
+                "payments": {},
+            },
+        ]
+        october = walk_payee_rollover(bills, payees)[1]
+        brandon = _payee([october], 0, 1)
+        nigel = _payee([october], 0, 2)
+        self.assertNotIn("late fee", " ".join(brandon["portion_reasons"]))
+        self.assertIn(
+            "$2 late fee. Refer to bill PDF from 10/14/26",
+            nigel["portion_reasons"],
+        )
+        self.assertEqual(nigel["amount_due"], 192.0)
+        self.assertEqual(round(brandon["amount_due"] + nigel["amount_due"], 2), 282.0)
+
+    def test_late_fee_is_split_in_half_when_both_payees_are_late(self):
+        payees = [
+            {"id": 1, "name": "Brandon", "responsibility_percent": 50},
+            {"id": 2, "name": "Nigel", "responsibility_percent": 50},
+        ]
+        bills = [
+            {
+                "month": "2026-09",
+                "cycle_date": "9/15/2026",
+                "cycle_total": 200.0,
+                "statement_total": 200.0,
+                "due_date": "2026-10-01",
+                "payments": {1: 100.0, 2: 0.0},
+                "payment_events": [
+                    {"user_id": 1, "amount": 100.0, "date": "2026-10-05"},
+                ],
+            },
+            {
+                "month": "2026-10",
+                "cycle_date": "10/14/2026",
+                "cycle_total": 180.0,
+                "statement_total": 282.0,
+                "late_fee": 2.0,
+                "payments": {},
+            },
+        ]
+        october = walk_payee_rollover(bills, payees)[1]
+        brandon = _payee([october], 0, 1)
+        nigel = _payee([october], 0, 2)
+        self.assertIn("your half of $2", " ".join(brandon["portion_reasons"]))
+        self.assertIn("Refer to bill PDF from 10/14/26", " ".join(nigel["portion_reasons"]))
+        self.assertEqual(brandon["amount_due"], 91.0)
+        self.assertEqual(nigel["amount_due"], 191.0)
 
     def test_clear_month_zeroes_a_credit_then_later_bills_carry(self):
         rows = walk_payee_rollover(BILLS, [ALICE, BOB], clear_month="2024-02")
