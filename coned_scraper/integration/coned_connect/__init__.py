@@ -13,6 +13,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import DOMAIN, CONF_ADDON_URL
 from .coordinator import ConEdisonDataUpdateCoordinator
+from .entity_match import adopt_mqtt_unique_ids
 
 if TYPE_CHECKING:
     pass
@@ -64,6 +65,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = coordinator
+    hass.data[DOMAIN][f"{entry.entry_id}_entity_ids"] = adopt_mqtt_unique_ids(
+        hass, entry.entry_id
+    )
 
     handler = _create_payment_claim_handler(hass, addon_url)
     unsub_mobile = hass.bus.async_listen("mobile_app_notification_action", handler)

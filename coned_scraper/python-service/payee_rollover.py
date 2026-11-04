@@ -272,7 +272,11 @@ def _sum_items(items: Sequence[Mapping[str, Any]]) -> float:
 
 
 def portion_reason_lines(items: Sequence[Mapping[str, Any]]) -> List[str]:
-    """Origin of each carried underpayment or credit."""
+    """Origin of each carried unpaid amount or credit.
+
+    Dates are left as stored (M/D/YY). A leading minus on credits means the
+    lines can be added to this bill's share to get the amount owed.
+    """
     lines = []
     for item in _copy_items(items):
         amount = item["amount"]
@@ -280,10 +284,10 @@ def portion_reason_lines(items: Sequence[Mapping[str, Any]]) -> List[str]:
         if item.get("kind") == "late_fee":
             lines.append(f"{money_label(amount)} late fee. Refer to bill PDF from {origin}")
         elif amount > 0:
-            lines.append(f"{money_label(amount)} from {origin} underpayment")
+            lines.append(f"{money_label(amount)} unpaid from {origin}")
         else:
             # A leading minus so the lines add up to the amount owed.
-            lines.append(f"-{money_label(abs(amount))} credit from {origin} overpayment")
+            lines.append(f"-{money_label(abs(amount))} credit from {origin}")
     return lines
 
 
@@ -295,23 +299,23 @@ def portion_breakdown_lines(
     late_total: float = 0.0,
     late_label: str = "",
 ) -> List[str]:
-    """Cycle charge plus rollover, so the owed amount can be read as a sum."""
-    lines = [f"{money_label(cycle_portion)} cycle charge"]
+    """This bill's share plus dated carry, so the owed amount can be read as a sum."""
+    lines = [f"{money_label(cycle_portion)} share of this bill"]
     if late_share > 0.009:
         lines.append(late_fee_line(late_share, late_total or late_share, late_label))
     if not use_rollover:
-        lines.append("Rollover balance not applied")
+        lines.append("Earlier unpaid amounts are not added to this bill")
         return lines
     details = portion_reason_lines(incoming_items)
     if details:
-        # The dated lines already add up to the rollover. Do not also print the total.
+        # The dated lines already add up to the carry. Do not also print the total.
         lines.extend(details)
         return lines
     incoming = _sum_items(incoming_items)
     if incoming < -0.009:
-        lines.append(f"{money_label(abs(incoming))} rollover credit")
-    else:
-        lines.append(f"{money_label(max(incoming, 0.0))} rollover balance")
+        lines.append(f"-{money_label(abs(incoming))} credit from earlier bills")
+    elif incoming > 0.009:
+        lines.append(f"{money_label(incoming)} unpaid from earlier bills")
     return lines
 
 
@@ -585,12 +589,19 @@ def settle_bill_payees(
         )
         new_items[payee_id] = carried
         new_rollover[payee_id] = settled["current_balance"]
+        owing_dates = []
+        for item in carried:
+            if float(item.get("amount") or 0) > 0.009:
+                parsed = _as_date(item.get("origin"))
+                if parsed:
+                    owing_dates.append(parsed)
         rows.append(
             {
                 "user_id": payee_id,
                 "name": payee.get("name"),
                 "responsibility_percent": payee.get("responsibility_percent") or 0,
                 "uses_rollover": use_rollover,
+                "owing_since": min(owing_dates).isoformat() if owing_dates else None,
                 "portion_reasons": portion_breakdown_lines(
                     portion,
                     incoming_items,

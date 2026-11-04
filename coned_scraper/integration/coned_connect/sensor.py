@@ -14,7 +14,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, SENSORS
+from .const import DOMAIN, SENSORS, mqtt_unique_id
 from .coordinator import ConEdisonDataUpdateCoordinator
 
 
@@ -25,12 +25,13 @@ async def async_setup_entry(
 ) -> None:
     """Set up Con Edison sensors from a config entry."""
     coordinator: ConEdisonDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
-    
+    adopted = hass.data[DOMAIN].get(f"{entry.entry_id}_entity_ids") or {}
+
     entities = [
-        ConEdisonSensor(coordinator, entry, sensor_type)
+        ConEdisonSensor(coordinator, entry, sensor_type, adopted.get(sensor_type))
         for sensor_type in SENSORS
     ]
-    
+
     async_add_entities(entities)
 
 
@@ -38,24 +39,30 @@ class ConEdisonSensor(CoordinatorEntity[ConEdisonDataUpdateCoordinator], SensorE
     """Representation of a Con Edison sensor."""
 
     _attr_has_entity_name = True
+    _attr_force_update = True
 
     def __init__(
         self,
         coordinator: ConEdisonDataUpdateCoordinator,
         entry: ConfigEntry,
         sensor_type: str,
+        adopted_entity_id: str | None = None,
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator)
-        
+
         self._sensor_type = sensor_type
         self._sensor_config = SENSORS[sensor_type]
-        
-        self._attr_unique_id = f"{entry.entry_id}_{sensor_type}"
+
+        # Match MQTT unique_ids (ConEd_account_balance, …) so auto-install
+        # replaces leftover discovery sensors instead of leaving them stale.
+        self._attr_unique_id = mqtt_unique_id(sensor_type)
         self._attr_name = self._sensor_config["name"]
         self._attr_native_unit_of_measurement = self._sensor_config.get("unit")
         self._attr_icon = self._sensor_config.get("icon")
-        
+        if adopted_entity_id:
+            self.entity_id = adopted_entity_id
+
         device_class = self._sensor_config.get("device_class")
         if device_class == "monetary":
             self._attr_device_class = SensorDeviceClass.MONETARY
@@ -63,7 +70,7 @@ class ConEdisonSensor(CoordinatorEntity[ConEdisonDataUpdateCoordinator], SensorE
             self._attr_device_class = SensorDeviceClass.ENERGY
         else:
             self._attr_device_class = None
-        
+
         state_class = self._sensor_config.get("state_class")
         if state_class == "total_increasing":
             self._attr_state_class = SensorStateClass.TOTAL_INCREASING
@@ -73,7 +80,7 @@ class ConEdisonSensor(CoordinatorEntity[ConEdisonDataUpdateCoordinator], SensorE
             self._attr_state_class = SensorStateClass.MEASUREMENT
         else:
             self._attr_state_class = None
-        
+
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)},
             name="ConEd Connect",
@@ -86,12 +93,12 @@ class ConEdisonSensor(CoordinatorEntity[ConEdisonDataUpdateCoordinator], SensorE
         """Return the state of the sensor."""
         if self.coordinator.data is None:
             return None
-        
+
         value = self.coordinator.data.get(self._sensor_type)
-        
+
         if value is None:
             return None
-        
+
         if isinstance(value, (int, float)):
             if self._sensor_config.get("device_class") == "monetary":
                 return round(value, 2)
@@ -100,7 +107,7 @@ class ConEdisonSensor(CoordinatorEntity[ConEdisonDataUpdateCoordinator], SensorE
             elif self._sensor_type == "kwh_cost":
                 return round(value, 4)
             return value
-        
+
         return value
 
     @property
@@ -108,11 +115,11 @@ class ConEdisonSensor(CoordinatorEntity[ConEdisonDataUpdateCoordinator], SensorE
         """Return extra state attributes."""
         if self.coordinator.data is None:
             return None
-        
+
         data_key = f"{self._sensor_type}_data"
         extra_data = self.coordinator.data.get(data_key)
-        
+
         if extra_data and isinstance(extra_data, dict):
             return extra_data
-        
+
         return None

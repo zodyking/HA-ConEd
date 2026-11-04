@@ -141,13 +141,13 @@ class PayeeRolloverTests(unittest.TestCase):
         tenant_b = _payee(rows, 1, 2)
         self.assertEqual(tenant_a["share_of_bill"], 100.0)
         self.assertEqual(tenant_a["amount_due"], 100.0)
-        self.assertEqual(tenant_a["portion_reasons"], ["$100 cycle charge", "$0 rollover balance"])
+        self.assertEqual(tenant_a["portion_reasons"], ["$100 share of this bill"])
         self.assertEqual(tenant_a["current_balance"], 0.0)
         self.assertEqual(tenant_b["share_of_bill"], 100.0)
         self.assertEqual(tenant_b["amount_due"], 150.0)
         self.assertEqual(
             tenant_b["portion_reasons"],
-            ["$100 cycle charge", "$50 from 10/15/26 underpayment"],
+            ["$100 share of this bill", "$50 unpaid from 10/15/26"],
         )
         # B paid this cycle only, so October's $50 is still theirs next time.
         self.assertEqual(tenant_b["current_balance"], 50.0)
@@ -164,7 +164,7 @@ class PayeeRolloverTests(unittest.TestCase):
         december = _payee(rows, 2, 1)
         self.assertEqual(
             december["portion_reasons"],
-            ["$200 cycle charge", "$50 from 10/15/26 underpayment"],
+            ["$200 share of this bill", "$50 unpaid from 10/15/26"],
         )
         self.assertEqual(december["amount_due"], 250.0)
 
@@ -191,7 +191,7 @@ class PayeeRolloverTests(unittest.TestCase):
         self.assertFalse(rows[0]["uses_rollover"])
         self.assertIsNone(rows[0]["calculation_note"])
         self.assertEqual(september["amount_due"], 100.0)
-        self.assertEqual(september["portion_reasons"][1], "Rollover balance not applied")
+        self.assertEqual(september["portion_reasons"][1], "Earlier unpaid amounts are not added to this bill")
         self.assertEqual(september["current_balance"], 0.0)
 
         october = rows[1]
@@ -204,7 +204,7 @@ class PayeeRolloverTests(unittest.TestCase):
 
         november_b = _payee(rows, 2, 2)
         self.assertEqual(november_b["amount_due"], 150.0)
-        self.assertIn("$50 from 10/15/26 underpayment", november_b["portion_reasons"])
+        self.assertIn("$50 unpaid from 10/15/26", november_b["portion_reasons"])
 
         december = rows[3]
         self.assertFalse(december["uses_rollover"])
@@ -243,12 +243,12 @@ class PayeeRolloverTests(unittest.TestCase):
         nigel = _payee([september], 0, 2)
         self.assertEqual(
             brandon["portion_reasons"],
-            ["$135.97 cycle charge", "-$0.75 credit from 8/14/26 overpayment"],
+            ["$135.97 share of this bill", "-$0.75 credit from 8/14/26"],
         )
         self.assertEqual(brandon["amount_due"], 135.22)
         self.assertEqual(
             nigel["portion_reasons"],
-            ["$135.97 cycle charge", "$0.76 from 8/14/26 underpayment"],
+            ["$135.97 share of this bill", "$0.76 unpaid from 8/14/26"],
         )
         self.assertEqual(nigel["amount_due"], 136.73)
 
@@ -394,6 +394,81 @@ class PayeeRolloverTests(unittest.TestCase):
             _payee(rows, 1, 2)["amount_due"],
             _payee(uncleared, 1, 2)["amount_due"],
         )
+
+    def test_screenshot_aug_sep_oct_shares_cover_the_bill(self):
+        """Ledger screenshots: 50/50 splits cover $271.93 and $317.99 to the penny."""
+        bills = [
+            {
+                "month": "2026-08",
+                "cycle_date": "8/14/2026",
+                "cycle_total": 290.49,
+                "statement_total": 290.49,
+                "payments": {1: 146.00, 2: 144.49},
+            },
+            {
+                "month": "2026-09",
+                "cycle_date": "9/15/2026",
+                "cycle_total": 271.93,
+                "statement_total": 271.93,
+                "payments": {1: 136.00, 2: 0.0},
+            },
+            {
+                "month": "2026-10",
+                "cycle_date": "10/14/2026",
+                "cycle_total": 182.06,
+                "statement_total": 317.99,
+                "payments": {1: 90.25, 2: 50.0},
+            },
+        ]
+        payees = [
+            {"id": 1, "name": "Brandon", "responsibility_percent": 50},
+            {"id": 2, "name": "Nigel", "responsibility_percent": 50},
+        ]
+        rows = walk_payee_rollover(bills, payees)
+
+        september = rows[1]
+        brandon_sep = _payee(rows, 1, 1)
+        nigel_sep = _payee(rows, 1, 2)
+        self.assertEqual(brandon_sep["share_of_bill"], 135.96)
+        self.assertEqual(nigel_sep["share_of_bill"], 135.97)
+        self.assertEqual(round(brandon_sep["share_of_bill"] + nigel_sep["share_of_bill"], 2), 271.93)
+        self.assertEqual(brandon_sep["amount_due"], 135.20)
+        self.assertEqual(nigel_sep["amount_due"], 136.73)
+        self.assertEqual(round(brandon_sep["amount_due"] + nigel_sep["amount_due"], 2), 271.93)
+        self.assertIn("$135.96 share of this bill", brandon_sep["portion_reasons"])
+        self.assertIn("-$0.76 credit from 8/14/26", brandon_sep["portion_reasons"])
+        self.assertIn("$135.97 share of this bill", nigel_sep["portion_reasons"])
+        self.assertIn("$0.76 unpaid from 8/14/26", nigel_sep["portion_reasons"])
+        self.assertEqual(round(136.00 + 0.0, 2), 136.00)
+        self.assertEqual(round(271.93 - 136.00, 2), 135.93)
+        household_sep = round(
+            max(0.0, nigel_sep["amount_due"] - nigel_sep["amount_paid"])
+            - max(0.0, brandon_sep["amount_paid"] - brandon_sep["amount_due"]),
+            2,
+        )
+        self.assertEqual(household_sep, 135.93)
+
+        october = rows[2]
+        brandon_oct = _payee(rows, 2, 1)
+        nigel_oct = _payee(rows, 2, 2)
+        self.assertEqual(brandon_oct["share_of_bill"], 91.03)
+        self.assertEqual(nigel_oct["share_of_bill"], 91.03)
+        self.assertEqual(brandon_oct["amount_due"], 90.23)
+        self.assertEqual(nigel_oct["amount_due"], 227.76)
+        self.assertEqual(round(brandon_oct["amount_due"] + nigel_oct["amount_due"], 2), 317.99)
+        self.assertIn("-$0.80 credit from 9/15/26", brandon_oct["portion_reasons"])
+        self.assertIn("$0.76 unpaid from 8/14/26", nigel_oct["portion_reasons"])
+        self.assertIn("$135.97 unpaid from 9/15/26", nigel_oct["portion_reasons"])
+        household_oct = round(
+            max(0.0, nigel_oct["amount_due"] - nigel_oct["amount_paid"])
+            - max(0.0, brandon_oct["amount_paid"] - brandon_oct["amount_due"]),
+            2,
+        )
+        self.assertEqual(household_oct, 177.74)
+        self.assertEqual(nigel_oct["owing_since"], "2026-08-14")
+        self.assertIsNone(brandon_oct["owing_since"])
+        self.assertTrue(september["uses_rollover"])
+        self.assertEqual(october["month"], "2026-10")
 
 
 if __name__ == "__main__":

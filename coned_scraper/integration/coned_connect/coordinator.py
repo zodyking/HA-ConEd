@@ -52,11 +52,11 @@ class ConEdisonDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Get the Ingress URL for the addon from Supervisor API."""
         if self._ingress_url:
             return self._ingress_url
-        
+
         token = os.environ.get("SUPERVISOR_TOKEN")
         if not token:
             return None
-        
+
         try:
             session = async_get_clientsession(self.hass)
             async with session.get(
@@ -74,99 +74,131 @@ class ConEdisonDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         return ingress_entry
         except Exception as err:
             _LOGGER.debug("Failed to get ingress URL: %s", err)
-        
+
         return None
 
-    async def _async_update_data(self) -> dict[str, Any]:
-        """Fetch data from the addon API."""
+    async def _fetch_json(self, session: aiohttp.ClientSession, path: str, timeout: int = 30) -> Any:
+        """GET JSON from the addon. A failed call returns None instead of aborting the rest."""
         try:
-            session = async_get_clientsession(self.hass)
-            data: dict[str, Any] = {}
-
-            # Fetch ledger data (account_balance, bills, payments)
             async with session.get(
-                f"{self.addon_url}/api/ledger",
-                timeout=aiohttp.ClientTimeout(total=30),
+                f"{self.addon_url}{path}",
+                timeout=aiohttp.ClientTimeout(total=timeout),
             ) as response:
                 if response.status == 200:
-                    ledger = await response.json()
-                    data["account_balance"] = extract_numeric(
-                        ledger.get("account_balance")
-                    )
-                    
-                    bills = ledger.get("bills", [])
-                    if len(bills) > 0:
-                        latest = bills[0]
-                        data["latest_bill"] = extract_numeric(latest.get("bill_total"))
-                        data["latest_bill_data"] = latest
-                    if len(bills) >= 2:
-                        data["previous_bill"] = extract_numeric(bills[1].get("bill_total"))
-                        data["previous_bill_data"] = bills[1]
-                    
-                    # Get last payment: use addon's latest_payment (most recent for current bill)
-                    latest_payment = ledger.get("latest_payment")
-                    if latest_payment and isinstance(latest_payment, dict):
-                        data["last_payment"] = extract_numeric(
-                            latest_payment.get("amount")
-                        )
-                        data["last_payment_data"] = latest_payment
-                    elif bills and bills[0].get("payments"):
-                        # Fallback: first item = most recent (addon sorts payments desc)
-                        payments = bills[0]["payments"]
-                        if payments:
-                            last_payment = payments[0]
-                            data["last_payment"] = extract_numeric(
-                                last_payment.get("amount")
-                            )
-                            data["last_payment_data"] = last_payment
-                    
-            # Fetch bill details (due_date, kwh_cost, kwh_used)
-            async with session.get(
-                f"{self.addon_url}/api/bill-details/latest",
-                timeout=aiohttp.ClientTimeout(total=30),
-            ) as response:
-                if response.status == 200:
-                    details = await response.json()
-                    data["due_date"] = details.get("due_date")
-                    data["kwh_cost"] = details.get("kwh_cost")
-                    data["last_bill_kwh"] = details.get("kwh_used")
+                    return await response.json()
+                _LOGGER.debug("Addon %s returned %s", path, response.status)
+        except Exception as err:
+            _LOGGER.warning("Addon %s failed: %s", path, err)
+        return None
 
-            # Fetch meter reading data (current usage, forecast)
-            async with session.get(
-                f"{self.addon_url}/api/meter-reading",
-                timeout=aiohttp.ClientTimeout(total=30),
-            ) as response:
-                if response.status == 200:
-                    meter = await response.json()
-                    data["current_usage_cost"] = meter.get("cost")
-                    
-                    forecast = meter.get("forecast", {})
-                    if forecast:
-                        data["billing_start_date"] = forecast.get("start_date")
-                        data["billing_end_date"] = forecast.get("end_date")
-                        data["current_cycle_usage"] = forecast.get("usage_to_date")
-                        data["forecasted_usage"] = forecast.get("forecasted_usage")
-
-            # Fetch bill PDF URL - check if PDF exists first
+    async def _attach_pdf_url(self, session: aiohttp.ClientSession, data: dict[str, Any]) -> None:
+        """Fill bill_pdf_url without failing the rest of the update."""
+        try:
             async with session.get(
                 f"{self.addon_url}/api/bill-document",
                 timeout=aiohttp.ClientTimeout(total=10),
                 allow_redirects=False,
             ) as response:
-                if response.status == 200:
-                    # PDF exists - construct external Ingress URL (full URL in attributes only)
-                    ingress_entry = await self._get_ingress_url()
-                    if ingress_entry:
-                        base_url = get_url(self.hass, prefer_external=True, require_ssl=False)
-                        pdf_url = f"{base_url.rstrip('/')}{ingress_entry}/api/bill-document"
-                    else:
-                        pdf_url = f"{self.addon_url}/api/bill-document"
-                    data["bill_pdf_url"] = "Check attributes"
-                    data["bill_pdf_url_data"] = {"url": pdf_url}
-
-            return data
-
-        except aiohttp.ClientError as err:
-            raise UpdateFailed(f"Error communicating with addon: {err}") from err
+                if response.status != 200:
+                    return
+                ingress_entry = await self._get_ingress_url()
+                if ingress_entry:
+                    base_url = get_url(self.hass, prefer_external=True, require_ssl=False)
+                    pdf_url = f"{base_url.rstrip('/')}{ingress_entry}/api/bill-document"
+                else:
+                    pdf_url = f"{self.addon_url}/api/bill-document"
+                data["bill_pdf_url"] = "Check attributes"
+                data["bill_pdf_url_data"] = {"url": pdf_url}
         except Exception as err:
-            raise UpdateFailed(f"Unexpected error: {err}") from err
+            _LOGGER.debug("Bill PDF URL unavailable: %s", err)
+
+    def _merge_legacy_payloads(
+        self,
+        ledger: dict[str, Any] | None,
+        details: dict[str, Any] | None,
+        meter: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Map older addon endpoints when /api/ha-sensors is missing."""
+        data: dict[str, Any] = {}
+        if ledger:
+            data["account_balance"] = extract_numeric(ledger.get("account_balance"))
+            bills = ledger.get("bills", [])
+            if len(bills) > 0:
+                latest = bills[0]
+                data["latest_bill"] = extract_numeric(latest.get("bill_total"))
+                data["latest_bill_data"] = latest
+            if len(bills) >= 2:
+                data["previous_bill"] = extract_numeric(bills[1].get("bill_total"))
+                data["previous_bill_data"] = bills[1]
+            latest_payment = ledger.get("latest_payment")
+            if latest_payment and isinstance(latest_payment, dict):
+                data["last_payment"] = extract_numeric(latest_payment.get("amount"))
+                data["last_payment_data"] = latest_payment
+            elif bills and bills[0].get("payments"):
+                payments = bills[0]["payments"]
+                if payments:
+                    last_payment = payments[0]
+                    data["last_payment"] = extract_numeric(last_payment.get("amount"))
+                    data["last_payment_data"] = last_payment
+            summaries = ledger.get("payee_summaries") or {}
+            latest_id = bills[0].get("id") if bills else None
+            summary = None
+            if isinstance(summaries, dict) and latest_id is not None:
+                summary = summaries.get(latest_id) or summaries.get(str(latest_id))
+            if summary:
+                payees = summary.get("payee_summaries") or summary.get("payees") or []
+                converted = dict(summary)
+                converted["payees"] = payees
+                data["payee_summary"] = extract_numeric(summary.get("bill_balance"))
+                data["payee_summary_data"] = converted
+        if details:
+            data["due_date"] = details.get("due_date")
+            data["kwh_cost"] = details.get("kwh_cost")
+            data["last_bill_kwh"] = details.get("kwh_used")
+        if meter:
+            usage_cost = meter.get("usage_to_date_cost")
+            if usage_cost is None:
+                usage_cost = meter.get("cost")
+            data["current_usage_cost"] = usage_cost
+            reading = meter.get("reading") or {}
+            if isinstance(reading, dict):
+                data["current_meter_usage"] = reading.get("value")
+            forecast = meter.get("forecast") or {}
+            if forecast:
+                data["billing_start_date"] = forecast.get("start_date")
+                data["billing_end_date"] = forecast.get("end_date")
+                data["current_cycle_usage"] = forecast.get("usage_to_date")
+                data["forecasted_usage"] = forecast.get("forecasted_usage")
+        return data
+
+    async def _async_update_data(self) -> dict[str, Any]:
+        """Fetch data from the addon API. One failed endpoint must not stale the rest."""
+        session = async_get_clientsession(self.hass)
+        data: dict[str, Any] = {}
+
+        bundled = await self._fetch_json(session, "/api/ha-sensors")
+        if isinstance(bundled, dict) and bundled:
+            data.update(bundled)
+        else:
+            ledger, details, meter = await _gather_legacy(self, session)
+            data.update(self._merge_legacy_payloads(ledger, details, meter))
+
+        await self._attach_pdf_url(session, data)
+
+        if not data:
+            raise UpdateFailed("Addon returned no sensor data")
+        return data
+
+
+async def _gather_legacy(
+    coordinator: ConEdisonDataUpdateCoordinator,
+    session: aiohttp.ClientSession,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None]:
+    ledger = await coordinator._fetch_json(session, "/api/ledger")
+    details = await coordinator._fetch_json(session, "/api/bill-details/latest")
+    meter = await coordinator._fetch_json(session, "/api/meter-reading")
+    return (
+        ledger if isinstance(ledger, dict) else None,
+        details if isinstance(details, dict) else None,
+        meter if isinstance(meter, dict) else None,
+    )

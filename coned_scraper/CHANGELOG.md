@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.3.103
+
+### Fixed
+- ConEd Connect now matches leftover MQTT unique_ids (`ConEd_*`) on auto-install and updates every sensor, including payee summary
+- One failed addon endpoint no longer leaves the rest of the ConEd Connect sensors stale
+- Payee breakdown copy and numbers add up to the bill: 50/50 odd-cent splits cover the balance, and each line is this bill's share plus unpaid amounts or credits from earlier dates
+
+### Changed
+- Payee summary attributes are a `payees` list (balance, days owing, amount to pay) plus the older flattened `brandon_*` / `nigel_*` keys
+
 ## 1.3.102
 
 ### Fixed

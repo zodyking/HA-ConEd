@@ -29,7 +29,7 @@ import db
 app = FastAPI(title="Con Edison API")
 
 # Code version for deployment verification
-CODE_VERSION = "1.3.102"
+CODE_VERSION = "1.3.103"
 
 @app.on_event("startup")
 async def startup():
@@ -2524,6 +2524,28 @@ async def get_all_bill_summaries():
     except Exception as e:
         await db.add_log("error", f"Failed to calculate summaries: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/ha-sensors")
+async def get_ha_sensors():
+    """Single payload so ConEd Connect can update every matched sensor."""
+    from ha_sensors import map_ha_sensor_payload
+
+    ledger = await _with_db_retry(db.get_ledger_data, "ha-sensors ledger")
+    details = await db.get_latest_bill_with_details()
+    meter = await get_meter_reading()
+    summaries = await db.calculate_all_payee_balances()
+    latest = summaries[0] if summaries else None
+    if latest:
+        bill_balance = float(latest.get("bill_balance") or 0)
+        total_paid = float(latest.get("total_paid") or 0)
+        if bill_balance < 0.01:
+            latest["bill_status"] = "paid"
+        elif total_paid > 0.01:
+            latest["bill_status"] = "partial"
+        else:
+            latest["bill_status"] = "unpaid"
+    return map_ha_sensor_payload(ledger, details, meter, latest)
 
 @app.get("/api/bills/{bill_id}/summary")
 async def get_bill_summary(bill_id: int):

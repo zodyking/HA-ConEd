@@ -14,10 +14,10 @@
       @click="expanded = !expanded"
     >
       <span class="ha-payee-header-text">
-        Bill: ${{ summary.bill_total?.toFixed(2) }} |
-        Paid: <span class="paid">${{ summary.total_paid?.toFixed(2) }}</span>
-        <template v-if="summary.bill_balance > 0.01">
-          | Due: <span class="due">${{ summary.bill_balance?.toFixed(2) }}</span>
+        Bill: ${{ money(summary.bill_total) }} |
+        Paid: <span class="paid">${{ money(summary.total_paid) }}</span>
+        <template v-if="(summary.bill_balance || 0) > 0.01">
+          | Still due: <span class="due">${{ money(summary.bill_balance) }}</span>
         </template>
       </span>
       <span class="ha-payee-header-right">
@@ -26,6 +26,10 @@
       </span>
     </div>
     <div v-if="expanded" class="ha-payee-rows">
+      <p class="ha-payee-legend">
+        Each person's share of this bill, plus anything still unpaid from earlier bills.
+        Those amounts add up to the ${{ money(summary.bill_total) }} bill.
+      </p>
       <div
         v-for="payee in filteredPayees"
         :key="payee.user_id"
@@ -37,23 +41,23 @@
           <span class="ha-payee-pct">{{ payee.responsibility_percent }}%</span>
         </div>
         <div class="ha-payee-fraction">
-          <span class="ha-payee-paid">${{ (payee.amount_paid || 0).toFixed(2) }}</span>
-          <span class="ha-payee-share">${{ (effectiveShare(payee) || 0).toFixed(2) }}</span>
+          <span class="ha-payee-paid">Paid ${{ money(payee.amount_paid) }}</span>
+          <span class="ha-payee-share">Share ${{ money(effectiveShare(payee)) }}</span>
         </div>
         <div class="ha-payee-status">
           <template v-if="isPaid(payee)">
-            <span class="status-paid">Paid ✓</span>
+            <span class="status-paid">Paid in full</span>
           </template>
           <template v-else-if="isOverPaid(payee)">
             <span class="status-paid">
-              Over Paid<br />
-              <span class="status-diff">by ${{ diff(payee).toFixed(2) }}</span>
+              Credit<br />
+              <span class="status-diff">${{ money(Math.abs(remaining(payee))) }} extra</span>
             </span>
           </template>
           <template v-else>
             <span class="status-under">
-              Under Paid<br />
-              <span class="status-diff">by ${{ Math.abs(diff(payee)).toFixed(2) }}</span>
+              Still owes<br />
+              <span class="status-diff">${{ money(Math.abs(remaining(payee))) }}</span>
             </span>
           </template>
         </div>
@@ -62,6 +66,10 @@
           <li v-for="(line, index) in reasonLines(payee)" :key="index">{{ line }}</li>
         </ul>
       </div>
+      <p v-if="(summary.bill_balance || 0) > 0.01" class="ha-payee-footer">
+        Left on the account: ${{ money(summary.bill_balance) }}
+        (credits on one person reduce what the household still owes).
+      </p>
     </div>
   </div>
 </template>
@@ -75,6 +83,7 @@ interface PayeeSummary {
   responsibility_percent: number
   amount_owed: number
   amount_paid: number
+  amount_due?: number
   share_of_bill?: number
   share_of_bill_cumulative?: number
   rollover_from_previous: number
@@ -116,8 +125,12 @@ const usesRollover = computed(() => {
   return props.showCumulative === true
 })
 
+function money(value: number | undefined | null) {
+  return (value || 0).toFixed(2)
+}
+
 function effectiveShare(payee: PayeeSummary) {
-  return usesRollover.value ? (payee.share_of_bill_cumulative ?? payee.share_of_bill ?? 0) : (payee.share_of_bill ?? 0)
+  return usesRollover.value ? (payee.share_of_bill_cumulative ?? payee.amount_due ?? payee.share_of_bill ?? 0) : (payee.share_of_bill ?? 0)
 }
 
 function reasonLines(payee: PayeeSummary) {
@@ -132,16 +145,16 @@ const filteredPayees = computed(() =>
   (summary.value?.payee_summaries || []).filter((p) => p.responsibility_percent > 0)
 )
 
-function diff(payee: PayeeSummary) {
-  return (payee.amount_paid || 0) - effectiveShare(payee)
+function remaining(payee: PayeeSummary) {
+  return effectiveShare(payee) - (payee.amount_paid || 0)
 }
 
 function isPaid(payee: PayeeSummary) {
-  return Math.abs(diff(payee)) < 0.01
+  return Math.abs(remaining(payee)) < 0.01
 }
 
 function isOverPaid(payee: PayeeSummary) {
-  return diff(payee) > 0.01
+  return remaining(payee) < -0.01
 }
 </script>
 
@@ -213,6 +226,14 @@ function isOverPaid(payee: PayeeSummary) {
   color: #888;
 }
 .ha-payee-rows { padding: 0.4rem; }
+.ha-payee-legend,
+.ha-payee-footer {
+  margin: 0 0.2rem 0.45rem;
+  font-size: 0.68rem;
+  line-height: 1.4;
+  color: #546e7a;
+}
+.ha-payee-footer { margin: 0.35rem 0.2rem 0.1rem; }
 .ha-payee-row {
   display: flex;
   flex-wrap: wrap;
@@ -240,9 +261,9 @@ function isOverPaid(payee: PayeeSummary) {
 }
 .ha-payee-name { font-weight: 600; min-width: 80px; }
 .ha-payee-pct { font-size: 0.6rem; color: #999; font-weight: 400; margin-left: 0.3rem; }
-.ha-payee-fraction { display: flex; flex-direction: column; align-items: center; line-height: 1.1; }
+.ha-payee-fraction { display: flex; flex-direction: column; align-items: center; line-height: 1.2; }
 .ha-payee-paid { color: #4caf50; font-weight: 600; }
-.ha-payee-share { border-top: 1px solid #999; color: #f44336; font-weight: 500; padding-top: 1px; font-size: 0.7rem; }
+.ha-payee-share { border-top: 1px solid #999; color: #37474f; font-weight: 500; padding-top: 1px; font-size: 0.7rem; }
 .ha-payee-status { font-weight: 600; font-size: 0.75rem; text-align: right; min-width: 100px; }
 .status-paid { color: #4caf50; }
 .status-under { color: #f44336; }
