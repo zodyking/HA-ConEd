@@ -24,14 +24,18 @@ def extract_numeric(value: Any) -> float:
         return 0.0
 
 
-def payee_slug(name: Any) -> str:
-    """HA-safe attribute prefix: lowercase, spaces to underscores."""
-    prefix = re.sub(r"[^a-z0-9_]", "", str(name or "unknown").lower().replace(" ", "_"))
-    return prefix or "unknown"
-
-
 def _money(value: Any) -> float:
     return round(float(value or 0.0), 2)
+
+
+def _payee_id(raw: Mapping[str, Any]) -> Any:
+    """Configured payee id (not the display name). None when unset."""
+    value = raw.get("user_id")
+    if value is None:
+        value = raw.get("id")
+    if value is None or value == "":
+        return None
+    return value
 
 
 def _days_owing(owing_since: Any, today: date) -> int:
@@ -52,22 +56,25 @@ def build_payee_summary_attributes(
     summary: Optional[Mapping[str, Any]],
     today: Optional[date] = None,
 ) -> Dict[str, Any]:
-    """Structured payee attributes plus flattened keys for existing templates.
+    """Generic payee attributes for whatever payees are configured.
 
-    Each payee lists balance (signed remaining), days they have been owing,
-    and how much they still need to pay. Nested ``payees`` is the mappable
-    list; ``brandon_*``-style keys stay for dashboards that already use them.
+    Each configured payee is listed with balance (signed remaining), days
+    they have been owing, and how much they still need to pay. Lookup is by
+    ``payees`` (ordered list) and ``payees_by_id`` (keyed by payee user id).
+    Display names stay on each row; they are never used as attribute keys.
     """
     today = today or date.today()
+    empty = {
+        "bill_balance": 0.0,
+        "bill_total": 0.0,
+        "total_paid": 0.0,
+        "bill_status": "unknown",
+        "payees": [],
+        "payee_names": [],
+        "payees_by_id": {},
+    }
     if not summary:
-        return {
-            "bill_balance": 0.0,
-            "bill_total": 0.0,
-            "total_paid": 0.0,
-            "bill_status": "unknown",
-            "payees": [],
-            "payee_names": [],
-        }
+        return empty
 
     bill_total = _money(summary.get("bill_total"))
     total_paid = _money(summary.get("total_paid"))
@@ -83,7 +90,9 @@ def build_payee_summary_attributes(
 
     payees: List[Dict[str, Any]] = []
     names: List[str] = []
-    for raw in summary.get("payees") or []:
+    by_id: Dict[str, Dict[str, Any]] = {}
+    raw_payees = summary.get("payees") or summary.get("payee_summaries") or []
+    for raw in raw_payees:
         name = str(raw.get("name") or "Unknown")
         percent = float(raw.get("responsibility_percent") or 0)
         if percent <= 0 and abs(_money(raw.get("current_balance"))) < 0.01:
@@ -96,7 +105,7 @@ def build_payee_summary_attributes(
         owing_since = raw.get("owing_since") if remaining > 0.009 else None
         days_owing = _days_owing(owing_since, today) if remaining > 0.009 else 0
         status = raw.get("status") or "paid"
-        row = {
+        row: Dict[str, Any] = {
             "name": name,
             "responsibility_percent": percent,
             "balance": remaining,
@@ -108,23 +117,18 @@ def build_payee_summary_attributes(
             "status": status,
             "share_of_bill": _money(raw.get("share_of_bill")),
         }
+        payee_id = _payee_id(raw)
+        if payee_id is not None:
+            row["user_id"] = payee_id
+            by_id[str(payee_id)] = row
         if owing_since:
             row["owing_since"] = owing_since
         payees.append(row)
         names.append(name)
 
-        prefix = payee_slug(name)
-        attrs[f"{prefix}_responsibility_percent"] = percent
-        attrs[f"{prefix}_amount_paid"] = paid
-        attrs[f"{prefix}_amount_due"] = due
-        attrs[f"{prefix}_difference"] = _money(paid - due)
-        attrs[f"{prefix}_status"] = status
-        attrs[f"{prefix}_balance"] = remaining
-        attrs[f"{prefix}_amount_to_pay"] = amount_to_pay
-        attrs[f"{prefix}_days_owing"] = days_owing
-
     attrs["payees"] = payees
     attrs["payee_names"] = names
+    attrs["payees_by_id"] = by_id
     return attrs
 
 

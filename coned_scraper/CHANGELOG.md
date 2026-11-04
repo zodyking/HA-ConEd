@@ -8,7 +8,7 @@
 - Payee breakdown copy and numbers add up to the bill: 50/50 odd-cent splits cover the balance, and each line is this bill's share plus unpaid amounts or credits from earlier dates
 
 ### Changed
-- Payee summary attributes are a `payees` list (balance, days owing, amount to pay) plus the older flattened `brandon_*` / `nigel_*` keys
+- Payee summary attributes are a `payees` list and `payees_by_id` map (balance, days owing, amount to pay) for whatever payees are configured — names are labels, not attribute keys
 
 ## 1.3.102
 

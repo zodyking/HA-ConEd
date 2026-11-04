@@ -147,10 +147,23 @@ class ConEdisonDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 summary = summaries.get(latest_id) or summaries.get(str(latest_id))
             if summary:
                 payees = summary.get("payee_summaries") or summary.get("payees") or []
-                converted = dict(summary)
-                converted["payees"] = payees
+                by_id = {
+                    str(payee.get("user_id") if payee.get("user_id") is not None else payee.get("id")): payee
+                    for payee in payees
+                    if payee.get("user_id") is not None or payee.get("id") is not None
+                }
                 data["payee_summary"] = extract_numeric(summary.get("bill_balance"))
-                data["payee_summary_data"] = converted
+                data["payee_summary_data"] = {
+                    "bill_cycle_date": summary.get("bill_cycle_date") or "",
+                    "bill_total": extract_numeric(summary.get("bill_total")),
+                    "total_paid": extract_numeric(summary.get("total_paid")),
+                    "bill_balance": extract_numeric(summary.get("bill_balance")),
+                    "bill_status": summary.get("bill_status") or "unknown",
+                    "month_range": summary.get("month_range") or "",
+                    "payees": payees,
+                    "payee_names": [payee.get("name") for payee in payees if payee.get("name")],
+                    "payees_by_id": by_id,
+                }
         if details:
             data["due_date"] = details.get("due_date")
             data["kwh_cost"] = details.get("kwh_cost")

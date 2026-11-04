@@ -41,7 +41,7 @@ This updates `config.yaml`, `main.py` `CODE_VERSION`, and the startup log in `ro
 | `ConEd_previous_bill` | Previous bill amount |
 | `ConEd_last_payment` | Last payment amount |
 | `ConEd_bill_pdf_url` | State shows "Check attributes"; PDF URL is in attributes |
-| `ConEd_payee_summary` | Payee breakdown (balance, shares) |
+| `ConEd_payee_summary` | Payee breakdown: each configured payee with balance, days owing, amount to pay |
 | `ConEd_due_date` | Bill due date |
 | `ConEd_kwh_cost` | $/kWh from bill |
 | `ConEd_last_bill_kwh` | kWh from last bill |
